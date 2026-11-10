@@ -343,6 +343,8 @@ Section "Install"
   !insertmacro NetModule kextls KEXTLS
   !insertmacro NetModule bcrypt BCRYPT
   !insertmacro NetModule winhttp WINHTTP
+  ;kexrt is an API library only (loaded by the resolver, not by name)
+  File /oname=kexrt.dll net-out\kexrt.dll
   CreateDirectory "$INSTDIR\certs"
   CreateDirectory "$INSTDIR\certs\local"
   File /oname=certs\roots.pem net\certs\roots.pem
@@ -440,6 +442,7 @@ Section "Uninstall"
   DeleteRegValue HKLM "Software\KernelEx\KnownDLLs" "BCRYPT"
   Delete /REBOOTOK "$INSTDIR\winhttp.dll"
   DeleteRegValue HKLM "Software\KernelEx\KnownDLLs" "WINHTTP"
+  Delete /REBOOTOK "$INSTDIR\kexrt.dll"
   Delete "$INSTDIR\certs\roots.pem"
   RMDir "$INSTDIR\certs\local"
   RMDir "$INSTDIR\certs"
