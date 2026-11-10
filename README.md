@@ -49,8 +49,8 @@ list.
 
 ### Platform and build
 
-1. **Targets.** Windows 98 SE is the primary target; Windows 98 FE and ME are
-   supported. Windows 95 is not, because the KernelEx core does not run on it.
+1. **Targets.** Windows 98 SE and Windows ME. Windows 98 first edition and
+   Windows 95 are not supported.
    Every release is tested in 86Box and on real hardware before it is tagged.
 2. **One toolchain.** clang and lld on Linux (`toolchain/`, `net/tools/`) is
    the only maintained build. The Visual C++ 6 project files stay in the tree
@@ -192,7 +192,7 @@ list.
 
 ## Requirements
 
-- Windows 98, 98 SE or ME.
+- Windows 98 SE or Windows ME.
 - Pentium-class CPU or newer.
 - A correct system clock (certificates cannot be checked against a wrong date).
 
