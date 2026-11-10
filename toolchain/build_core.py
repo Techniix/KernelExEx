@@ -441,9 +441,40 @@ def build_verify(b: Build):
            base="0x400000", entry="entrypoint", kind="exe")
 
 
+def build_vxd(b: Build):
+    """VKrnlEx.vxd: compiled as ring-0 code, linked as a PE DLL by lld, then
+    converted to the LE format by toolchain/vxd/le_link.py."""
+    d = ROOT / "vxd"
+    tv = ROOT / "toolchain/vxd"
+    srcs = [s for s in dsp_sources(d / "vxd.dsp") if s.name.lower() != "debug.cpp"]
+    srcs += [tv / "vxdwraps.c", tv / "vxdrt.c"]
+    flags = [f"-I{tv / 'include'}", f"-I{d}", f"-I{ROOT / 'common'}", "-D_WIN32_WINNT=0x0410",
+             "-mgeneral-regs-only", "-fno-jump-tables", *COMPAT]
+    objs = b.compile("vxd", ctor_order(srcs), flags)
+    if run(["llvm-objdump", "-h", *objs]).count(".ctors"):
+        sys.exit("vxd: static constructors are not run in a VxD")
+    defs = b.obj / "defs" / "VKrnlEx.def"
+    defs.parent.mkdir(parents=True, exist_ok=True)
+    defs.write_text("LIBRARY VKrnlEx.dll\nEXPORTS\n    VKRNLEX_DDB DATA\n")
+    # the entry point is irrelevant to a VxD (le_link.py drops it); name the control procedure
+    pe = b.link("VKrnlEx", objs, ["kexcrt"], base="0x10000000", entry="__Z12VKRNLEX_CTRLv", defs=defs, ext=".pe")
+    # ring-0 code must not touch the FPU or MMX/SSE state
+    dis = run(["llvm-objdump", "-d", "--no-show-raw-insn", pe])
+    fpu = sorted(set(re.findall(r"^\s+[0-9a-f]+:\s+(f[a-z]+|emms|movq|movd|\w*xmm\w*)\b", dis, re.M)) -
+                 {"fs", "fwait"})
+    if fpu:
+        sys.exit(f"vxd: FPU/SIMD instructions in ring-0 code: {fpu}")
+    out = run([sys.executable, tv / "le_link.py", pe, b.out / "VKrnlEx.vxd", "--name", "VKRNLEX",
+               "--description", "KernelEx Virtual Device"])
+    print("  " + out.strip())
+    # the LE image must equal the relocated PE, and every INT 20h must name a known service
+    known = "0x00010000,0x00010004,0x0001004F,0x00010051,0x00010052,0x00010063,0x00010090,0x0001012D"
+    run([sys.executable, tv / "check_vxd.py", pe, b.out / "VKrnlEx.vxd", "--allow", known])
+
+
 STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "gen": prepare_apilibs,
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
-         "auxiliary": build_auxiliary, "verify": build_verify}
+         "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd}
 
 
 def main():
@@ -455,7 +486,8 @@ def main():
     a = ap.parse_args()
     b = Build(a.sdk.resolve(), a.out.resolve(), a.j)
     mingw_inc = Path((b.sdk / "MINGW_INCLUDE").read_text().strip())
-    TREES = [ROOT / x for x in ("core", "common", "kexcrt", "sheet", "kexCOM", "auxiliary", "kexcontrol", "verify")]
+    TREES = [ROOT / x for x in ("core", "common", "kexcrt", "sheet", "kexCOM", "auxiliary", "kexcontrol", "verify",
+                                "vxd")]
     TREES += [mingw_inc, mingw_inc.parent / "crt"]  # sources say <RpcProxy.h>, mingw-w64 has rpcproxy.h
     b.case_overlay(TREES + ([b.gen / "apilibs"] if (b.gen / "apilibs").exists() else []))
     for name, fn in STEPS.items():

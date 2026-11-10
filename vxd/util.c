@@ -39,6 +39,7 @@ void __cdecl _assert(const char* expr, const char* file, unsigned line)
 	abort();
 }
 
+#ifndef __clang__ /* clang builds: toolchain/vxd/vxdrt.c */
 void __declspec(naked) _stdcall RtlUnwind(
 	PVOID TargetFrame,
 	PVOID TargetIp,
@@ -48,3 +49,4 @@ void __declspec(naked) _stdcall RtlUnwind(
 {
 	VMMJmp(ObsoleteRtlUnwind);
 }
+#endif

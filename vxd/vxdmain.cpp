@@ -72,10 +72,12 @@ BOOL __stdcall ControlDispatcher(
 		return VKernelEx_W32_DeviceIOControl(ECX, EDX, (PDIOCPARAMETERS) ESI);
 	case BEGIN_PM_APP:
 		return VKernelEx_Begin_PM_App(EBX);
+#ifdef CREATE_PROCESS /* not defined by the clang build headers; the handlers only return success */
 	case CREATE_PROCESS:
 		return VKernelEx_Create_Process(EDX);
 	case DESTROY_PROCESS:
 		return VKernelEx_Destroy_Process(EDX);
+#endif
 	default:
 		return TRUE;
 	}
@@ -149,8 +151,9 @@ BOOL _stdcall VKernelEx_Begin_PM_App(HVM hVM)
 {
 	WORD version;
 	void* k32ptr;
-	void* backup = NULL;
-	bool allOK = false;
+	/* volatile: set inside __try, read after an exception (see toolchain/rt/msvc_compat.h) */
+	void* volatile backup = NULL;
+	volatile bool allOK = false;
 
 	if (!Test_Sys_VM_Handle(hVM))
 		return TRUE;
