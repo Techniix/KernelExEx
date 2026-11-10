@@ -1,8 +1,8 @@
   ;ANSI installer: Unicode NSIS installers do not run on Windows 9x
   Unicode false
 
-  !define _VERSION '4.5.2'
-  !define _VERSION_CODE 0x04050078
+  !define _VERSION '4.7.0'
+  !define _VERSION_CODE 0x04070000
   
   !ifndef _DEBUG
     !define FLAVOUR 'Release'
@@ -39,7 +39,7 @@
   
   ;Name and file
   Name "KernelEx"
-  Caption "KernelEx ${VERSION} Setup"
+  Caption "KernelExEx ${VERSION} Setup"
   OutFile "KernelEx-dev.exe"
 
   ;Default installation folder

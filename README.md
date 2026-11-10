@@ -25,6 +25,7 @@ bugs; back up before installing.
 | Vista/7 APIs | `kexrt.dll`: SRW locks, condition variables, `InitOnce*`, `Fls*`, `GetTickCount64`, `InitializeCriticalSectionEx`, `Create{Event,Mutex,Semaphore}Ex`, `inet_pton`, `inet_ntop`, `WSAPoll` and others |
 | Installer | Optional (unticked) setting that sends plain HTTP and FTP through the [Protoweb](https://protoweb.org) proxy to browse restored 1990s websites. HTTPS is not proxied. Uninstall restores the previous proxy settings |
 | Build | Everything builds on Linux with open-source tools: the KernelEx core and API libraries, the property sheet, `kexCOM`, the auxiliary DLLs, the `VKrnlEx.vxd` kernel driver, the new modules and the installer. No Microsoft compiler, DDK or Wine needed |
+| Developer docs | Porting guide and a generated inventory of the 968 functions in 25 DLLs that KernelExEx adds or replaces |
 | Checks | `util/patcheck` verifies KernelEx's kernel32 patch patterns against any `kernel32.dll` offline. `net/tools/pecheck.py` verifies each binary imports only functions Windows 98 SE has and uses only Pentium instructions. The build fails on two clang miscompiles of the old inline assembly (see `toolchain/build_core.py`) |
 
 How the kernel driver is built: clang compiles it, lld links it as an
@@ -243,8 +244,10 @@ program.
 
 Programs can simply call `WinHttp*`, `BCrypt*` or the new KERNEL32 functions
 as they would on Windows 7. `net/kextls/include/kextls.h` is a small direct
-API for TLS client connections. The porting guide (`docs/PORTING.md`,
-decision 18) is being written.
+API for TLS client connections. [`docs/PORTING.md`](docs/PORTING.md) is the
+porting guide (build settings, limits, run-time detection, a checklist for AI
+agents); [`docs/API.md`](docs/API.md) and [`docs/api.json`](docs/api.json)
+list every function KernelExEx adds or replaces, generated from the sources.
 
 ## Building (Linux)
 

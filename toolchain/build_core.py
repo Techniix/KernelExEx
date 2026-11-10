@@ -497,6 +497,9 @@ def main():
         fn(b)
         if name == "gen":
             b.case_overlay(TREES + [b.gen / "apilibs"])
+    if not a.only:
+        # docs/API.md and docs/api.json must match the API tables
+        run([sys.executable, ROOT / "toolchain/gen_api_inventory.py", "--check"])
     print("done")
     return 0
 

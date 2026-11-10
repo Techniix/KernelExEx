@@ -22,9 +22,10 @@
 #ifndef __VERSION_H
 #define __VERSION_H
 
-#define VERSION_STR      "4.5.2"
-#define VERSION_CODE     0x04050078
-#define RCVERSION        4, 5, 12, 0
-#define _RCVERSION_      "4, 5, 12, 0"
+/* KernelExEx reports 4.7.x: above KernelEx 4.5.2 and clear of the 4.6 betas of other forks */
+#define VERSION_STR      "4.7.0"
+#define VERSION_CODE     0x04070000
+#define RCVERSION        4, 7, 0, 0
+#define _RCVERSION_      "4, 7, 0, 0"
 
 #endif
