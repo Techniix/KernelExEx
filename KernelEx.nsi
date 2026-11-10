@@ -98,7 +98,7 @@
   LangString SEC_PRODUCT ${LANG_ENGLISH} "$(DESC_SHORTPRODUCT) "
   LangString DESC_INSTALLING ${LANG_ENGLISH} "Installing"
   LangString DESC_DOWNLOADING1 ${LANG_ENGLISH} "Downloading"
-  LangString DESC_DOWNLOADFAILED ${LANG_ENGLISH} "Download Failed:"
+  LangString DESC_DOWNLOADFAILED ${LANG_ENGLISH} "Could not download MSLU. Put unicows.exe (the Microsoft Layer for Unicode redistributable) next to this installer and run it again. Error:"
   LangString ERROR_PRODUCT_INVALID_PATH ${LANG_ENGLISH} "The $(DESC_SHORTPRODUCT) Installation$\n\
     was not found in the following location:$\n"
   LangString ERROR_PRODUCT_FATAL ${LANG_ENGLISH} "A fatal error occurred during the installation$\n\
@@ -174,6 +174,13 @@ Section "-MSLU" SECPRODUCT
   StrCmp "1.1.3790.0" "$R2.$R3.$R4.$R5" lbl_Skip
   
   lbl_download:
+  ;Prefer the MSLU redistributable (unicows.exe) placed next to the installer:
+  ;the old download link is gone and NSISdl cannot fetch over HTTPS.
+  IfFileExists "$EXEDIR\unicows.exe" 0 lbl_net
+  DetailPrint "Using $EXEDIR\unicows.exe"
+  CopyFiles /SILENT "$EXEDIR\unicows.exe" "$TEMP\unicows.exe"
+  Goto lbl_continue
+  lbl_net:
   DetailPrint "$(DESC_DOWNLOADING1) $(DESC_SHORTPRODUCT)..."
   MessageBox MB_ICONEXCLAMATION|MB_YESNO|MB_DEFBUTTON2 "$(DESC_PRODUCT_DECISION)" /SD IDNO \
     IDYES +2 IDNO 0
