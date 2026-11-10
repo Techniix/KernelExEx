@@ -23,7 +23,7 @@
 
 int WINAPI CommonUnimpStub(void);
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__clang__)
 #define UNIMPL_FUNC(name,params) \
 	__asm__( ".text\n" \
 			 ".globl _" #name "@0\n" \

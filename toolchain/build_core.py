@@ -103,6 +103,7 @@ class Build:
         if errors:
             (self.out / f"{name}.errors.txt").write_text("\n".join(errors))
             sys.exit(f"{name}: {len(errors)} of {len(jobs)} file(s) failed, see {self.out / (name + '.errors.txt')}")
+        (self.out / f"{name}.errors.txt").unlink(missing_ok=True)
         objs = [o for _, o in jobs]
         self.check_objects(name, objs)
         return objs
@@ -201,6 +202,18 @@ class Build:
         run(cmd)
         return res
 
+    def clean_def(self, d: Path):
+        """lld does not accept BASE= on the LIBRARY line or a SECTIONS block.
+        Returns (path of a cleaned copy, image base or None)."""
+        text = d.read_text(errors="replace").replace("\r\n", "\n")
+        m = re.search(r"BASE\s*=\s*(0x[0-9A-Fa-f]+)", text)
+        text = re.sub(r"[ \t]+BASE\s*=\s*0x[0-9A-Fa-f]+", "", text)
+        text = re.sub(r"^SECTIONS\n(?:[ \t]+.*\n)+", "", text, flags=re.M)
+        out = self.obj / "defs" / d.name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text)
+        return out, (m.group(1) if m else None)
+
     # ---- helpers ---------------------------------------------------
     def implib_from_def(self, name, text):
         d = self.lib / f"{name}.def"
@@ -247,6 +260,10 @@ def build_kexcrt(b: Build):
     mingw = Path((b.sdk / "MINGW_INCLUDE").read_text().strip()).parents[1]
     wsp = sorted((mingw / "mingw-w64-crt/libsrc/wspiapi").glob("*.c"))
     b.archive("wspiapi", b.compile("wspiapi", wsp, ["-D_WIN32_WINNT=0x0500"]))
+    # GUID definitions (uuid.lib of the Platform SDK)
+    am = (mingw / "mingw-w64-crt/Makefile.am").read_text().replace("\\\n", " ")
+    uuid = [mingw / "mingw-w64-crt" / f for f in re.search(r"^src_libuuid=(.*)$", am, re.M).group(1).split()]
+    b.archive("uuid", b.compile("uuid", uuid, ["-D_WIN32_WINNT=0x0601"]))
 
 
 def build_k32ord(b: Build):
@@ -366,8 +383,67 @@ def build_kexbasen(b: Build):
                         "winmm.dll", "ws2_32.dll", "cryptui.dll"])
 
 
+def build_sheet(b: Build):
+    d = ROOT / "sheet"
+    objs = b.compile("sheet", ctor_order(dsp_sources(d / "sheet.dsp")),
+                     [f"-I{d}", f"-I{ROOT / 'common'}", "-D_USRDLL", "-DSHEET_EXPORTS", "-D_WIN32_WINNT=0x0410", *COMPAT,
+                      "-include", "stdio.h"])  # the VC6 headers pulled in stdio.h indirectly
+    res = b.resource("sheet", d / "sheet.rc")
+    b.link("sheet", [*objs, res], ["kexcrt", "kernel32", "user32", "gdi32", "comctl32", "advapi32", "shell32",
+                                   "shlwapi", "ole32", "uuid"],
+           base="0x7D200000", entry="__DllMainCRTStartup@12", defs=d / "server.def", kill_at=True)
+
+
+def build_kexcom(b: Build):
+    d = ROOT / "kexCOM"
+    objs = b.compile("kexCOM", ctor_order(dsp_sources(d / "kexCOM.dsp")),
+                     [f"-I{d}", f"-I{ROOT / 'common'}", "-D_USRDLL", "-DKEXCOM_EXPORTS", "-D_WIN32_WINNT=0x0410", *COMPAT,
+                      "-include", "shlobj.h"])  # CLSID_ShellLink lives in shobjidl.h in mingw-w64
+    # the MSVC project uses /entry:DllMain@12 (no static constructors)
+    b.link("kexCOM", objs, ["kexcrt", "kernel32", "user32", "gdi32", "advapi32", "shell32", "ole32", "oleaut32",
+                            "uuid"],
+           base="0x7D300000", entry="DllMain@12", defs=d / "server.def", kill_at=True)
+
+
+AUX = {
+    # name: (libs, kill_at, resource)
+    "msimg32": (["kernel32", "gdi32"], True, "msimgme.rc"),
+    "pdh": (["k32ord", "kernel32"], False, None),
+    "psapi": (["kernel32", "KernelEx"], False, None),
+    "uxtheme": (["k32ord", "kernel32", "user32", "gdi32"], False, None),
+    "wtsapi32": (["kernel32", "gdi32"], True, None),
+    "userenv": (["kernel32", "gdi32", "shell32", "shlwapi"], False, None),
+}
+
+
+def build_auxiliary(b: Build):
+    (b.out / "auxiliary").mkdir(exist_ok=True)
+    base = 0x7D400000
+    for name, (libs, kill_at, rc) in AUX.items():
+        d = ROOT / "auxiliary" / name
+        objs = b.compile("aux_" + name, sorted(d.glob("*.c")), [f"-I{d}", f"-I{ROOT / 'common'}",
+                                                                "-D_WIN32_WINNT=0x0500", *COMPAT])
+        if rc:
+            objs.append(b.resource("aux_" + name, d / rc))
+        has_main = "DllMain" in "".join(f.read_text(errors="replace") for f in d.glob("*.c"))
+        defs, def_base = b.clean_def(d / f"{name}.def")
+        out = b.link(name, objs, libs + ["kexcrt"], base=def_base or hex(base),
+                     entry="DllMain@12" if has_main else None, defs=defs, kill_at=kill_at)
+        shutil.move(out, b.out / "auxiliary" / out.name)
+        base += 0x100000
+
+
+def build_verify(b: Build):
+    d = ROOT / "verify"
+    objs = b.compile("verify", [d / "main.c"], [f"-I{d}", f"-I{ROOT / 'common'}", "-D_WIN32_WINNT=0x0410", *COMPAT])
+    res = b.resource("verify", d / "verify.rc")
+    b.link("verify", [*objs, res], ["kexcrt", "kernel32", "user32", "advapi32", "comctl32", "shell32"],
+           base="0x400000", entry="entrypoint", kind="exe")
+
+
 STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "gen": prepare_apilibs,
-         "kexbases": build_kexbases, "kexbasen": build_kexbasen}
+         "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
+         "auxiliary": build_auxiliary, "verify": build_verify}
 
 
 def main():

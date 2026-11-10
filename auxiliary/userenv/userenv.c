@@ -30,6 +30,11 @@
 #define TRACE()
 #define FIXME()
 
+#elif defined(__clang__)
+
+#define TRACE(...) do { } while (0)
+#define FIXME(...) do { } while (0)
+
 #else
 
 #define TRACE(x,args...) debug_output(__func__,x,args)
