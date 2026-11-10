@@ -25,6 +25,9 @@
 #include "resolver.h"
 #include "../vxd/interface.h"
 
+/* complete type, needed by the inline assembler of clang */
+extern LONG old_jtab[JTAB_SIZE];
+
 __declspec(naked) 
 PROC ExportFromOrdinalStatic_thunk(IMAGE_NT_HEADERS* PEh, WORD ordinal)
 {

@@ -19,7 +19,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-DLLS = ("kernel32", "user32", "advapi32", "ws2_32", "wsock32", "msvcrt", "gdi32", "shell32")
+DLLS = ("kernel32", "user32", "advapi32", "ws2_32", "wsock32", "msvcrt", "gdi32", "shell32",
+        # needed by the KernelEx core build (toolchain/build_core.py)
+        "comctl32", "comdlg32", "version", "winspool", "shlwapi", "ole32", "oleaut32", "rpcrt4",
+        "usp10", "winmm", "cryptui", "mpr", "imm32", "msimg32", "psapi", "userenv", "uxtheme")
 
 
 def configure_headers(mingw: Path, out: Path) -> None:

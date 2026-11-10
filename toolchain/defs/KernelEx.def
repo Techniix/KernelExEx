@@ -1,0 +1,4 @@
+LIBRARY KernelEx.dll
+EXPORTS
+    ; MPRServices entry point: the registry names it with MSVC decoration
+    _MprStart@4 = MprStart@4

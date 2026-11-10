@@ -35,6 +35,12 @@
 using namespace std;
 #include "prep.h"
 
+#ifdef _WIN32
+#define PATH_SEP '\\'
+#else
+#define PATH_SEP '/'
+#endif
+
 //////////////////////////////////////////////////////////////////////////
 
 vector<export_entry_named> all_exports_named;
@@ -558,7 +564,7 @@ void work()
 		if (path.empty())
 			continue;
 
-		path += '\\';
+		path += PATH_SEP;
 
 		cout << "Processing directory: '" << path << '\'' << endl;
 		if (is_uptodate_dir(path))

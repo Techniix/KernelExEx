@@ -11,7 +11,7 @@ on Pentium-class CPUs.
   - Code: no instruction newer than the Pentium: CMOV/FCMOV/FCOMI (P6),
     multi-byte NOP (0F 1F, P6), MMX/SSE registers, SYSENTER, RDTSCP.
 
-Usage: pecheck.py <allowlist file | exports dir> <dll>...
+Usage: pecheck.py <allowlist file | exports dir> [--shared-arena] <dll>...
 
   exports dir: e.g. tools/exports/win98se, export tables dumped from a real
   installation (names only).
@@ -114,7 +114,8 @@ def main():
     src = Path(sys.argv[1])
     if src.is_dir():
         # a directory of real export tables: <dll name>.txt, one export per line
-        for f in src.glob("*.txt"):
+        # <dll>.txt holds names, <dll>.ord holds ordinals as "#N"
+        for f in list(src.glob("*.txt")) + list(src.glob("*.ord")):
             for fn in f.read_text().split():
                 allow.add((f.stem.lower(), fn))
     else:
@@ -123,7 +124,8 @@ def main():
             if line:
                 dll, fn = line.split("!", 1)
                 allow.add((dll.lower(), fn))
-    dlls = sys.argv[2:]
+    dlls = [a for a in sys.argv[2:] if a != "--shared-arena"]
+    shared_ok = "--shared-arena" in sys.argv  # KernelEx core and shared API libraries live above 2 GB
     infos = {Path(p).name.lower(): parse(p) for p in dlls}
     ours = {(n, e) for n, i in infos.items() for e in i["exports"]}
     failed = False
@@ -133,7 +135,7 @@ def main():
             problems.append("not a 32-bit i386 PE")
         if i["subsys_ver"][0] > 4 or i["os_ver"][0] > 4:
             problems.append(f"subsystem {i['subsys_ver']} / OS {i['os_ver']} newer than 4.x (9x refuses to load)")
-        if i["image_base"] >= 0x80000000:
+        if i["image_base"] >= 0x80000000 and not shared_ok:
             problems.append(f"image base {i['image_base']:#x} is in the 9x shared arena")
         if i["tls"]:
             problems.append("has a TLS directory (static TLS fails in 9x LoadLibrary)")

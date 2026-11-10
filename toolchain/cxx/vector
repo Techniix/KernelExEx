@@ -1,0 +1,82 @@
+#ifndef KEX_CXX_VECTOR
+#define KEX_CXX_VECTOR
+#include <stddef.h>
+#include <new>
+namespace std {
+template<class T> class vector
+{
+public:
+	typedef T value_type;
+	typedef T* iterator;
+	typedef const T* const_iterator;
+	typedef size_t size_type;
+	vector() : m_d(0), m_n(0), m_cap(0) {}
+	vector(const vector& o) : m_d(0), m_n(0), m_cap(0) { for (size_t i = 0; i < o.m_n; i++) push_back(o.m_d[i]); }
+	~vector() { clear(); ::operator delete(m_d); }
+	vector& operator=(const vector& o)
+	{
+		if (this != &o) { clear(); for (size_t i = 0; i < o.m_n; i++) push_back(o.m_d[i]); }
+		return *this;
+	}
+	iterator begin() { return m_d; }
+	iterator end() { return m_d + m_n; }
+	const_iterator begin() const { return m_d; }
+	const_iterator end() const { return m_d + m_n; }
+	size_type size() const { return m_n; }
+	size_type capacity() const { return m_cap; }
+	bool empty() const { return m_n == 0; }
+	T& operator[](size_type i) { return m_d[i]; }
+	const T& operator[](size_type i) const { return m_d[i]; }
+	T& front() { return m_d[0]; }
+	T& back() { return m_d[m_n - 1]; }
+	const T& front() const { return m_d[0]; }
+	const T& back() const { return m_d[m_n - 1]; }
+	void reserve(size_type cap)
+	{
+		if (cap <= m_cap) return;
+		T* nd = (T*) ::operator new(cap * sizeof(T));
+		for (size_t i = 0; i < m_n; i++) { new (nd + i) T(m_d[i]); m_d[i].~T(); }
+		::operator delete(m_d);
+		m_d = nd;
+		m_cap = cap;
+	}
+	void push_back(const T& v)
+	{
+		if (m_n == m_cap)
+		{
+			T copy(v); /* v may live inside this vector */
+			reserve(m_cap ? m_cap * 2 : 8);
+			new (m_d + m_n++) T(copy);
+			return;
+		}
+		new (m_d + m_n++) T(v);
+	}
+	void pop_back() { m_d[--m_n].~T(); }
+	void clear() { while (m_n) m_d[--m_n].~T(); }
+	void resize(size_type n, const T& v = T())
+	{
+		while (m_n > n) pop_back();
+		reserve(n);
+		while (m_n < n) new (m_d + m_n++) T(v);
+	}
+	iterator erase(iterator pos)
+	{
+		for (iterator i = pos; i + 1 != end(); ++i) *i = *(i + 1);
+		pop_back();
+		return pos;
+	}
+	iterator insert(iterator pos, const T& v)
+	{
+		size_t idx = pos - m_d;
+		T copy(v);
+		push_back(copy);
+		for (size_t i = m_n - 1; i > idx; i--) m_d[i] = m_d[i - 1];
+		m_d[idx] = copy;
+		return m_d + idx;
+	}
+private:
+	T* m_d;
+	size_t m_n, m_cap;
+};
+}
+#endif

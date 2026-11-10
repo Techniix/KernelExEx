@@ -1,0 +1,99 @@
+#ifndef KEX_CXX_LIST
+#define KEX_CXX_LIST
+#include <stddef.h>
+#include <new>
+namespace std {
+template<class T> class list
+{
+	struct link { link* prev; link* next; };
+	struct node : link { T v; node(const T& x) : v(x) {} };
+public:
+	typedef T value_type;
+	typedef size_t size_type;
+	class const_iterator;
+	class iterator
+	{
+	public:
+		iterator() : p(0) {}
+		T& operator*() const { return static_cast<node*>(p)->v; }
+		T* operator->() const { return &static_cast<node*>(p)->v; }
+		iterator& operator++() { p = p->next; return *this; }
+		iterator operator++(int) { iterator t(*this); p = p->next; return t; }
+		iterator& operator--() { p = p->prev; return *this; }
+		iterator operator--(int) { iterator t(*this); p = p->prev; return t; }
+		bool operator==(const iterator& o) const { return p == o.p; }
+		bool operator!=(const iterator& o) const { return p != o.p; }
+	private:
+		friend class list;
+		friend class const_iterator;
+		explicit iterator(link* q) : p(q) {}
+		link* p;
+	};
+	class const_iterator
+	{
+	public:
+		const_iterator() : p(0) {}
+		const_iterator(const iterator& i) : p(i.p) {}
+		const T& operator*() const { return static_cast<const node*>(p)->v; }
+		const T* operator->() const { return &static_cast<const node*>(p)->v; }
+		const_iterator& operator++() { p = p->next; return *this; }
+		const_iterator operator++(int) { const_iterator t(*this); p = p->next; return t; }
+		const_iterator& operator--() { p = p->prev; return *this; }
+		bool operator==(const const_iterator& o) const { return p == o.p; }
+		bool operator!=(const const_iterator& o) const { return p != o.p; }
+	private:
+		friend class list;
+		explicit const_iterator(const link* q) : p(q) {}
+		const link* p;
+	};
+
+	list() : m_n(0) { m_h.prev = m_h.next = &m_h; }
+	list(const list& o) : m_n(0) { m_h.prev = m_h.next = &m_h; assign(o); }
+	~list() { clear(); }
+	list& operator=(const list& o) { if (this != &o) { clear(); assign(o); } return *this; }
+
+	iterator begin() { return iterator(m_h.next); }
+	iterator end() { return iterator(&m_h); }
+	const_iterator begin() const { return const_iterator(m_h.next); }
+	const_iterator end() const { return const_iterator(&m_h); }
+	size_type size() const { return m_n; }
+	bool empty() const { return m_n == 0; }
+	T& front() { return static_cast<node*>(m_h.next)->v; }
+	T& back() { return static_cast<node*>(m_h.prev)->v; }
+
+	iterator insert(iterator pos, const T& v)
+	{
+		node* n = new (::operator new(sizeof(node))) node(v);
+		n->next = pos.p;
+		n->prev = pos.p->prev;
+		pos.p->prev->next = n;
+		pos.p->prev = n;
+		m_n++;
+		return iterator(n);
+	}
+	iterator erase(iterator pos)
+	{
+		link* nx = pos.p->next;
+		pos.p->prev->next = nx;
+		nx->prev = pos.p->prev;
+		static_cast<node*>(pos.p)->~node();
+		::operator delete(static_cast<node*>(pos.p));
+		m_n--;
+		return iterator(nx);
+	}
+	void push_back(const T& v) { insert(end(), v); }
+	void push_front(const T& v) { insert(begin(), v); }
+	void pop_back() { iterator i = end(); erase(--i); }
+	void pop_front() { erase(begin()); }
+	void clear() { while (m_n) erase(begin()); }
+	void remove(const T& v)
+	{
+		for (iterator i = begin(); i != end(); ) { if (*i == v) i = erase(i); else ++i; }
+	}
+private:
+	void assign(const list& o) { for (const_iterator i = o.begin(); i != o.end(); ++i) push_back(*i); }
+	link m_h;
+	size_t m_n;
+};
+}
+#endif

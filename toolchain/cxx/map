@@ -1,0 +1,133 @@
+#ifndef KEX_CXX_MAP
+#define KEX_CXX_MAP
+#include <stddef.h>
+#include <string.h>
+#include <new>
+#include <utility>
+namespace std {
+/* Ordered map kept as a sorted array of heap nodes: O(log n) lookup,
+ * O(n) insert/erase. References to elements stay valid across inserts;
+ * iterators do not. */
+template<class K, class V> class map
+{
+public:
+	typedef pair<const K, V> value_type;
+	typedef size_t size_type;
+
+	class const_iterator;
+	class iterator
+	{
+	public:
+		iterator() : p(0) {}
+		value_type& operator*() const { return **p; }
+		value_type* operator->() const { return *p; }
+		iterator& operator++() { ++p; return *this; }
+		iterator operator++(int) { iterator t(*this); ++p; return t; }
+		iterator& operator--() { --p; return *this; }
+		bool operator==(const iterator& o) const { return p == o.p; }
+		bool operator!=(const iterator& o) const { return p != o.p; }
+	private:
+		friend class map;
+		friend class const_iterator;
+		explicit iterator(value_type** q) : p(q) {}
+		value_type** p;
+	};
+	class const_iterator
+	{
+	public:
+		const_iterator() : p(0) {}
+		const_iterator(const iterator& i) : p(i.p) {}
+		const value_type& operator*() const { return **p; }
+		const value_type* operator->() const { return *p; }
+		const_iterator& operator++() { ++p; return *this; }
+		const_iterator operator++(int) { const_iterator t(*this); ++p; return t; }
+		const_iterator& operator--() { --p; return *this; }
+		bool operator==(const const_iterator& o) const { return p == o.p; }
+		bool operator!=(const const_iterator& o) const { return p != o.p; }
+	private:
+		friend class map;
+		explicit const_iterator(value_type** q) : p(q) {}
+		value_type** p;
+	};
+
+	map() : m_v(0), m_n(0), m_cap(0) {}
+	map(const map& o) : m_v(0), m_n(0), m_cap(0) { assign(o); }
+	~map() { clear(); ::operator delete(m_v); }
+	map& operator=(const map& o) { if (this != &o) { clear(); assign(o); } return *this; }
+
+	iterator begin() { return iterator(m_v); }
+	iterator end() { return iterator(m_v + m_n); }
+	const_iterator begin() const { return const_iterator(m_v); }
+	const_iterator end() const { return const_iterator(m_v + m_n); }
+	size_type size() const { return m_n; }
+	bool empty() const { return m_n == 0; }
+
+	void clear()
+	{
+		for (size_t i = 0; i < m_n; i++) { m_v[i]->~value_type(); ::operator delete(m_v[i]); }
+		m_n = 0;
+	}
+	iterator find(const K& k)
+	{
+		size_t i = lower(k);
+		return iterator(m_v + ((i < m_n && !(k < m_v[i]->first)) ? i : m_n));
+	}
+	const_iterator find(const K& k) const
+	{
+		size_t i = lower(k);
+		return const_iterator(m_v + ((i < m_n && !(k < m_v[i]->first)) ? i : m_n));
+	}
+	size_type count(const K& k) const { return find(k) != end() ? 1 : 0; }
+	pair<iterator, bool> insert(const value_type& v)
+	{
+		size_t i = lower(v.first);
+		if (i < m_n && !(v.first < m_v[i]->first))
+			return pair<iterator, bool>(iterator(m_v + i), false);
+		if (m_n == m_cap)
+		{
+			size_t cap = m_cap ? m_cap * 2 : 16;
+			value_type** nv = (value_type**) ::operator new(cap * sizeof(value_type*));
+			if (m_n) memcpy(nv, m_v, m_n * sizeof(value_type*));
+			::operator delete(m_v);
+			m_v = nv;
+			m_cap = cap;
+		}
+		value_type* node = new (::operator new(sizeof(value_type))) value_type(v);
+		memmove(m_v + i + 1, m_v + i, (m_n - i) * sizeof(value_type*));
+		m_v[i] = node;
+		m_n++;
+		return pair<iterator, bool>(iterator(m_v + i), true);
+	}
+	V& operator[](const K& k) { return insert(value_type(k, V())).first->second; }
+	size_type erase(const K& k)
+	{
+		iterator it = find(k);
+		if (it == end()) return 0;
+		erase(it);
+		return 1;
+	}
+	void erase(iterator it)
+	{
+		size_t i = it.p - m_v;
+		m_v[i]->~value_type();
+		::operator delete(m_v[i]);
+		memmove(m_v + i, m_v + i + 1, (m_n - i - 1) * sizeof(value_type*));
+		m_n--;
+	}
+private:
+	size_t lower(const K& k) const
+	{
+		size_t lo = 0, hi = m_n;
+		while (lo < hi)
+		{
+			size_t mid = lo + (hi - lo) / 2;
+			if (m_v[mid]->first < k) lo = mid + 1; else hi = mid;
+		}
+		return lo;
+	}
+	void assign(const map& o) { for (size_t i = 0; i < o.m_n; i++) insert(*o.m_v[i]); }
+	value_type** m_v;
+	size_t m_n, m_cap;
+};
+}
+#endif

@@ -1,0 +1,79 @@
+#ifndef KEX_CXX_ALGORITHM
+#define KEX_CXX_ALGORITHM
+#include <stddef.h>
+#include <utility>
+#undef min
+#undef max
+namespace std {
+template<class T> inline const T& min(const T& a, const T& b) { return b < a ? b : a; }
+template<class T> inline const T& max(const T& a, const T& b) { return a < b ? b : a; }
+
+template<class I, class O> inline O copy(I first, I last, O out)
+{
+	for (; first != last; ++first, ++out) *out = *first;
+	return out;
+}
+template<class I, class O> inline O copy_backward(I first, I last, O out)
+{
+	while (first != last) *--out = *--last;
+	return out;
+}
+template<class I, class T> inline void fill(I first, I last, const T& v)
+{
+	for (; first != last; ++first) *first = v;
+}
+template<class I, class T> inline I find(I first, I last, const T& v)
+{
+	for (; first != last; ++first) if (*first == v) break;
+	return first;
+}
+template<class I, class T> inline I lower_bound(I first, I last, const T& v)
+{
+	ptrdiff_t n = last - first;
+	while (n > 0)
+	{
+		ptrdiff_t half = n / 2;
+		I mid = first + half;
+		if (*mid < v) { first = mid + 1; n -= half + 1; }
+		else n = half;
+	}
+	return first;
+}
+template<class I, class T> inline I upper_bound(I first, I last, const T& v)
+{
+	ptrdiff_t n = last - first;
+	while (n > 0)
+	{
+		ptrdiff_t half = n / 2;
+		I mid = first + half;
+		if (!(v < *mid)) { first = mid + 1; n -= half + 1; }
+		else n = half;
+	}
+	return first;
+}
+template<class I, class T> inline bool binary_search(I first, I last, const T& v)
+{
+	I i = lower_bound(first, last, v);
+	return i != last && !(v < *i);
+}
+/* heap sort: in place, no recursion, O(n log n) worst case */
+template<class I> inline void __sift(I a, ptrdiff_t root, ptrdiff_t n)
+{
+	for (;;)
+	{
+		ptrdiff_t c = 2 * root + 1;
+		if (c >= n) return;
+		if (c + 1 < n && a[c] < a[c + 1]) c++;
+		if (!(a[root] < a[c])) return;
+		swap(a[root], a[c]);
+		root = c;
+	}
+}
+template<class I> inline void sort(I first, I last)
+{
+	ptrdiff_t n = last - first, i;
+	for (i = n / 2 - 1; i >= 0; i--) __sift(first, i, n);
+	for (i = n - 1; i > 0; i--) { swap(first[0], first[i]); __sift(first, 0, i); }
+}
+}
+#endif
