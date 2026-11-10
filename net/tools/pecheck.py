@@ -11,7 +11,10 @@ on Pentium-class CPUs.
   - Code: no instruction newer than the Pentium: CMOV/FCMOV/FCOMI (P6),
     multi-byte NOP (0F 1F, P6), MMX/SSE registers, SYSENTER, RDTSCP.
 
-Usage: pecheck.py <allowlist> <dll>...
+Usage: pecheck.py <allowlist file | exports dir> <dll>...
+
+  exports dir: e.g. tools/exports/win98se, export tables dumped from a real
+  installation (names only).
 """
 import re
 import struct
@@ -108,11 +111,18 @@ def code_check(path):
 
 def main():
     allow = set()
-    for line in Path(sys.argv[1]).read_text().splitlines():
-        line = line.split("#", 1)[0].strip()
-        if line:
-            dll, fn = line.split("!", 1)
-            allow.add((dll.lower(), fn))
+    src = Path(sys.argv[1])
+    if src.is_dir():
+        # a directory of real export tables: <dll name>.txt, one export per line
+        for f in src.glob("*.txt"):
+            for fn in f.read_text().split():
+                allow.add((f.stem.lower(), fn))
+    else:
+        for line in src.read_text().splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                dll, fn = line.split("!", 1)
+                allow.add((dll.lower(), fn))
     dlls = sys.argv[2:]
     infos = {Path(p).name.lower(): parse(p) for p in dlls}
     ours = {(n, e) for n, i in infos.items() for e in i["exports"]}

@@ -31,3 +31,9 @@ for f in "$NET"/kextls/src/kex_entropy.c "$NET"/kextls/src/drbg.c "$NET"/kextls/
 done
 $CC -o "$OUT/test_net" $objs -lpthread
 echo "built $OUT/test_net"
+
+# kexrt: portable sync core + address text functions
+$CC -O1 -g -std=c99 -D_DEFAULT_SOURCE -Wall -I"$NET"/kexrt/src \
+  "$NET"/kexrt/src/sync_core.c "$NET"/kexrt/src/inet.c "$NET"/tests/host/test_kexrt.c \
+  -o "$OUT/test_kexrt" -lpthread
+echo "built $OUT/test_kexrt"

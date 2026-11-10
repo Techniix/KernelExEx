@@ -2,6 +2,7 @@
 """Cross-build the KernelEx net modules for Windows 95/98/ME with clang + lld.
 
   kextls.dll   Mbed TLS + DRBG + KernelEx API library (RtlGenRandom, rand_s)
+  kexrt.dll    KernelEx API library: Vista/7 KERNEL32 sync/FLS/time, WS2_32 helpers
   bcrypt.dll   CNG subset (RNG, hashes, HMAC) on kextls
   winhttp.dll  WinHTTP subset on kextls + Winsock 1.1
 
@@ -30,6 +31,14 @@ MODULES = {
             NET / "kextls/src" / f for f in
             ("kex_entropy.c", "drbg.c", "kex_platform.c", "truststore.c", "session.c", "digest.c", "apilib.c", "dllmain.c")],
         "defines": ["-DKEXTLS_BUILD"],
+        "libs": ["kernel32", "msvcrt"],
+        "kill_at": False,
+    },
+    "kexrt": {
+        "base": "0x66C00000",
+        "sources": [NET / "kexrt/src" / f for f in
+                    ("sync_core.c", "inet.c", "kernel32_api.c", "ws2_api.c", "apilib.c")],
+        "defines": [],
         "libs": ["kernel32", "msvcrt"],
         "kill_at": False,
     },
@@ -85,8 +94,22 @@ def cflags(sdk: Path):
                                                 check=True).stdout.strip() + "/include",
         "-isystem", str(sdk / "include"), "-isystem", str(Path(mingw_inc).parent / "crt"), "-isystem", mingw_inc,
         f"-I{NET}/kextls/config", f"-I{NET}/kextls/include", f"-I{NET}/kextls/src", f"-I{NET}/rt",
-        f"-I{NET}/winhttp", f"-I{MBED}/include", f"-I{MBED}/library",
+        f"-I{NET}/winhttp", f"-I{NET}/kexrt/src", f"-I{MBED}/include", f"-I{MBED}/library",
     ]
+
+
+def check_api_tables():
+    """KernelEx binary-searches API tables: names must be sorted by strcmp
+    (byte order) and unique. An unsorted table silently breaks lookups."""
+    import re
+    bad = []
+    for f in list((NET / "kexrt/src").glob("*.c")) + list((NET / "kextls/src").glob("*.c")):
+        text = f.read_text()
+        for m in re.finditer(r"(?:kexrt_api|apilib_named_api)\s+\w+\[\]\s*=\s*\{(.*?)\n\};", text, re.S):
+            names = re.findall(r'\{\s*"([^"]+)"', m.group(1))
+            if [n.encode() for n in names] != sorted(n.encode() for n in names) or len(set(names)) != len(names):
+                bad.append(f"{f.name}: table not strcmp-sorted/unique: {names}")
+    return bad
 
 
 def compile_one(src: Path, obj: Path, flags, quiet: bool):
@@ -109,6 +132,10 @@ def main():
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("-j", type=int, default=os.cpu_count() or 4)
     a = ap.parse_args()
+    bad = check_api_tables()
+    if bad:
+        print("\n".join(bad))
+        return 1
     out = a.out.resolve()
     objdir = out / "obj"
     flags = cflags(a.sdk.resolve())
