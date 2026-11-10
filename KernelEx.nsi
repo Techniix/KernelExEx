@@ -1,3 +1,6 @@
+  ;ANSI installer: Unicode NSIS installers do not run on Windows 9x
+  Unicode false
+
   !define _VERSION '4.5.2'
   !define _VERSION_CODE 0x04050078
   
@@ -340,7 +343,7 @@ Section "-Install"
     "USERENV" "USERENV.DLL"
   
   ;KernelEx net: crypto + TLS (kextls), CNG subset (bcrypt), WinHTTP (winhttp)
-  ;built by net/tools/build_win9x.py into net-out\
+  ;built by net/tools/build_win9x.py (staged in net-out by toolchain/build_installer.py)
   !insertmacro NetModule kextls KEXTLS
   !insertmacro NetModule bcrypt BCRYPT
   !insertmacro NetModule winhttp WINHTTP

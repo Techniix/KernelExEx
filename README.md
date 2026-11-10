@@ -24,11 +24,15 @@ bugs; back up before installing.
 | CNG | `bcrypt.dll`: `BCryptGenRandom`, MD5, SHA-1, SHA-2, HMAC |
 | Vista/7 APIs | `kexrt.dll`: SRW locks, condition variables, `InitOnce*`, `Fls*`, `GetTickCount64`, `InitializeCriticalSectionEx`, `Create{Event,Mutex,Semaphore}Ex`, `inet_pton`, `inet_ntop`, `WSAPoll` and others |
 | Installer | Optional (unticked) setting that sends plain HTTP and FTP through the [Protoweb](https://protoweb.org) proxy to browse restored 1990s websites. HTTPS is not proxied. Uninstall restores the previous proxy settings |
-| Build | Every user-mode part of KernelEx (core, `kexbases`, `kexbasen`, property sheet, `kexCOM`, auxiliary DLLs, `verify`) and the new modules build on Linux with clang. No Visual C++ 6 needed |
+| Build | Everything builds on Linux with open-source tools: the KernelEx core and API libraries, the property sheet, `kexCOM`, the auxiliary DLLs, the `VKrnlEx.vxd` kernel driver, the new modules and the installer. No Microsoft compiler, DDK or Wine needed |
 | Checks | `util/patcheck` verifies KernelEx's kernel32 patch patterns against any `kernel32.dll` offline. `net/tools/pecheck.py` verifies each binary imports only functions Windows 98 SE has and uses only Pentium instructions. The build fails on two clang miscompiles of the old inline assembly (see `toolchain/build_core.py`) |
 
-Not yet ported to the Linux build: `VKrnlEx.vxd` (the kernel-mode patcher)
-and the installer itself.
+How the kernel driver is built: clang compiles it, lld links it as an
+ordinary PE file, and `toolchain/vxd/le_link.py` converts that into the LE
+format Windows 9x drivers use. Every build checks that the converted driver,
+loaded the way Windows loads it, is byte-for-byte the same as the original.
+The VxD definitions in `toolchain/vxd/include` are written from public
+documentation, not copied from Microsoft's DDK.
 
 ### Security rules
 
@@ -174,7 +178,7 @@ list.
 
 | Component | Contents | Status | Ticked by default |
 |---|---|---|---|
-| KernelEx core | Core, `kexbases`, `kexbasen`, VxD, Properties tab | builds (VxD pending) | always installed |
+| KernelEx core | Core, `kexbases`, `kexbasen`, VxD, Properties tab | builds | always installed |
 | Modern TLS and crypto | `kextls`, `winhttp`, `bcrypt`, root certificates | builds | to be decided |
 | Vista/7 APIs | `kexrt` | builds | to be decided |
 | Clock sync | SNTP client | planned | to be decided |
@@ -225,9 +229,9 @@ and restore `core.ini`.
 
 ### Full installer
 
-`KernelEx.nsi` builds the complete installer. It is being moved to the Linux
-build; until then it needs NSIS and binaries laid out as the Visual C++ build
-left them.
+`KernelExEx-setup.exe` installs everything: it replaces KernelEx 4.5.2 if
+present, and the uninstaller removes it again. Run it, follow the pages,
+restart. Test it in 86Box (with a disk snapshot) before real hardware.
 
 ### Per-program settings
 
@@ -265,6 +269,14 @@ python3 net/tools/pecheck.py net/tools/exports/win98se ../build/win9x/*.dll
 # tests (need openssl and python3-cryptography)
 net/tests/host/build.sh ../build/host
 python3 net/tests/host/run_tests.py ../build/host/test_net
+
+# NSIS for Windows 9x installers (sources: github.com/kichik/nsis, github.com/SCons/scons)
+python3 toolchain/nsis/build_nsis.py --nsis-src ../nsis --scons-src ../scons \
+    --sdk ../build/sdk --core-lib ../build/core/lib --work ../build/xmingw --prefix ../build/nsis
+
+# installer
+python3 toolchain/build_installer.py --core ../build/core --net ../build/win9x \
+    --nsis ../build/nsis --out ../build/installer
 ```
 
 Design notes for the network modules are in `net/docs/ARCHITECTURE.md`.
@@ -274,7 +286,9 @@ Design notes for the network modules are in `net/docs/ARCHITECTURE.md`.
 | Path | Contents |
 |---|---|
 | `core/`, `vxd/`, `apilibs/`, `kexcontrol/`, `sheet/` | KernelEx 4.5.2 core, kernel patcher, API libraries, settings UI |
-| `toolchain/` | Linux build of the KernelEx core: `build_core.py`, minimal C++ library, runtime pieces |
+| `toolchain/` | Linux build: `build_core.py` (core, API libraries, VxD), `build_installer.py`, minimal C++ library, runtime pieces |
+| `toolchain/vxd/` | VxD headers, PE-to-LE converter, LE dumper and checker |
+| `toolchain/nsis/` | Cross-build of NSIS for Windows 9x installers |
 | `net/kextls/` | TLS, CSPRNG, trust store |
 | `net/winhttp/`, `net/bcrypt/` | WinHTTP and CNG |
 | `net/kexrt/` | Vista/7 KERNEL32 and WS2_32 additions |

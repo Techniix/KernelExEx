@@ -277,7 +277,7 @@ int wmain(int argc, wchar_t* argv[])
 	if (regfilei)
 		fclose(regfilei);
 	if (regfileu)
-		fclose(regfilei);
+		fclose(regfileu);
 
 	printf("Finished.");
 	return 0;
