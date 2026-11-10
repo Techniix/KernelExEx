@@ -182,12 +182,33 @@ list.
     files are copied.
 22. **Virtual LAN (ZeroTier).** The ZeroTier client (MPL-2.0 since 1.16; the
     commercial network controller is not used) with a virtual network card
-    driver, a Control Panel applet and a tray icon. Carries IPX as well as
-    TCP/IP for LAN games.
-23. **WiFi with WPA2.** A built-in client (scan, choose, password) on
-    wpa_supplicant (BSD). It works with cards whose 98 driver accepts the
-    standard WPA key requests; a list of known-good cards is kept.
+    driver, a Control Panel applet and a tray icon. IPX is a first-class
+    citizen: setup binds Windows' IPX/SPX protocol to the virtual adapter,
+    and the applet checks that the network's rules let IPX (EtherType
+    0x8137) through and shows the exact rule to add when they do not.
+23. **WiFi with WPA2, on our own drivers.** Windows 98 drivers for WiFi cards
+    mostly cannot do WPA2, so KernelExEx brings its own: one NDIS miniport
+    that hosts open WiFi drivers through a compatibility layer, the way
+    Haiku runs FreeBSD's. WPA2 is done in software inside it, so the card's
+    capabilities do not matter. See `docs/research/wifi.md`. A built-in
+    client (scan, choose, password) sits on top.
 24. **7-Zip** built against KernelExEx, with Explorer context menus.
+25. **File sharing with modern PCs**: an SMB2/3 client, so Network
+    Neighborhood and mapped drives reach Windows 10/11, Samba and NAS boxes
+    that have SMB1 turned off. Signing and encryption on, as modern servers
+    require.
+26. **Disks over 137 GB and AHCI/SATA**: 48-bit LBA in our own IDE port
+    driver and an AHCI driver, with FAT32 tools that handle large volumes.
+27. **More than 512 MB of RAM**: our own fix for the VCACHE and memory
+    manager limits, in VKrnlEx.vxd or a companion VxD.
+28. **Intel HD Audio** driver for onboard sound, with Linux `snd-hda-intel`
+    as the reference.
+29. **FTP with TLS (FTPS) and SFTP** clients on the KernelExEx TLS stack.
+30. **Bluetooth**, HID first: a USB Bluetooth adapter driver, the L2CAP and
+    HID profiles and secure pairing, so pads (8BitDo), keyboards and mice
+    connect without cables. Audio (A2DP) comes after.
+31. **Update service**, last: root certificates, controller database and
+    components.
 
 ## Installer components
 
@@ -210,8 +231,15 @@ list.
 | Unicode layer | `kexuni.dll` (MSLU replacement) | builds, in installer | always installed |
 | USB mass storage | `usbstor.sys` | planned | to be decided |
 | Virtual LAN | ZeroTier client, Control Panel applet, virtual adapter | planned | to be decided |
-| WiFi client | WPA/WPA2 on wpa_supplicant | planned | to be decided |
+| WiFi | our WiFi drivers (WPA2 in software) and client | research | to be decided |
 | 7-Zip | archiver with Explorer menus | planned | to be decided |
+| SMB2/3 client | file sharing with modern PCs | planned | to be decided |
+| Large disks | 48-bit LBA, AHCI | planned | to be decided |
+| Memory fix | more than 512 MB of RAM | planned | to be decided |
+| HD Audio | Intel HD Audio driver | planned | to be decided |
+| FTPS / SFTP | file transfer clients | planned | to be decided |
+| Bluetooth | adapter driver, HID, later audio | planned | to be decided |
+| Updates | update service | planned, last | to be decided |
 | Developer SDK | headers, import libraries, porting guide | planned | to be decided |
 
 ## Requirements
