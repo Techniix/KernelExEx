@@ -1,0 +1,22 @@
+; KernelEx winhttp.dll exports (subset of the Windows WinHTTP API)
+LIBRARY winhttp.dll
+EXPORTS
+  WinHttpAddRequestHeaders
+  WinHttpCheckPlatform
+  WinHttpCloseHandle
+  WinHttpConnect
+  WinHttpCrackUrl
+  WinHttpGetDefaultProxyConfiguration
+  WinHttpGetIEProxyConfigForCurrentUser
+  WinHttpOpen
+  WinHttpOpenRequest
+  WinHttpQueryDataAvailable
+  WinHttpQueryHeaders
+  WinHttpQueryOption
+  WinHttpReadData
+  WinHttpReceiveResponse
+  WinHttpSendRequest
+  WinHttpSetOption
+  WinHttpSetStatusCallback
+  WinHttpSetTimeouts
+  WinHttpWriteData
