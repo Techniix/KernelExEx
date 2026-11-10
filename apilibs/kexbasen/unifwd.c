@@ -27,6 +27,23 @@
 
 static HMODULE hUnicows;
 
+/* kexuni.dll, KernelExEx's open replacement, sits next to kexbasen.dll */
+static HMODULE load_kexuni(void)
+{
+	char path[MAX_PATH];
+	char* slash;
+	HMODULE h = GetModuleHandle("KEXUNI.DLL");
+	if (h)
+		return h;
+	if (!GetModuleFileName(GetModuleHandle("KEXBASEN.DLL"), path, sizeof(path) - 16))
+		return NULL;
+	slash = strrchr(path, '\\');
+	if (!slash)
+		return NULL;
+	strcpy(slash + 1, "KEXUNI.DLL");
+	return LoadLibrary(path);
+}
+
 int unifwd_init(void)
 {
 	DWORD lasterror = GetLastError();
@@ -43,6 +60,9 @@ int unifwd_init(void)
 		if (_control87(0, 0) != fpu_cw)
 			_control87(fpu_cw, 0xfffff);
 	}
+	//Microsoft no longer offers MSLU for download: without it, use kexuni
+	if (!hUnicows)
+		hUnicows = load_kexuni();
 	SetLastError(lasterror);
 	return (hUnicows != NULL);
 }
@@ -50,7 +70,7 @@ int unifwd_init(void)
 void unicows_fatal_error(const char* func)
 {
 	char msg[256];
-	strcpy(msg, "kexbasen: Failed to get unicows proc addr: ");
+	strcpy(msg, "kexbasen: Failed to get unicows/kexuni proc addr: ");
 	strcat(msg, func);
 	fatal_error(msg);
 }

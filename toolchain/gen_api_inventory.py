@@ -30,7 +30,7 @@ KIND_TEXT = {
     "new": "added (not in Windows 98 SE)",
     "replaced": "replaced or extended (Windows 98 SE has a weaker version)",
     "stub": "stub: exists so programs load, fails with ERROR_CALL_NOT_IMPLEMENTED or similar",
-    "mslu": "forwarded to the Microsoft Layer for Unicode (unicows.dll)",
+    "mslu": "forwarded to the Microsoft Layer for Unicode (unicows.dll), or to KernelExEx's kexuni.dll when MSLU is not installed",
 }
 
 # whole DLLs that KernelExEx installs (not routed through API libraries)

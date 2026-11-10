@@ -37,7 +37,7 @@ Every function in the inventory has one of four kinds:
 | `new` | Windows 98 SE does not have it; KernelExEx implements it | Use it |
 | `replaced` | Windows 98 SE has a version with bugs or missing features; KernelExEx's replaces it | Use it |
 | `stub` | Exists only so programs load; returns failure (usually `ERROR_CALL_NOT_IMPLEMENTED`) | Handle the failure; do not depend on it |
-| `mslu` | Unicode (`...W`) function forwarded to the Microsoft Layer for Unicode | Works only if `unicows.dll` is installed (the KernelExEx installer installs it) |
+| `mslu` | Unicode (`...W`) function forwarded to the Microsoft Layer for Unicode | Works. Uses `unicows.dll` if installed, otherwise KernelExEx's own `kexuni.dll` (always installed) |
 
 ## 3. Targets and hard limits
 
@@ -193,7 +193,7 @@ When asked to make code run on Windows 98 with KernelExEx:
 
 1. Target `i686`, `-march=i586`, subsystem 4.0, `msvcrt.dll`; no UCRT.
 2. Look up every Windows API you call in `docs/api.json`. Treat `stub` as
-   "will fail at run time" and `mslu` as "needs unicows.dll"; for anything not
+   "will fail at run time" and `mslu` as working (through `unicows.dll` or `kexuni.dll`); for anything not
    listed, check `net/tools/exports/win98se/<dll>.txt` (native Windows 98 SE).
 3. No thread pools, IOCP, `WaitOnAddress`, IPv6, asymmetric CNG, SChannel.
 4. One CPU: do not spin-wait on another thread.

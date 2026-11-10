@@ -66,6 +66,17 @@ MODULES = {
         "kill_at": True,
         "def": NET.parent / "input/xinput/xinput.def",
     },
+    # open replacement for the unicows.dll functions kexbasen forwards
+    "kexuni": {
+        "base": "0x66D00000",
+        "sources": [NET.parent / "apilibs/kexuni" / f for f in
+                    ("helpers.c", "kernel32.c", "user32.c", "gdi32.c", "advapi32.c", "shell32.c", "comdlg32.c",
+                     "winspool.c")],
+        "defines": [],
+        "libs": ["winspool", "comdlg32", "shell32", "gdi32", "user32", "advapi32", "kernel32", "msvcrt"],
+        "kill_at": True,
+        "def": NET.parent / "apilibs/kexuni/kexuni.def",
+    },
 }
 RT = [NET / "rt/w9xrt.c", NET / "rt/w9xrt_div.c", NET / "rt/chkstk.S"]
 DLLENTRY = NET / "rt/dllentry.c"
@@ -194,25 +205,28 @@ def main():
             write_import_lib(name, objs, out)
         print(f"built {dll} ({dll.stat().st_size // 1024} KB)")
 
-    # the on-target self-test program
-    src = NET / "tests/win9x/kexnet_test.c"
-    obj = objdir / "tests" / "kexnet_test.o"
-    err = compile_one(src, obj, flags, False)
-    if err:
-        print(err)
-        return 1
-    exe = out / "kexnet_test.exe"
-    cmd = ["clang", *TARGET, "-fuse-ld=lld", "-nostdlib", "-o", str(exe), str(obj), *rt_objs,
-           f"-L{a.sdk.resolve() / 'lib'}", f"-L{out}", "-lwinhttp", "-lbcrypt", "-luser32", "-lkernel32", "-lmsvcrt",
-           "-Wl,--entry=mainCRTStartup@0", "-Wl,--subsystem,console:4.0",
-           "-Wl,--major-os-version,4", "-Wl,--minor-os-version,0", "-Wl,--image-base,0x400000",
-           "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat", "-Wl,--file-alignment,4096",
-           "-Wl,--gc-sections", "-Wl,--no-insert-timestamp", "-Wl,--disable-auto-import"]
-    p = subprocess.run(cmd, capture_output=True, text=True)
-    if p.returncode != 0:
-        print(f"link kexnet_test failed:\n{p.stderr}")
-        return 1
-    print(f"built {exe} ({exe.stat().st_size // 1024} KB)")
+    # the on-target self-test programs
+    tests = [(NET / "tests/win9x/kexnet_test.c", ["-lwinhttp", "-lbcrypt", "-luser32", "-lkernel32", "-lmsvcrt"]),
+             (NET.parent / "apilibs/kexuni/tests/kexuni_test.c",
+              ["-lgdi32", "-luser32", "-ladvapi32", "-lkernel32", "-lmsvcrt"])]
+    for src, libs in tests:
+        obj = objdir / "tests" / (src.stem + ".o")
+        err = compile_one(src, obj, flags, False)
+        if err:
+            print(err)
+            return 1
+        exe = out / (src.stem + ".exe")
+        cmd = ["clang", *TARGET, "-fuse-ld=lld", "-nostdlib", "-o", str(exe), str(obj), *rt_objs,
+               f"-L{a.sdk.resolve() / 'lib'}", f"-L{out}", *libs,
+               "-Wl,--entry=mainCRTStartup@0", "-Wl,--subsystem,console:4.0",
+               "-Wl,--major-os-version,4", "-Wl,--minor-os-version,0", "-Wl,--image-base,0x400000",
+               "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat", "-Wl,--file-alignment,4096",
+               "-Wl,--gc-sections", "-Wl,--no-insert-timestamp", "-Wl,--disable-auto-import"]
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        if p.returncode != 0:
+            print(f"link {src.stem} failed:\n{p.stderr}")
+            return 1
+        print(f"built {exe} ({exe.stat().st_size // 1024} KB)")
     return 0
 
 

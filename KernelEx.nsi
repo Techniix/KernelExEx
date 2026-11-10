@@ -99,7 +99,7 @@
   LangString SEC_PRODUCT ${LANG_ENGLISH} "$(DESC_SHORTPRODUCT) "
   LangString DESC_INSTALLING ${LANG_ENGLISH} "Installing"
   LangString DESC_DOWNLOADING1 ${LANG_ENGLISH} "Downloading"
-  LangString DESC_DOWNLOADFAILED ${LANG_ENGLISH} "Could not download MSLU. Put unicows.exe (the Microsoft Layer for Unicode redistributable) next to this installer and run it again. Error:"
+  LangString DESC_USING_KEXUNI ${LANG_ENGLISH} "Microsoft Layer for Unicode not found: using KernelExEx's own (kexuni.dll)"
   LangString ERROR_PRODUCT_INVALID_PATH ${LANG_ENGLISH} "The $(DESC_SHORTPRODUCT) Installation$\n\
     was not found in the following location:$\n"
   LangString ERROR_PRODUCT_FATAL ${LANG_ENGLISH} "A fatal error occurred during the installation$\n\
@@ -162,8 +162,6 @@ FunctionEnd
 
 Section "-MSLU" SECPRODUCT
 
-  !define URL_PRODUCT "http://download.microsoft.com/download/b/7/5/b75eace3-00e2-4aa0-9a6f-0b6882c71642/unicows.exe"
-
   IfFileExists $SYSDIR\unicows.dll 0 lbl_download
   
   ;check version
@@ -175,25 +173,17 @@ Section "-MSLU" SECPRODUCT
   StrCmp "1.1.3790.0" "$R2.$R3.$R4.$R5" lbl_Skip
   
   lbl_download:
-  ;Prefer the MSLU redistributable (unicows.exe) placed next to the installer:
-  ;the old download link is gone and NSISdl cannot fetch over HTTPS.
-  IfFileExists "$EXEDIR\unicows.exe" 0 lbl_net
+  ;Microsoft no longer offers MSLU for download. KernelExEx brings its own
+  ;implementation (kexuni.dll), so MSLU is optional: install it only when
+  ;unicows.exe (the Microsoft redistributable) is next to this installer.
+  IfFileExists "$EXEDIR\unicows.exe" 0 lbl_kexuni
   DetailPrint "Using $EXEDIR\unicows.exe"
   CopyFiles /SILENT "$EXEDIR\unicows.exe" "$TEMP\unicows.exe"
   Goto lbl_continue
-  lbl_net:
-  DetailPrint "$(DESC_DOWNLOADING1) $(DESC_SHORTPRODUCT)..."
-  MessageBox MB_ICONEXCLAMATION|MB_YESNO|MB_DEFBUTTON2 "$(DESC_PRODUCT_DECISION)" /SD IDNO \
-    IDYES +2 IDNO 0
-  Abort
-  ; Download
-  AddSize 900
-  nsisdl::download /TIMEOUT=30000 "${URL_PRODUCT}" "$TEMP\unicows.exe"
-  Pop $0
-  StrCmp "$0" "success" lbl_continue
-    DetailPrint "$(DESC_DOWNLOADFAILED) $0"
-    Abort
- 
+  lbl_kexuni:
+  DetailPrint "$(DESC_USING_KEXUNI)"
+  Goto lbl_Skip
+
   lbl_continue:
   DetailPrint "$(DESC_INSTALLING) $(DESC_SHORTPRODUCT)..."
   Banner::show /NOUNLOAD "$(DESC_INSTALLING) $(DESC_SHORTPRODUCT)..."
@@ -282,6 +272,14 @@ Section "-Install"
   StrCpy $R7 $0
   Call UpgradeDLL_Func
   
+  ;KernelExEx's Unicode layer, used when MSLU (unicows.dll) is absent
+  GetTempFileName $0 "$INSTDIR"
+  File /oname=$0 "net-out\kexuni.dll"
+  StrCpy $R4 "$INSTDIR\kexuni.dll"
+  StrCpy $R6 "0"
+  StrCpy $R7 $0
+  Call UpgradeDLL_Func
+
   GetTempFileName $0 "$INSTDIR"
   File /oname=$0 "sheet\${FLAVOUR}\sheet.dll"
   StrCpy $R4 "$INSTDIR\sheet.dll"
@@ -540,6 +538,7 @@ Section "Uninstall"
   Delete /REBOOTOK "$INSTDIR\KernelEx.dll"
   Delete /REBOOTOK "$INSTDIR\kexbases.dll"
   Delete /REBOOTOK "$INSTDIR\kexbasen.dll"
+  Delete /REBOOTOK "$INSTDIR\kexuni.dll"
   Delete "$INSTDIR\core.ini"
   UnRegDLL "$INSTDIR\sheet.dll"
   Delete /REBOOTOK "$INSTDIR\sheet.dll"
