@@ -148,7 +148,7 @@ list.
 17. **Other modern hardware**, studied before anything is promised:
     - USB 3 (xHCI) host controllers, since many modern boards have no older
       USB controller;
-    - USB mass storage;
+    - USB mass storage (now planned: see decision 21);
     - AHCI/SATA, disks over 137 GB and more than 512 MB of RAM;
     - Intel HD Audio, the onboard sound on modern boards (Linux
       `snd-hda-intel` as reference);
@@ -174,6 +174,20 @@ list.
     be switched per program on the KernelEx tab of a program's Properties.
     Which boxes are ticked by default will be settled before the first
     release.
+20. **No Microsoft redistributables required.** MSLU is no longer offered
+    for download, so `kexuni.dll` implements the 208 functions KernelEx
+    forwarded to it. A real `unicows.dll`, if installed, is still preferred.
+21. **USB mass storage** with our own `usbstor.sys` (Linux `usb-storage` as
+    reference), on 98 SE's own WDM-to-IOS bridge (`ntmap.sys`). No Windows ME
+    files are copied.
+22. **Virtual LAN (ZeroTier).** The ZeroTier client (MPL-2.0 since 1.16; the
+    commercial network controller is not used) with a virtual network card
+    driver, a Control Panel applet and a tray icon. Carries IPX as well as
+    TCP/IP for LAN games.
+23. **WiFi with WPA2.** A built-in client (scan, choose, password) on
+    wpa_supplicant (BSD). It works with cards whose 98 driver accepts the
+    standard WPA key requests; a list of known-good cards is kept.
+24. **7-Zip** built against KernelExEx, with Explorer context menus.
 
 ## Installer components
 
@@ -193,6 +207,11 @@ list.
 | USB audio driver | headsets and microphones | research | to be decided |
 | SDL runtimes | SDL 1.2, SDL2, SDL3 | planned | to be decided |
 | Discord presence | tray agent (companion installed on the modern PC) | planned | to be decided |
+| Unicode layer | `kexuni.dll` (MSLU replacement) | builds, in installer | always installed |
+| USB mass storage | `usbstor.sys` | planned | to be decided |
+| Virtual LAN | ZeroTier client, Control Panel applet, virtual adapter | planned | to be decided |
+| WiFi client | WPA/WPA2 on wpa_supplicant | planned | to be decided |
+| 7-Zip | archiver with Explorer menus | planned | to be decided |
 | Developer SDK | headers, import libraries, porting guide | planned | to be decided |
 
 ## Requirements
