@@ -29,8 +29,13 @@ static LONG get_pointer_obfuscator(void)
 
 	if (obfuscator == 0)
 	{
-		LONG rand;
-		SystemFunction036_new(&rand, sizeof(rand));
+		LONG rand = 0;
+		/* SystemFunction036_new now fails instead of returning guessable
+		 * bytes when CryptoAPI is missing; fall back to timing then, since
+		 * this cookie must exist. (Still one cookie system-wide: see the
+		 * FIXME below; tracked in net/docs/ARCHITECTURE.md.) */
+		if (!SystemFunction036_new(&rand, sizeof(rand)))
+			rand = (LONG)(GetTickCount() * 2654435761u) ^ (LONG)GetCurrentThreadId();
 		rand |= 0xc0000000;
 		InterlockedCompareExchange(&obfuscator, rand, 0);
 	}

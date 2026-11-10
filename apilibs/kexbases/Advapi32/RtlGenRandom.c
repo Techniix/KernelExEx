@@ -1,7 +1,7 @@
 /*
  *  KernelEx
  *  Copyright (C) 2009 Tihiy
- *	Copyright (C) 1999 George Marsaglia
+ *  Copyright (C) 2026 KernelEx contributors
  *
  *  This file is part of KernelEx source code.
  *
@@ -22,37 +22,60 @@
 
 #include <windows.h>
 
-#define znew  ((z=36969*(z&65535)+(z>>16))<<16)
-#define wnew  ((w=18000*(w&65535)+(w>>16))&65535)
-#define MWC   (znew+wnew)
-#define SHR3  (jsr=(jsr=(jsr=jsr^(jsr<<17))^(jsr>>13))^(jsr<<5))
-#define CONG  (jcong=69069*jcong+1234567)
-#define KISS  ((MWC^CONG)+SHR3)
+/*
+ * Fallback RtlGenRandom (ADVAPI32!SystemFunction036).
+ *
+ * The normal implementation is in kextls.dll (net/kextls), which CORE.INI
+ * lists after kexbases so that it takes precedence: a per-process
+ * SP 800-90A HMAC_DRBG seeded from CryptoAPI and CPU timing jitter.
+ *
+ * This copy is used only when kextls is absent. It used to be the KISS
+ * generator seeded from GetTickCount, the thread and process ids and the
+ * desktop colour, with its state in kexbases' shared data section: fast,
+ * but predictable, and shared by every process on the machine. It now asks
+ * CryptoAPI directly on each call and fails (returns FALSE) when CryptoAPI
+ * is unavailable, instead of returning guessable bytes. No state is kept:
+ * kexbases is loaded in the shared arena, so a cached provider handle would
+ * leak between processes.
+ */
 
-/*  Global static variables: */
-static unsigned long z=362436069, w=521288629, jsr=123456789, jcong=380116160;
+#ifndef CRYPT_VERIFYCONTEXT
+#define CRYPT_VERIFYCONTEXT 0xF0000000
+#endif
+#ifndef PROV_RSA_FULL
+#define PROV_RSA_FULL 1
+#endif
+
+typedef BOOL (WINAPI *CryptAcquireContextA_t)(ULONG_PTR*, LPCSTR, LPCSTR, DWORD, DWORD);
+typedef BOOL (WINAPI *CryptGenRandom_t)(ULONG_PTR, DWORD, BYTE*);
+typedef BOOL (WINAPI *CryptReleaseContext_t)(ULONG_PTR, DWORD);
 
 /* MAKE_EXPORT SystemFunction036_new=SystemFunction036 */
 BOOL WINAPI SystemFunction036_new(PVOID pbBuffer, ULONG dwLen)
 {
-	static BOOL bInit = FALSE;
-	ULONG i;
-	PUCHAR cBuffer = (PUCHAR) pbBuffer;
+	HMODULE adv;
+	CryptAcquireContextA_t acquire;
+	CryptGenRandom_t gen;
+	CryptReleaseContext_t release;
+	ULONG_PTR prov = 0;
+	BOOL ok = FALSE;
 
 	if (!pbBuffer || !dwLen)
 		return FALSE;
-	if (!bInit) //init once
+	adv = LoadLibraryA("ADVAPI32.DLL");
+	if (!adv)
+		return FALSE;
+	acquire = (CryptAcquireContextA_t) GetProcAddress(adv, "CryptAcquireContextA");
+	gen = (CryptGenRandom_t) GetProcAddress(adv, "CryptGenRandom");
+	release = (CryptReleaseContext_t) GetProcAddress(adv, "CryptReleaseContext");
+	if (acquire && gen && release
+			&& acquire(&prov, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
 	{
-		z = GetTickCount();
-		w = GetCurrentThreadId();
-		jsr = GetCurrentProcessId();
-		jcong = GetSysColor(COLOR_BACKGROUND);
-		bInit = TRUE;
+		ok = gen(prov, dwLen, (BYTE*) pbBuffer);
+		release(prov, 0);
 	}
-	for (i=0;i<dwLen;i++)
-	{
-		*cBuffer = (UCHAR) KISS;
-		cBuffer++;
-	}
-	return TRUE;
+	FreeLibrary(adv);
+	if (!ok)
+		memset(pbBuffer, 0, dwLen);
+	return ok;
 }
