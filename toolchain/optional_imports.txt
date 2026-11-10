@@ -1,0 +1,13 @@
+# Delay-loaded imports of kexbasen.dll that stock Windows 98 SE does not have.
+# They are resolved on first use through GetProcAddress, so they are only
+# needed by the API that uses them (and KernelEx itself may supply them).
+# Same imports as the Visual C++ build of KernelEx 4.5.2.
+usp10.dll!ScriptCacheGetHeight
+usp10.dll!ScriptFreeCache
+usp10.dll!ScriptGetCMap
+usp10.dll!ScriptGetFontProperties
+usp10.dll!ScriptGetGlyphABCWidth
+winspool.drv!GetDefaultPrinterA
+cryptui.dll!CryptUIDlgViewCRLW
+cryptui.dll!CryptUIDlgViewCTLW
+cryptui.dll!CryptUIDlgViewCertificateW

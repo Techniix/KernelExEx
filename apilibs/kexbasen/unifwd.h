@@ -46,7 +46,7 @@ unsigned long __stdcall GetUnicowsAddress(const char* name);
  *	}
  */
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__clang__)
 
 /* How to make it less messy? */
 #define FORWARD_TO_UNICOWS(name) \
@@ -67,6 +67,30 @@ unsigned long __stdcall GetUnicowsAddress(const char* name);
 		"movl _ref_" #name ", %eax\n\t" \
 		"jmp *%eax\n" \
 	".lcomm _ref_" #name ",4\n\t"
+
+#elif defined(__clang__)
+
+/* clang's MS-style inline assembler accepts neither "push offset" nor a
+ * label inside a one-line __asm block, so resolve through a helper. */
+static unsigned long __stdcall kex_unifwd_resolve(unsigned long* ref, const char* name)
+{
+	if (!*ref)
+		*ref = GetUnicowsAddress(name);
+	return *ref;
+}
+
+#define FORWARD_TO_UNICOWS(name) \
+	static const char name##_fwd_n[] = #name; \
+	static unsigned long name##_fwd_ref = 0; \
+	int __declspec(naked) __stdcall name##_fwd(void) \
+	{ \
+		__asm { lea eax, name##_fwd_n } \
+		__asm { push eax } \
+		__asm { lea eax, name##_fwd_ref } \
+		__asm { push eax } \
+		__asm { call kex_unifwd_resolve } \
+		__asm { jmp eax } \
+	}
 
 #else
 

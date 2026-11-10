@@ -62,14 +62,14 @@ __asm {
 	mov [ebx+CONTEXT_SEGGS], gs
 	mov [ebx+CONTEXT_SEGSS], ss
 	pushf
-	pop [ebx+CONTEXT_EFLAGS]
+	pop dword ptr [ebx+CONTEXT_EFLAGS]
 	mov eax, [ebp]
 	mov [ebx+CONTEXT_EBP], eax
 	mov eax, [ebp+4]
 	mov [ebx+CONTEXT_EIP], eax
 	lea eax, [ebp+8]
 	mov [ebx+CONTEXT_ESP], eax
-	mov [ebx+CONTEXT_CONTEXTFLAGS], CONTEXT_FULL
+	mov dword ptr [ebx+CONTEXT_CONTEXTFLAGS], CONTEXT_FULL
 	pop ebx
 	ret 4
 	}

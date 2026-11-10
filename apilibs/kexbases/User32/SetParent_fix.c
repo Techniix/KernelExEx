@@ -20,6 +20,10 @@
  */
 
 #include <windows.h>
+#include "asmimp.h"
+
+KEX_ASM_IMPORT(SetParent, 8);
+KEX_ASM_IMPORT(SetLastError, 4);
 #include "thuni_layer.h"
 
 /* returns TRUE if hwnd is a parent of hwndNewParent */
@@ -72,7 +76,7 @@ __hwndok:
 	jnz     __childfail
 
 	/* return control to SetParent */
-	jmp     dword ptr [SetParent]
+	jmp dword ptr [IMP(SetParent)]
 
 __childfail:
 	/* circular reference detected - stop! */
@@ -80,7 +84,7 @@ __childfail:
 
 __error:
 	/* return error */
-	call    dword ptr [SetLastError]
+	call dword ptr [IMP(SetLastError)]
 	xor     eax, eax
 	retn    8
 

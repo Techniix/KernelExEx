@@ -11,7 +11,7 @@ on Pentium-class CPUs.
   - Code: no instruction newer than the Pentium: CMOV/FCMOV/FCOMI (P6),
     multi-byte NOP (0F 1F, P6), MMX/SSE registers, SYSENTER, RDTSCP.
 
-Usage: pecheck.py <allowlist file | exports dir> [--shared-arena] <dll>...
+Usage: pecheck.py <allowlist file | exports dir> [--shared-arena] [--also <allowlist>] <dll>...
 
   exports dir: e.g. tools/exports/win98se, export tables dumped from a real
   installation (names only).
@@ -80,6 +80,23 @@ def parse(path):
                     names.append(cstr(d, rva_to_off(sections, v) + 2))
                 thunk += 4
             off += 20
+    # delay-load imports (directory 13, version 2 descriptors with RVAs)
+    if ndirs > 13 and dirs[13][0]:
+        off = rva_to_off(sections, dirs[13][0])
+        while True:
+            attrs, name_rva, _, _, int_rva = struct.unpack_from("<IIIII", d, off)
+            if not name_rva:
+                break
+            dll = cstr(d, rva_to_off(sections, name_rva)).lower()
+            names = imports.setdefault(dll, [])
+            thunk = rva_to_off(sections, int_rva)
+            while True:
+                v = struct.unpack_from("<I", d, thunk)[0]
+                if not v:
+                    break
+                names.append(f"#{v & 0xFFFF}" if v & 0x80000000 else cstr(d, rva_to_off(sections, v) + 2))
+                thunk += 4
+            off += 32
     exports = []
     if dirs[0][0]:
         off = rva_to_off(sections, dirs[0][0])
@@ -124,7 +141,16 @@ def main():
             if line:
                 dll, fn = line.split("!", 1)
                 allow.add((dll.lower(), fn))
-    dlls = [a for a in sys.argv[2:] if a != "--shared-arena"]
+    args = sys.argv[2:]
+    while "--also" in args:  # extra allowlist file (dll!function per line), e.g. optional delay-loaded imports
+        i = args.index("--also")
+        for line in Path(args[i + 1]).read_text().splitlines():
+            line = line.split("#", 1)[0].strip() if not line.strip().startswith("#") else ""
+            if line:
+                dll, fn = line.split("!", 1)
+                allow.add((dll.lower(), fn))
+        del args[i:i + 2]
+    dlls = [a for a in args if a != "--shared-arena"]
     shared_ok = "--shared-arena" in sys.argv  # KernelEx core and shared API libraries live above 2 GB
     infos = {Path(p).name.lower(): parse(p) for p in dlls}
     ours = {(n, e) for n, i in infos.items() for e in i["exports"]}

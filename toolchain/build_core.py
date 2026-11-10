@@ -101,7 +101,8 @@ class Build:
         with concurrent.futures.ThreadPoolExecutor(self.jobs) as ex:
             errors = [e for e in ex.map(one, jobs) if e]
         if errors:
-            sys.exit(f"{name}: {len(errors)} file(s) failed\n" + "\n".join(errors[:8]))
+            (self.out / f"{name}.errors.txt").write_text("\n".join(errors))
+            sys.exit(f"{name}: {len(errors)} of {len(jobs)} file(s) failed, see {self.out / (name + '.errors.txt')}")
         objs = [o for _, o in jobs]
         self.check_objects(name, objs)
         return objs
@@ -109,8 +110,27 @@ class Build:
     def check_objects(self, name, objs):
         syms = run(["llvm-nm", *objs])
         bad = sorted(set(re.findall(r"\.refptr\.\S+", syms)))
+        if "kex_seh_unsupported_filter" in syms:
+            sys.exit(f"{name}: __except with a filter other than EXCEPTION_EXECUTE_HANDLER is not supported")
         if bad:
             sys.exit(f"{name}: auto-import stubs present (would clobber registers in thunks): {bad[:5]}")
+        # Inline assembly naming a dllimport function ("call dword ptr [HeapAlloc]") is
+        # miscompiled by clang into: mov reg,[__imp__X] / call dword ptr [reg], which
+        # dereferences the function's code. See common/asmimp.h for the fix.
+        bad = []
+        for i in range(0, len(objs), 40):
+            dis = run(["llvm-objdump", "-d", "-r", "--no-show-raw-insn", "--x86-asm-syntax=intel", *objs[i:i + 40]])
+            lines = [l for l in dis.splitlines() if l.strip()]
+            for k, line in enumerate(lines):
+                m = re.search(r"IMAGE_REL_I386_DIR32\s+(__imp__\S+)", line)
+                if not m or k == 0 or k + 1 >= len(lines):
+                    continue
+                load = re.search(r"\bmov\s+(e\w\w), dword ptr \[", lines[k - 1])
+                if load and re.search(r"ptr \[%s\]" % load.group(1), lines[k + 1]):
+                    bad.append(f"{m.group(1)}: {lines[k + 1].strip()}")
+        if bad:
+            sys.exit(f"{name}: inline assembly dereferences an imported function (use IMP() from asmimp.h):\n  "
+                     + "\n  ".join(bad[:10]))
 
     def archive(self, name, objs):
         lib = self.lib / f"lib{name}.a"
@@ -206,6 +226,9 @@ class Build:
 
 # ---------------------------------------------------------------------------
 
+COMPAT = ["-include", str(ROOT / "toolchain/rt/msvc_compat.h")]
+
+
 def build_kexcrt(b: Build):
     d = ROOT / "kexcrt"
     # same file list as kexcrt/makefile (atox.c and strtox.c are templates)
@@ -220,6 +243,10 @@ def build_kexcrt(b: Build):
     objs = b.compile("kexcrt", plain + sorted((ROOT / "toolchain/rt").glob("*.[cS]")), flags)
     objs += b.compile("kexcrt", renamed, flags + ["-include", str(ROOT / "toolchain/rt/kexcrt_pre.h")])
     b.archive("kexcrt", objs)
+    # getaddrinfo fallbacks that the Platform SDK supplies inline in wspiapi.h
+    mingw = Path((b.sdk / "MINGW_INCLUDE").read_text().strip()).parents[1]
+    wsp = sorted((mingw / "mingw-w64-crt/libsrc/wspiapi").glob("*.c"))
+    b.archive("wspiapi", b.compile("wspiapi", wsp, ["-D_WIN32_WINNT=0x0500"]))
 
 
 def build_k32ord(b: Build):
@@ -242,6 +269,12 @@ def build_k32ord(b: Build):
             sys.exit(f"k32ord: {name} is in k32ord.def but not declared in k32ord.h")
         lines.append(f"{deco[name]} @{ordinal} NONAME" if ordinal else deco[name])
     b.implib_from_def("k32ord", "\n".join(lines) + "\n")
+    # shell32 functions that Windows 9x exports by ordinal only (the names
+    # appeared with Windows 2000/XP); ordinals are the documented ones.
+    b.implib_from_def("shl32ord", "LIBRARY SHELL32.dll\nEXPORTS\n"
+                      "SHGetSpecialFolderPath@16 @175 NONAME\n"
+                      "ILFindLastID@4 @16 NONAME\nILRemoveLastID@4 @17 NONAME\nILClone@4 @18 NONAME\n"
+                      "SHILCreateFromPath@12 @28 NONAME\nILFree@4 @155 NONAME\nSHCreateDirectory@8 @165 NONAME\n")
 
 
 def dsp_sources(dsp: Path, exts=(".c", ".cpp")):
@@ -265,14 +298,76 @@ def build_core(b: Build):
     release_skip = {"debug.cpp", "debugproto.cpp", "apihook.cpp"}
     srcs = [f for f in dsp_sources(d / "core.dsp") if f.name not in release_skip]
     objs = b.compile("core", ctor_order(srcs), [f"-I{d}", f"-I{ROOT / 'common'}", "-DKEXCORE_EXPORTS", "-D_USRDLL",
-                                                "-D_WIN32_WINNT=0x0410"])
+                                                "-D_WIN32_WINNT=0x0410", *COMPAT])
     res = b.resource("core", d / "Core.rc")
     b.link("KernelEx", [*objs, res], ["kexcrt", "k32ord", "kernel32", "user32", "gdi32", "advapi32", "comctl32"],
            base="0xBFA00000", entry="PreDllMain@12", implib="KernelEx", shared_sections=True,
            defs=ROOT / "toolchain/defs/KernelEx.def")
 
 
-STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core}
+def prepare_apilibs(b: Build):
+    """Copy apilibs to <out>/gen/apilibs (lower-case directories, LF line
+    ends), then run util/prep to regenerate the API lists there."""
+    host = b.out / "host"
+    host.mkdir(exist_ok=True)
+    prep = host / "prep"
+    run(["g++", "-std=gnu++98", "-w", "-O1", f"-I{ROOT / 'toolchain/hostshim'}", ROOT / "util/prep/prep.cpp",
+         "-o", prep])
+    dst = b.gen / "apilibs"
+    shutil.rmtree(dst, ignore_errors=True)
+    for lib in ("kexbases", "kexbasen"):
+        src = ROOT / "apilibs" / lib
+        for root, _, files in os.walk(src):
+            rel = Path(root).relative_to(ROOT / "apilibs")
+            out = dst / str(rel).lower()
+            out.mkdir(parents=True, exist_ok=True)
+            for f in files:
+                data = (Path(root) / f).read_bytes()
+                if f == "dirlist" or f.lower().endswith((".c", ".cpp", ".h", ".hpp", ".def", ".rc", ".inc")):
+                    data = data.replace(b"\r\n", b"\n")
+                (out / f).write_bytes(data)
+        run([prep, "."], cwd=dst / lib)
+    for link in ("common", "kexcrt", "core"):
+        l = b.gen / link
+        if not l.exists():
+            l.symlink_to(ROOT / link)
+
+
+def build_apilib(b: Build, name, base, shared, libs, delay=()):
+    d = b.gen / "apilibs" / name
+    dirs = [x.strip() for x in (d / "dirlist").read_text().split() if x.strip()]
+    srcs = sorted(d.glob("*.c")) + sorted(d.glob("*.cpp"))
+    for sub in dirs:
+        for root, _, files in os.walk(d / sub):
+            srcs += [Path(root) / f for f in sorted(files) if f.lower().endswith((".c", ".cpp"))]
+    srcs += [ROOT / "common/common.c"] + ([ROOT / "common/pemanip.cpp"] if False else [])
+    in_dsp = {p.name.lower() for p in dsp_sources(ROOT / "apilibs" / name / f"{name}.dsp")}
+    srcs = [s for s in srcs if s.name.lower() in in_dsp]
+    flags = [f"-I{d}", f"-I{ROOT / 'common'}", "-D_USRDLL", "-D_WIN32_WINNT=0x0500", "-D_SSIZE_T_DEFINED", *COMPAT]
+    objs = b.compile(name, ctor_order(srcs), flags, cxx_for_c=True)  # /TP: everything is C++
+    res = b.resource(name, d / f"{name}.rc")
+    extra = [f"-Wl,--delayload={x}" for x in delay]
+    b.link(name, [*objs, res], libs + ["KernelEx", "kexcrt", "k32ord"], base=base, entry="__DllMainCRTStartup@12",
+           shared_sections=shared, extra=extra)
+
+
+def build_kexbases(b: Build):
+    build_apilib(b, "kexbases", "0xBFA40000", True,
+                 ["kernel32", "user32", "gdi32", "winspool", "comdlg32", "advapi32", "shell32", "version"])
+
+
+def build_kexbasen(b: Build):
+    build_apilib(b, "kexbasen", "0x7D000000", False,
+                 # usp10 before gdi32: mingw-w64's gdi32 also lists the Script* functions
+                 # (Windows 10 forwards them), which 9x gdi32 does not have
+                 ["usp10", "kernel32", "user32", "gdi32", "winspool", "cryptui", "comdlg32", "advapi32", "shlwapi",
+                  "shl32ord", "shell32", "rpcrt4", "winmm", "ws2_32", "wspiapi"],
+                 delay=["shell32.dll", "rpcrt4.dll", "usp10.dll", "comdlg32.dll", "winspool.drv", "shlwapi.dll",
+                        "winmm.dll", "ws2_32.dll", "cryptui.dll"])
+
+
+STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "gen": prepare_apilibs,
+         "kexbases": build_kexbases, "kexbasen": build_kexbasen}
 
 
 def main():
@@ -283,13 +378,17 @@ def main():
     ap.add_argument("--only", action="append")
     a = ap.parse_args()
     b = Build(a.sdk.resolve(), a.out.resolve(), a.j)
-    b.case_overlay([ROOT / x for x in ("core", "common", "kexcrt", "apilibs", "sheet", "kexCOM", "auxiliary",
-                                       "kexcontrol", "verify")])
+    mingw_inc = Path((b.sdk / "MINGW_INCLUDE").read_text().strip())
+    TREES = [ROOT / x for x in ("core", "common", "kexcrt", "sheet", "kexCOM", "auxiliary", "kexcontrol", "verify")]
+    TREES += [mingw_inc, mingw_inc.parent / "crt"]  # sources say <RpcProxy.h>, mingw-w64 has rpcproxy.h
+    b.case_overlay(TREES + ([b.gen / "apilibs"] if (b.gen / "apilibs").exists() else []))
     for name, fn in STEPS.items():
         if a.only and name not in a.only:
             continue
-        print(f"== {name}")
+        print(f"== {name}", flush=True)
         fn(b)
+        if name == "gen":
+            b.case_overlay(TREES + [b.gen / "apilibs"])
     print("done")
     return 0
 

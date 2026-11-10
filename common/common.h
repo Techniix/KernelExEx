@@ -27,6 +27,9 @@
 #include <malloc.h>
 #include "kexcoresdk.h"
 #include "k32ord.h"
+#include "asmimp.h"
+
+KEX_ASM_IMPORT(CommonUnimpStub, 0);
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,7 +52,7 @@ size_t lstrlenWnull(LPCWSTR s);
 };
 #endif
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__clang__)
 #define UNIMPL_FUNC(name,params) \
 	__asm__( ".text\n" \
 			 ".globl _" #name "_stub@0\n" \
@@ -64,7 +67,7 @@ size_t lstrlenWnull(LPCWSTR s);
 	{ \
 		__asm xor eax,eax \
 		__asm mov cl, params \
-		__asm jmp dword ptr [CommonUnimpStub] \
+		__asm jmp dword ptr [IMP(CommonUnimpStub)] \
 	}
 #endif
 

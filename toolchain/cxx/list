@@ -9,6 +9,8 @@ template<class T> class list
 	struct node : link { T v; node(const T& x) : v(x) {} };
 public:
 	typedef T value_type;
+	typedef T& reference;
+	typedef const T& const_reference;
 	typedef size_t size_type;
 	class const_iterator;
 	class iterator
@@ -86,6 +88,19 @@ public:
 	void pop_back() { iterator i = end(); erase(--i); }
 	void pop_front() { erase(begin()); }
 	void clear() { while (m_n) erase(begin()); }
+	/* move one element (of this list or another) in front of pos */
+	void splice(iterator pos, list& other, iterator it)
+	{
+		if (pos == it || pos.p == it.p->next) return;
+		it.p->prev->next = it.p->next;
+		it.p->next->prev = it.p->prev;
+		other.m_n--;
+		it.p->next = pos.p;
+		it.p->prev = pos.p->prev;
+		pos.p->prev->next = it.p;
+		pos.p->prev = it.p;
+		m_n++;
+	}
 	void remove(const T& v)
 	{
 		for (iterator i = begin(); i != end(); ) { if (*i == v) i = erase(i); else ++i; }

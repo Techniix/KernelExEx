@@ -21,6 +21,9 @@
  */
 
 #include <windows.h>
+#include "asmimp.h"
+
+KEX_ASM_IMPORT(CallWindowProcA, 20);
 #include "thuni_macro.h"
 #include "thuni_thunk.h"
 #include "thuni_layer.h"
@@ -37,7 +40,7 @@ LRESULT WINAPI CallWindowProcA_fix(WNDPROC lpPrevWndFunc, HWND hWnd,
 __asm {
 	mov ecx, [esp+4] ;lpPrevWndFunc
 	jecxz FAIL
-	jmp dword ptr [CallWindowProcA]
+	jmp dword ptr [IMP(CallWindowProcA)]
 FAIL:
 	xor eax,eax
 	ret 20

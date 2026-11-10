@@ -22,6 +22,9 @@
  */
 
 #include <windows.h>
+#include "asmimp.h"
+
+KEX_ASM_IMPORT(EnterCriticalSection, 4);
 #include "kstructs.h"
 
 /* MAKE_EXPORT DeleteCriticalSection_fix=DeleteCriticalSection */
@@ -48,7 +51,7 @@ __asm {
 	mov eax, [esp+4]
 	cmp byte ptr [eax], WIN98_K32OBJ_CRITICAL_SECTION
 	jnz __error
-	jmp dword ptr [EnterCriticalSection]
+	jmp dword ptr [IMP(EnterCriticalSection)]
 __error:
 	jmp orphaned_cs_handler
 	}

@@ -41,7 +41,7 @@ PVOID WINAPI GetShlwapiProc(int funcnum)
 		if (!hShlwapi)
 			hShlwapi = LoadLibrary("shlwapi.dll");
 	}
-	PVOID proc = kexGetProcAddress(hShlwapi,(LPSTR)funcnum);
+	PVOID proc = (PVOID) kexGetProcAddress(hShlwapi,(LPSTR)funcnum);
 	if (!proc)
 		shlwapi_fatal_error(funcnum);
 	return proc;	

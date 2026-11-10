@@ -65,7 +65,7 @@ BOOL init_tryentercritsec()
 	return FALSE;
 }
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__clang__)
 
 BOOL WINAPI TryEnterCrst(CRIT_SECT* crit);
 

@@ -20,6 +20,13 @@
  */
 
 #include <windows.h>
+#include "asmimp.h"
+
+KEX_ASM_IMPORT(SendMessageA, 16);
+KEX_ASM_IMPORT(IsBadReadPtr, 8);
+KEX_ASM_IMPORT(GetProcessHeap, 0);
+KEX_ASM_IMPORT(HeapAlloc, 12);
+KEX_ASM_IMPORT(HeapFree, 12);
 
 /* MAKE_EXPORT SendMessageA_fix=SendMessageA */
 __declspec(naked)
@@ -32,7 +39,7 @@ __asm {
 	cmp eax, 203 ;EM_SETTABSTOPS
 	jz fix_settabstops
 orig_func:
-	jmp dword ptr [SendMessageA]
+	jmp dword ptr [IMP(SendMessageA)]
 fix_settabstops:
 	mov eax, [esp+12] ;wParam
 	cmp eax, 0
@@ -41,7 +48,7 @@ fix_settabstops:
 	push eax ;HeapAlloc.dwBytes
 	push eax ;cb
 	push dword ptr [esp+16+8]
-	call dword ptr [IsBadReadPtr] ;sanity check: ok to read ?
+	call dword ptr [IMP(IsBadReadPtr)] ;sanity check: ok to read ?
 	test eax, eax
 	jz L2
 	add esp, 4 ;can't read => return failure
@@ -49,9 +56,9 @@ fix_settabstops:
 	ret 16
 L2:
 	push 0
-	call dword ptr [GetProcessHeap]
+	call dword ptr [IMP(GetProcessHeap)]
 	push eax
-	call dword ptr [HeapAlloc]
+	call dword ptr [IMP(HeapAlloc)]
 	test eax, eax
 	jnz L3 ;alloc successful?
 	ret 16
@@ -71,13 +78,13 @@ L3:
 	push dword ptr [esp+12+8]
 	push dword ptr [esp+8+12]
 	push dword ptr [esp+4+16]
-	call dword ptr [SendMessageA]
+	call dword ptr [IMP(SendMessageA)]
 	push eax ;remember result
 	push ebx
 	push 0
-	call dword ptr [GetProcessHeap]
+	call dword ptr [IMP(GetProcessHeap)]
 	push eax
-	call dword ptr [HeapFree]
+	call dword ptr [IMP(HeapFree)]
 	pop eax ;remembered result
 	pop ebx
 	ret 16
