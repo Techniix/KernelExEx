@@ -4,3 +4,5 @@ set -e
 out=${1:-/tmp}
 cc -O2 -Wall -Wextra -o "$out/test_kxpad" "$(dirname "$0")/test_kxpad.c" "$(dirname "$0")/../xinput/kxpad.c"
 "$out/test_kxpad"
+cc -O2 -Wall -Wextra -o "$out/test_x360" "$(dirname "$0")/test_x360.c" "$(dirname "$0")/../kexpad/x360.c"
+"$out/test_x360"

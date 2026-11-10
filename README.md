@@ -186,8 +186,8 @@ list.
 | Root certificate updates | signed updater | planned | to be decided |
 | Protoweb proxy | IE proxy for HTTP and FTP | in installer script | no (decided) |
 | RetroZilla | browser with Protoweb settings | planned | to be decided |
-| XInput | `xinput*.dll` | planned | to be decided |
-| Xbox controller driver | 360 protocol, later One/Series | planned | to be decided |
+| XInput | `xinput1_1`-`1_4`, `xinput9_1_0`, controller database | builds, in installer | to be decided |
+| Xbox controller driver | `kexpad.sys`, 360 protocol (173 pads); later One/Series | builds, in installer; untested on hardware | to be decided |
 | Gamepad Configurator | mapping, test, profiles | planned | to be decided |
 | Per-program mixer | audio API library, mixer, tray icon | planned | to be decided |
 | USB audio driver | headsets and microphones | research | to be decided |
@@ -277,9 +277,12 @@ python3 net/tests/host/run_tests.py ../build/host/test_net
 python3 toolchain/nsis/build_nsis.py --nsis-src ../nsis --scons-src ../scons \
     --sdk ../build/sdk --core-lib ../build/core/lib --work ../build/xmingw --prefix ../build/nsis
 
+# Xbox 360-protocol controller driver (WDM, imports checked against 98 SE)
+python3 toolchain/wdm/build_kexpad.py --out ../build/kexpad --sdk ../build/sdk
+
 # installer
 python3 toolchain/build_installer.py --core ../build/core --net ../build/win9x \
-    --nsis ../build/nsis --out ../build/installer
+    --kexpad ../build/kexpad --nsis ../build/nsis --out ../build/installer
 ```
 
 Design notes for the network modules are in `net/docs/ARCHITECTURE.md`.
@@ -292,6 +295,11 @@ Design notes for the network modules are in `net/docs/ARCHITECTURE.md`.
 | `toolchain/` | Linux build: `build_core.py` (core, API libraries, VxD), `build_installer.py`, minimal C++ library, runtime pieces |
 | `toolchain/vxd/` | VxD headers, PE-to-LE converter, LE dumper and checker |
 | `toolchain/nsis/` | Cross-build of NSIS for Windows 9x installers |
+| `toolchain/wdm/` | WDM driver build: `build_kexpad.py`, import libraries with exact names |
+| `input/xinput/` | XInput DLL and the SDL-format mapping engine (`kxpad.c`) |
+| `input/kexpad/` | HID minidriver for Xbox 360-protocol pads; `gen_inf.py` makes the INF from Linux `xpad` |
+| `input/gamepad/` | Controller database shipped with XInput |
+| `input/tests/` | Host tests for the mapping engine and the 360 report translation |
 | `net/kextls/` | TLS, CSPRNG, trust store |
 | `net/winhttp/`, `net/bcrypt/` | WinHTTP and CNG |
 | `net/kexrt/` | Vista/7 KERNEL32 and WS2_32 additions |

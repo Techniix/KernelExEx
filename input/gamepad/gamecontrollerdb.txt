@@ -1,0 +1,14 @@
+# KernelExEx game controller database (SDL gamecontrollerdb format)
+#
+# KernelExEx's XInput reads this file and user.txt next to it; lines in
+# user.txt win. A controller with no line here gets the default layout:
+#   buttons 0-10 = A B X Y LB RB Back Start LS RS Guide, hat = d-pad,
+#   X/Y = left stick, Z/R = right stick, U/V = left/right trigger.
+# kexpad (Xbox 360 protocol) aims for this layout; the axis order it gets
+# through Windows' HID joystick mapping is still to be checked on hardware.
+#
+# Inputs are numbered as joyGetPosEx reports them: a0-a5 = X Y Z R U V,
+# b0-b31, h0. The GUID is 03000000 + VID (LE) + 0000 + PID (LE) + 000000000000.
+# The platform field must be Windows 9x, or absent.
+#
+# Entries for specific controllers are added as they are tested on 98 SE / ME.

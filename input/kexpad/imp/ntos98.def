@@ -1,0 +1,15 @@
+LIBRARY ntoskrnl.exe
+EXPORTS
+@InterlockedExchange@8
+@IofCallDriver@8
+@IofCompleteRequest@8
+ExAllocatePoolWithTag@12
+ExFreePool@4
+IoAllocateIrp@8
+IoBuildDeviceIoControlRequest@36
+IoFreeIrp@4
+KeInitializeEvent@12
+KeSetEvent@12
+KeWaitForSingleObject@20
+PoCallDriver@8
+PoStartNextPowerIrp@4

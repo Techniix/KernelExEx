@@ -1,0 +1,6 @@
+; Windows 98 SE's usbd.sys exports these two under their decorated names
+; ("_USBD_...Ex@N"); build with toolchain/wdm/implib_exact.py.
+LIBRARY usbd.sys
+EXPORTS
+USBD_CreateConfigurationRequestEx@8
+USBD_ParseConfigurationDescriptorEx@28

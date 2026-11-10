@@ -31,6 +31,7 @@
   !include "UpdateDLL.nsh"
   !include "WinVer.nsh"
   !include "nsDialogs.nsh"
+  !include "WordFunc.nsh"
 
 ;--------------------------------
 ;General
@@ -409,6 +410,51 @@ Section "-Install"
 SectionEnd
 
 ;--------------------------------
+;Optional: game controllers
+
+!define DEVPATH_KEY "Software\Microsoft\Windows\CurrentVersion\Setup"
+
+SectionGroup "Game controllers" SECGAMEPAD
+
+Section "XInput for modern games" SECXINPUT
+  ;xinput1_3.dll on top of the joystick API, with SDL-style mappings
+  SetOutPath "$SYSDIR"
+  File "net-out\xinput1_3.dll"
+  ;one DLL answers to every XInput name games link against
+  File "/oname=xinput1_1.dll" "net-out\xinput1_3.dll"
+  File "/oname=xinput1_2.dll" "net-out\xinput1_3.dll"
+  File "/oname=xinput1_4.dll" "net-out\xinput1_3.dll"
+  File "/oname=xinput9_1_0.dll" "net-out\xinput1_3.dll"
+  WriteRegStr HKLM "Software\KernelEx\Components" "XInput" "1"
+  SetOutPath "$INSTDIR\gamepad"
+  File "input\gamepad\gamecontrollerdb.txt"
+  SetOutPath "$INSTDIR"
+SectionEnd
+
+Section "Xbox 360-protocol USB controller driver" SECKEXPAD
+  ;kexpad.sys and its INF stay together in one folder that is added to
+  ;DevicePath, so Windows finds them when a controller is plugged in.
+  SetOutPath "$INSTDIR\drivers\kexpad"
+  File "input\kexpad\kexpad.sys"
+  File "input\kexpad\kexpad.inf"
+  SetOutPath "$INSTDIR"
+  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+  StrCmp $0 "" 0 +2
+    StrCpy $0 "$WINDIR\INF"
+  ${WordFind} "$0" "$INSTDIR\drivers\kexpad" "E+1{" $1
+  IfErrors 0 kexpad_listed
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexpad"
+  kexpad_listed:
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexPad" "1"
+SectionEnd
+
+SectionGroupEnd
+
+LangString DESC_GAMEPAD ${LANG_ENGLISH} "Support for modern game controllers."
+LangString DESC_XINPUT ${LANG_ENGLISH} "XInput (xinput1_3.dll) for games that need it. Works with any controller Windows sees; layouts follow the SDL controller database."
+LangString DESC_KEXPAD ${LANG_ENGLISH} "Driver for Xbox 360 and compatible USB pads (8BitDo, PowerA, PDP, Hori and others). Windows uses it when you plug one in."
+
+;--------------------------------
 ;Optional: Protoweb proxy (off unless the user ticks it)
 ;Sends plain HTTP and FTP through Protoweb's archive proxy. HTTPS is left
 ;direct, so the TLS stack still reaches the real web. The previous settings
@@ -435,6 +481,9 @@ SectionEnd
 LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain HTTP and FTP go through wayback.protoweb.org:7851; HTTPS stays direct. Your old proxy settings are restored on uninstall."
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SECPROTOWEB} $(DESC_PROTOWEB)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECGAMEPAD} $(DESC_GAMEPAD)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECXINPUT} $(DESC_XINPUT)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXPAD} $(DESC_KEXPAD)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ;--------------------------------
@@ -443,6 +492,28 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
 Section "Uninstall"
 
   SetDetailsView show
+
+  ;Game controllers
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "XInput"
+  StrCmp $0 "1" 0 +7
+    Delete /REBOOTOK "$SYSDIR\xinput1_3.dll"
+    Delete /REBOOTOK "$SYSDIR\xinput1_1.dll"
+    Delete /REBOOTOK "$SYSDIR\xinput1_2.dll"
+    Delete /REBOOTOK "$SYSDIR\xinput1_4.dll"
+    Delete /REBOOTOK "$SYSDIR\xinput9_1_0.dll"
+    Delete "$INSTDIR\gamepad\gamecontrollerdb.txt"
+  RMDir "$INSTDIR\gamepad"
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexPad"
+  StrCmp $0 "1" 0 un_kexpad_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\kexpad" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\kexpad\kexpad.sys"
+    Delete "$INSTDIR\drivers\kexpad\kexpad.inf"
+    RMDir "$INSTDIR\drivers\kexpad"
+    RMDir "$INSTDIR\drivers"
+  un_kexpad_done:
+  DeleteRegKey HKLM "Software\KernelEx\Components"
 
   ;Put back the proxy settings saved before Protoweb was turned on
   ReadRegStr $0 HKLM "Software\KernelEx\ProtowebBackup" "Saved"
