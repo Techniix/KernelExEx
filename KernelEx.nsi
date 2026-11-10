@@ -10,6 +10,18 @@
   !endif
 
 ;--------------------------------
+;KernelEx net modules (clang/lld build): copy beside KernelEx and map the
+;DLL name through KernelEx's KnownDLLs so every process finds it.
+
+!macro NetModule name KEY
+  GetTempFileName $0 "$INSTDIR"
+  File /oname=$0 net-out\${name}.dll
+  Delete "$INSTDIR\${name}.dll"
+  Rename /REBOOTOK $0 "$INSTDIR\${name}.dll"
+  WriteRegStr HKLM "Software\KernelEx\KnownDLLs" "${KEY}" "${KEY}.DLL"
+!macroend
+
+;--------------------------------
 ;Includes
 
   !include "MUI2.nsh"
@@ -326,6 +338,15 @@ Section "Install"
   WriteRegStr HKLM "Software\KernelEx\KnownDLLs" \
     "USERENV" "USERENV.DLL"
   
+  ;KernelEx net: crypto + TLS (kextls), CNG subset (bcrypt), WinHTTP (winhttp)
+  ;built by net/tools/build_win9x.py into net-out\
+  !insertmacro NetModule kextls KEXTLS
+  !insertmacro NetModule bcrypt BCRYPT
+  !insertmacro NetModule winhttp WINHTTP
+  CreateDirectory "$INSTDIR\certs"
+  CreateDirectory "$INSTDIR\certs\local"
+  File /oname=certs\roots.pem net\certs\roots.pem
+  
   SetOverwrite lastused
   
   ExecWait '"$WINDIR\regedit.exe" /s "$INSTDIR\settings.reg"'
@@ -413,6 +434,15 @@ Section "Uninstall"
   DeleteRegValue HKLM "Software\KernelEx\KnownDLLs" "WTSAPI32"
   Delete /REBOOTOK "$INSTDIR\userenv.dll"
   DeleteRegValue HKLM "Software\KernelEx\KnownDLLs" "USERENV"
+  Delete /REBOOTOK "$INSTDIR\kextls.dll"
+  DeleteRegValue HKLM "Software\KernelEx\KnownDLLs" "KEXTLS"
+  Delete /REBOOTOK "$INSTDIR\bcrypt.dll"
+  DeleteRegValue HKLM "Software\KernelEx\KnownDLLs" "BCRYPT"
+  Delete /REBOOTOK "$INSTDIR\winhttp.dll"
+  DeleteRegValue HKLM "Software\KernelEx\KnownDLLs" "WINHTTP"
+  Delete "$INSTDIR\certs\roots.pem"
+  RMDir "$INSTDIR\certs\local"
+  RMDir "$INSTDIR\certs"
   
   File "util\sdbcreate\sdbdb\kexsdb.u.reg"
   ExecWait '"$WINDIR\regedit.exe" /s "$INSTDIR\kexsdb.u.reg"'
