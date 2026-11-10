@@ -71,6 +71,7 @@
   !define MUI_STARTMENUPAGE_REGISTRY_VALUENAME "SMDir"
   !insertmacro MUI_PAGE_STARTMENU Application $StartMenuFolder
 
+  !insertmacro MUI_PAGE_COMPONENTS
   !insertmacro MUI_PAGE_INSTFILES
   Page custom PageDefConfig PageLeaveDefConfig
   !insertmacro MUI_PAGE_FINISH
@@ -155,7 +156,7 @@ FunctionEnd
 ;--------------------------------
 ;Installer Section
 
-Section "MSLU" SECPRODUCT
+Section "-MSLU" SECPRODUCT
 
   !define URL_PRODUCT "http://download.microsoft.com/download/b/7/5/b75eace3-00e2-4aa0-9a6f-0b6882c71642/unicows.exe"
 
@@ -217,7 +218,7 @@ Section "MSLU" SECPRODUCT
 
 SectionEnd
 
-Section "Install"
+Section "-Install"
 
   SetDetailsView show
   
@@ -398,11 +399,55 @@ Section "Install"
 SectionEnd
 
 ;--------------------------------
+;Optional: Protoweb proxy (off unless the user ticks it)
+;Sends plain HTTP and FTP through Protoweb's archive proxy. HTTPS is left
+;direct, so the TLS stack still reaches the real web. The previous settings
+;are saved and put back on uninstall.
+
+!define PW_PROXY "http=wayback.protoweb.org:7851;ftp=wayback.protoweb.org:7851"
+
+Section /o "Use the Protoweb proxy for HTTP and FTP" SECPROTOWEB
+  ReadRegStr $0 HKLM "Software\KernelEx\ProtowebBackup" "Saved"
+  StrCmp $0 "1" pw_saved
+    ReadRegDWORD $1 HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyEnable"
+    ReadRegStr $2 HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyServer"
+    ReadRegStr $3 HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyOverride"
+    WriteRegDWORD HKLM "Software\KernelEx\ProtowebBackup" "ProxyEnable" $1
+    WriteRegStr HKLM "Software\KernelEx\ProtowebBackup" "ProxyServer" $2
+    WriteRegStr HKLM "Software\KernelEx\ProtowebBackup" "ProxyOverride" $3
+    WriteRegStr HKLM "Software\KernelEx\ProtowebBackup" "Saved" "1"
+  pw_saved:
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyEnable" 1
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyServer" "${PW_PROXY}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyOverride" "<local>"
+SectionEnd
+
+LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain HTTP and FTP go through wayback.protoweb.org:7851; HTTPS stays direct. Your old proxy settings are restored on uninstall."
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECPROTOWEB} $(DESC_PROTOWEB)
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
+
+;--------------------------------
 ;Uninstaller Section
 
 Section "Uninstall"
 
   SetDetailsView show
+
+  ;Put back the proxy settings saved before Protoweb was turned on
+  ReadRegStr $0 HKLM "Software\KernelEx\ProtowebBackup" "Saved"
+  StrCmp $0 "1" 0 pw_none
+    ReadRegStr $2 HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyServer"
+    StrCmp $2 "${PW_PROXY}" 0 pw_drop
+      ReadRegDWORD $1 HKLM "Software\KernelEx\ProtowebBackup" "ProxyEnable"
+      ReadRegStr $2 HKLM "Software\KernelEx\ProtowebBackup" "ProxyServer"
+      ReadRegStr $3 HKLM "Software\KernelEx\ProtowebBackup" "ProxyOverride"
+      WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyEnable" $1
+      WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyServer" $2
+      WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyOverride" $3
+    pw_drop:
+    DeleteRegKey HKLM "Software\KernelEx\ProtowebBackup"
+  pw_none:
 
   ;Files to uninstall
   IfFileExists "$WINDIR\SYSBCKUP\KERNEL32.DLL" 0 +5
