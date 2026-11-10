@@ -57,6 +57,15 @@ MODULES = {
         "kill_at": True,
         "def": NET / "winhttp/winhttp.def",
     },
+    # XInput on the Windows 9x joystick API; installed under all XInput DLL names
+    "xinput1_3": {
+        "base": "0x66E00000",
+        "sources": [NET.parent / "input/xinput" / f for f in ("xinput.c", "kxpad.c")],
+        "defines": ["-DKXPAD_W9XRT"],
+        "libs": ["winmm", "user32", "advapi32", "kernel32", "msvcrt"],
+        "kill_at": True,
+        "def": NET.parent / "input/xinput/xinput.def",
+    },
 }
 RT = [NET / "rt/w9xrt.c", NET / "rt/w9xrt_div.c", NET / "rt/chkstk.S"]
 DLLENTRY = NET / "rt/dllentry.c"

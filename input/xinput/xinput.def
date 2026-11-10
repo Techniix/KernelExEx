@@ -1,0 +1,16 @@
+; KernelExEx XInput. Ordinals 100-103 are the unnamed exports of xinput1_3/1_4.
+LIBRARY xinput1_3.dll
+EXPORTS
+  DllMain                          @1
+  XInputGetState                   @2
+  XInputSetState                   @3
+  XInputGetCapabilities            @4
+  XInputEnable                     @5
+  XInputGetDSoundAudioDeviceGuids  @6
+  XInputGetBatteryInformation      @7
+  XInputGetKeystroke               @8
+  XInputGetAudioDeviceIds          @10
+  XInputGetStateEx                 @100 NONAME
+  XInputWaitForGuideButton         @101 NONAME
+  XInputCancelGuideButtonWait      @102 NONAME
+  XInputPowerOffController         @103 NONAME
