@@ -301,9 +301,11 @@ list.
     it also writes USB sticks. It is a separate program (CSMWrap's SeaBIOS
     is LGPLv3, decision 42) with a command line and a simple window.
 
-44. **Our own version numbers** (to decide): KernelExEx releases need a
-    scheme of their own instead of carrying on KernelEx's 4.x numbers, used
-    the same way by the installer, the Properties tab, every driver's
+44. **Our own version numbers** (decided): KernelExEx starts at 1.0.0,
+    semantic versions (1.1.0 adds features, 1.0.1 fixes), crediting
+    KernelEx 4.5.2 as its base instead of carrying on its 4.x numbers.
+    Until 1.0.0 ships, test builds are "1.0.0 test build N". Used the same
+    way by the installer, the Properties tab, every driver's
     `DriverVer`/file version and the test builds.
 45. **Logo** (planned): an original KernelExEx logo, shown in the
     installer (welcome and finish pages, header, icon) and at the top of
