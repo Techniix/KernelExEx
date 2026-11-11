@@ -146,6 +146,8 @@ typedef struct kexnet_adapter
 #define FROM_DISPATCH(old) do { if (old < DISPATCH_LEVEL) KeLowerIrql(old); } while (0)
 
 static const struct kexnet_driver *the_driver;
+static kexbsd_worker *shared_worker;
+void obsd_set_systq_worker(kexbsd_worker *w);
 static KEXNET_ADAPTER *adapters[MAX_ADAPTERS];
 static KEXNET_ADAPTER *attaching;   /* during match/attach: timeouts and interrupts belong here */
 static struct obsd_dma_tag
@@ -668,33 +670,321 @@ int obsd_ifiq_input(struct ifiqueue *ifiq, struct mbuf_list *ml)
 }
 
 /* ---- ifmedia ---------------------------------------------------------------------- */
-void obsd_ifmedia_init(struct ifmedia *ifm, uint64_t dontcare, int (*change)(struct ifnet *),
-                       void (*status)(struct ifnet *, struct ifmediareq *))
+void obsd_ifmedia_init(struct ifmedia *ifm, uint64_t dontcare, ifm_change_cb_t change, ifm_stat_cb_t status)
 {
 	memset(ifm, 0, sizeof(*ifm));
+	TAILQ_INIT(&ifm->ifm_list);
 	ifm->ifm_mask = dontcare;
-	ifm->ifm_change = change;
-	ifm->ifm_status = status;
+	ifm->ifm_change_cb = change;
+	ifm->ifm_status_cb = status;
 }
 
 void obsd_ifmedia_add(struct ifmedia *ifm, uint64_t mword, int data, void *aux)
 {
-	if (ifm->ifm_count < IFMEDIA_MAX)
-	{
-		ifm->ifm_list[ifm->ifm_count].ifm_media = mword;
-		ifm->ifm_list[ifm->ifm_count].ifm_data = (unsigned int) data;
-		ifm->ifm_list[ifm->ifm_count].ifm_aux = aux;
-		ifm->ifm_count++;
-	}
+	struct ifmedia_entry *e = (struct ifmedia_entry *) kexbsd_malloc(sizeof(*e), M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (!e)
+		return;
+	e->ifm_media = mword;
+	e->ifm_data = (unsigned int) data;
+	e->ifm_aux = aux;
+	TAILQ_INSERT_TAIL(&ifm->ifm_list, e, ifm_list);
+	ifm->ifm_nwords++;
+}
+
+static struct ifmedia_entry *ifmedia_find(struct ifmedia *ifm, uint64_t target, uint64_t mask)
+{
+	struct ifmedia_entry *e;
+	TAILQ_FOREACH(e, &ifm->ifm_list, ifm_list)
+		if ((e->ifm_media & ~mask) == (target & ~mask))
+			return e;
+	return NULL;
 }
 
 void obsd_ifmedia_set(struct ifmedia *ifm, uint64_t mword)
 {
-	int i;
+	struct ifmedia_entry *e = ifmedia_find(ifm, mword, ifm->ifm_mask);
 	ifm->ifm_media = mword;
-	for (i = 0; i < ifm->ifm_count; i++)
-		if (ifm->ifm_list[i].ifm_media == mword)
-			ifm->ifm_cur = &ifm->ifm_list[i];
+	if (!e)
+	{
+		obsd_ifmedia_add(ifm, mword, 0, NULL);   /* as OpenBSD does: never leave ifm_cur NULL */
+		e = TAILQ_LAST(&ifm->ifm_list, ifmedia_list);
+	}
+	ifm->ifm_cur = e;
+}
+
+int obsd_ifmedia_match(struct ifmedia *ifm, uint64_t target, uint64_t mask)
+{
+	return ifmedia_find(ifm, target, mask) != NULL;
+}
+
+void obsd_ifmedia_delete_instance(struct ifmedia *ifm, uint64_t inst)
+{
+	struct ifmedia_entry *e, *n;
+	for (e = TAILQ_FIRST(&ifm->ifm_list); e; e = n)
+	{
+		n = TAILQ_NEXT(e, ifm_list);
+		if (inst == IFM_INST_ANY || inst == IFM_INST(e->ifm_media))
+		{
+			TAILQ_REMOVE(&ifm->ifm_list, e, ifm_list);
+			ifm->ifm_nwords--;
+			if (ifm->ifm_cur == e)
+				ifm->ifm_cur = NULL;
+			kexbsd_free(e, M_DEVBUF);
+		}
+	}
+}
+
+/* bit/s for the media words net80211 and em use */
+uint64_t obsd_ifmedia_baudrate(uint64_t w)
+{
+	uint64_t sub = IFM_SUBTYPE(w);
+	if (IFM_TYPE(w) == IFM_ETHER)
+		switch (sub)
+		{
+		case IFM_10_T:
+			return IF_Mbps(10);
+		case IFM_100_TX:
+			return IF_Mbps(100);
+		case IFM_1000_T:
+		case IFM_1000_SX:
+		case IFM_1000_LX:
+			return IF_Mbps(1000);
+		default:
+			return 0;
+		}
+	if (IFM_TYPE(w) == IFM_IEEE80211)
+	{
+		static const uint32_t kbps[] = { [IFM_IEEE80211_DS1] = 1000, [IFM_IEEE80211_DS2] = 2000,
+		                                 [IFM_IEEE80211_DS5] = 5500, [IFM_IEEE80211_DS11] = 11000,
+		                                 [IFM_IEEE80211_DS22] = 22000, [IFM_IEEE80211_OFDM6] = 6000,
+		                                 [IFM_IEEE80211_OFDM9] = 9000, [IFM_IEEE80211_OFDM12] = 12000,
+		                                 [IFM_IEEE80211_OFDM18] = 18000, [IFM_IEEE80211_OFDM24] = 24000,
+		                                 [IFM_IEEE80211_OFDM36] = 36000, [IFM_IEEE80211_OFDM48] = 48000,
+		                                 [IFM_IEEE80211_OFDM54] = 54000, [IFM_IEEE80211_OFDM72] = 72000 };
+		if (sub < nitems(kbps))
+			return IF_Kbps(kbps[sub]);
+		/* HT: a nominal 65 Mbit/s per stream for MCS 0-7 groups; NDIS only shows it */
+		if (sub >= IFM_IEEE80211_HT_MCS0 && sub <= IFM_IEEE80211_HT_MCS76)
+			return IF_Mbps(65) * (1 + (sub - IFM_IEEE80211_HT_MCS0) / 8);
+		if (sub >= IFM_IEEE80211_VHT_MCS0 && sub <= IFM_IEEE80211_HE_MCS11)
+			return IF_Mbps(433);
+	}
+	return 0;
+}
+
+/* ---- more mbuf(9), for net80211 --------------------------------------------------- */
+int obsd_m_dup_pkthdr(struct mbuf *to, struct mbuf *from, int how)
+{
+	(void) how;
+	to->m_flags = (to->m_flags & M_EXT) | (from->m_flags & ~M_EXT);
+	to->m_pkthdr = from->m_pkthdr;
+	if (!(to->m_flags & M_EXT))
+		to->m_data = to->m_dat;
+	return 0;
+}
+
+/* make the first len bytes contiguous in the first mbuf */
+struct mbuf *obsd_m_pullup(struct mbuf *m, int len)
+{
+	struct mbuf *n;
+	caddr_t data;
+	void *p;
+	int total, have;
+	if ((int) m->m_len >= len)
+		return m;
+	total = (m->m_flags & M_PKTHDR) ? m->m_pkthdr.len : len;
+	if (total < len)
+	{
+		obsd_m_freem(m);
+		return NULL;
+	}
+	if ((int) M_TRAILINGSPACE(m) + (int) m->m_len >= len)
+	{
+		data = m->m_data;
+	}
+	else
+	{
+		p = kexbsd_malloc(len + MCLBYTES, M_DEVBUF, M_NOWAIT);
+		if (!p)
+		{
+			obsd_m_freem(m);
+			return NULL;
+		}
+		data = (caddr_t) (((ULONG_PTR) p + MCLBYTES - 1) & ~(ULONG_PTR) (MCLBYTES - 1));
+		memcpy(data, m->m_data, m->m_len);
+		if (m->m_alloc)
+			kexbsd_free(m->m_alloc, M_DEVBUF);
+		m->m_alloc = p;
+		m->m_buf = m->m_data = data;
+		m->m_bufsize = len;
+		m->m_flags |= M_EXT;
+	}
+	have = m->m_len;
+	while (have < len && (n = m->m_next) != NULL)
+	{
+		int c = len - have < (int) n->m_len ? len - have : (int) n->m_len;
+		memcpy(data + have, n->m_data, c);
+		have += c;
+		n->m_data += c;
+		n->m_len -= c;
+		if (!n->m_len)
+			m->m_next = obsd_m_free(n);
+	}
+	m->m_len = have;
+	return m;
+}
+
+struct mbuf *obsd_m_prepend(struct mbuf *m, int len, int how)
+{
+	struct mbuf *n;
+	if ((int) M_LEADINGSPACE(m) >= len)
+	{
+		m->m_data -= len;
+		m->m_len += len;
+		if (m->m_flags & M_PKTHDR)
+			m->m_pkthdr.len += len;
+		return m;
+	}
+	n = obsd_m_clget(NULL, how, len < MHLEN ? MHLEN : len);
+	if (!n)
+	{
+		obsd_m_freem(m);
+		return NULL;
+	}
+	obsd_m_dup_pkthdr(n, m, how);
+	m->m_flags &= ~M_PKTHDR;
+	n->m_data = n->m_buf + n->m_bufsize - len;
+	n->m_len = len;
+	n->m_next = m;
+	n->m_pkthdr.len += len;
+	return n;
+}
+
+void obsd_m_align(struct mbuf *m, int len)
+{
+	m->m_data = m->m_buf + ((m->m_bufsize - len) & ~(sizeof(long) - 1));
+}
+
+struct mbuf *obsd_m_dup_pkt(struct mbuf *m, unsigned int adj, int how)
+{
+	int len = m->m_pkthdr.len;
+	struct mbuf *n = obsd_m_clget(NULL, how, len + adj);
+	if (!n)
+		return NULL;
+	obsd_m_dup_pkthdr(n, m, how);
+	n->m_data += adj;
+	obsd_m_copydata(m, 0, len, n->m_data);
+	n->m_len = n->m_pkthdr.len = len;
+	return n;
+}
+
+struct mbuf *obsd_m_split(struct mbuf *m, int len, int how)
+{
+	int total = m->m_pkthdr.len;
+	struct mbuf *n;
+	if (len > total)
+		return NULL;
+	n = obsd_m_clget(NULL, how, total - len ? total - len : 1);
+	if (!n)
+		return NULL;
+	obsd_m_copydata(m, len, total - len, n->m_data);
+	n->m_len = n->m_pkthdr.len = total - len;
+	obsd_m_adj(m, -(total - len));
+	return n;
+}
+
+void obsd_m_cat(struct mbuf *m, struct mbuf *n)
+{
+	while (m->m_next)
+		m = m->m_next;
+	m->m_next = n;
+}
+
+void obsd_mq_init(struct mbuf_queue *mq, unsigned int maxlen)
+{
+	memset(mq, 0, sizeof(*mq));
+	mtx_init(&mq->mq_mtx, IPL_NET);
+	mq->mq_maxlen = maxlen;
+}
+
+int obsd_mq_enqueue(struct mbuf_queue *mq, struct mbuf *m)
+{
+	int dropped = 0;
+	if (!mq->mq_mtx.m.name)
+		mtx_init(&mq->mq_mtx, IPL_NET);   /* MBUF_QUEUE_INITIALIZER leaves it unset */
+	mtx_enter(&mq->mq_mtx);
+	if (mq_len(mq) < mq->mq_maxlen)
+		ml_enqueue(&mq->mq_list, m);
+	else
+	{
+		mq->mq_drops++;
+		dropped = 1;
+	}
+	mtx_leave(&mq->mq_mtx);
+	if (dropped)
+		obsd_m_freem(m);
+	return dropped;
+}
+
+struct mbuf *obsd_mq_dequeue(struct mbuf_queue *mq)
+{
+	struct mbuf *m;
+	if (!mq->mq_mtx.m.name)
+		return ml_dequeue(&mq->mq_list);
+	mtx_enter(&mq->mq_mtx);
+	m = ml_dequeue(&mq->mq_list);
+	mtx_leave(&mq->mq_mtx);
+	return m;
+}
+
+unsigned int obsd_mq_purge(struct mbuf_queue *mq)
+{
+	unsigned int n = 0;
+	struct mbuf *m;
+	while ((m = obsd_mq_dequeue(mq)) != NULL)
+	{
+		obsd_m_freem(m);
+		n++;
+	}
+	return n;
+}
+
+/* ---- ifnet output ------------------------------------------------------------------ */
+void if_start(struct ifnet *ifp)
+{
+	if (ifp->if_qstart)
+		ifp->if_qstart(&ifp->if_snd);
+	else if (ifp->if_start)
+		ifp->if_start(ifp);
+}
+
+int obsd_if_enqueue(struct ifnet *ifp, struct mbuf *m)
+{
+	int e = ifq_enqueue(&ifp->if_snd, m);
+	if (!e)
+		if_start(ifp);
+	return e;
+}
+
+int obsd_ether_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst, struct rtentry *rt)
+{
+	(void) dst;
+	(void) rt;
+	return obsd_if_enqueue(ifp, m);   /* frames from NDIS are already Ethernet */
+}
+
+int obsd_ether_addmulti(struct ifreq *ifr, struct arpcom *ac)
+{
+	(void) ifr;
+	(void) ac;
+	return ENETRESET;   /* the list itself comes from NDIS (OID_802_3_MULTICAST_LIST) */
+}
+
+int obsd_ether_delmulti(struct ifreq *ifr, struct arpcom *ac)
+{
+	(void) ifr;
+	(void) ac;
+	return ENETRESET;
 }
 
 /* ---- NDIS entry points --------------------------------------------------------------- */
@@ -853,7 +1143,14 @@ static NDIS_STATUS NTAPI mp_initialize(PNDIS_STATUS open_err, PUINT medium_index
 		PNDIS_MINIPORT_BLOCK blk = (PNDIS_MINIPORT_BLOCK) handle;
 		NdisMSetAttributesEx(handle, a, 0, 0, NdisInterfaceInternal);
 		a->sc = (struct device *) kexbsd_malloc(drv->softc_size, M_DEVBUF, M_NOWAIT | M_ZERO);
-		a->worker = kexbsd_worker_create(drv->name);
+		/* one thread for every adapter of this driver binary, and net80211's
+		 * systq: the whole driver is serialized on it */
+		if (!shared_worker)
+		{
+			shared_worker = kexbsd_worker_create(drv->name);
+			obsd_set_systq_worker(shared_worker);
+		}
+		a->worker = shared_worker;
 		if (!a->sc || !a->worker || !blk->NextDeviceObject)
 			goto fail;
 		kexbsd_snprintf(a->sc->dv_xname, sizeof(a->sc->dv_xname), "%s%d", drv->name, slot);
@@ -1000,8 +1297,7 @@ fail:
 			kexbsd_free(a->sc, M_DEVBUF);
 		if (a->dev)
 			kexbsd_device_destroy(a->dev);
-		if (a->worker)
-			kexbsd_worker_destroy(a->worker);
+
 		kexbsd_free(a, M_DEVBUF);
 	}
 	return NDIS_STATUS_ADAPTER_NOT_FOUND;

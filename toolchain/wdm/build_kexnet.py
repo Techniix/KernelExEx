@@ -40,13 +40,17 @@ def main():
     em = SRC / "em" / "dev" / "pci"
     rt = wdm.ROOT / "net/rt/w9xrt_div.c"
     tables = {"kexbsd.sys": wdm.exports_of(bsdout / "kexbsd.sys")}
+    USBLIB = [SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", BSD / "lib" / "obsd_kern.c", rt]
+    WIFI = USBLIB + sorted((SRC / "wifi" / "net80211").glob("*.c")) + sorted((SRC / "wifi" / "crypto").glob("*.c")) \
+        + [SRC / "wifi" / "kex80211_rand.c", BSD / "lib" / "subr_tree.c"]
     drivers = {
         # obsd_usb.c in every driver: the glue (obsd_net.c) serves PCI and USB drivers
-        "kexem": ([SRC / "kexem.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", em / "if_em.c", em / "if_em_hw.c", rt],
+        "kexem": ([SRC / "kexem.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", BSD / "lib" / "obsd_kern.c", em / "if_em.c", em / "if_em_hw.c", rt],
                   ["-I", str(SRC / "em")]),
-        "kexrndis": ([SRC / "kexrndis.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c",
-                      SRC / "urndis" / "dev" / "usb" / "if_urndis.c", rt], ["-I", str(SRC / "urndis")]),
-        "kexcdce": ([SRC / "cdce" / "kexcdce.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", rt], ["-I", str(SRC)]),
+        "kexrndis": ([SRC / "kexrndis.c", SRC / "urndis" / "dev" / "usb" / "if_urndis.c"] + USBLIB, ["-I", str(SRC / "urndis")]),
+        "kexcdce": ([SRC / "cdce" / "kexcdce.c"] + USBLIB, ["-I", str(SRC)]),
+        # the wireless stack alone, to prove it links (never installed)
+        "kexwlan_linktest": ([SRC / "wifi" / "kexwlan_linktest.c"] + WIFI, ["-I", str(SRC / "wifi"), "-I", str(SRC)]),
     }
     for name, (srcs, inc) in drivers.items():
         dout = out / name

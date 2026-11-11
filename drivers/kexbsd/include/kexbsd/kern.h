@@ -161,7 +161,17 @@ KEXBSD_API int callout_drain(struct callout *c);
 #define callout_active(c) ((c)->active != 0)
 #define callout_deactivate(c) ((c)->active = 0)
 
+/* ---- work items for kexbsd worker threads (kexbsd/kexusb.h) ---------------- */
+struct kexbsd_work
+{
+	struct kexbsd_work *next;
+	void (*fn)(void *);
+	void *arg;
+	volatile int queued;
+};
+
 /* ---- taskqueue(9) ------------------------------------------------------ */
+#ifndef KEXBSD_OPENBSD   /* OpenBSD's task(9) has its own struct task (obsd/kexobsd.h) */
 typedef void task_fn_t(void *context, int pending);
 
 struct task
@@ -196,6 +206,7 @@ KEXBSD_API void taskqueue_thread_enqueue(void *context);
 KEXBSD_API extern struct taskqueue *taskqueue_thread;
 KEXBSD_API extern struct taskqueue *taskqueue_swi;
 #define taskqueue_create_fast taskqueue_create
+#endif /* KEXBSD_OPENBSD */
 
 /* ---- time --------------------------------------------------------------- */
 struct timeval

@@ -74,3 +74,49 @@ groundwork, and xHCI for modern boards); PCI/PCIe cards do not.
 4. PCI `athn(4)`, then `urtwn(4)` and `iwm(4)`.
 5. Option 1 (wpa_supplicant over vendor drivers) as an extra for cards we
    do not cover.
+
+
+## Port status (2026-11-11)
+
+**Stack:** OpenBSD net80211 (master) and the crypto it needs (sha1, sha2,
+hmac, md5, aes, rijndael, arc4, key_wrap, cmac, michael) are vendored in
+`drivers/kexnet/wifi/`, unmodified, and compile and link into a 98 SE
+driver (`kexwlan_linktest.sys`, 198 KB, imports only kexbsd/ntoskrnl/ndis/
+hal). Licences: net80211 ISC / 2-clause BSD; crypto public domain, ISC,
+MIT-style (aes.c, Thomas Pornin) or 3-clause BSD (sha2). OpenBSD's
+`net/if_media.h` is 4-clause (Stone/Thorpe), so the IEEE 802.11 media words
+are our own definitions (kexobsd_net.h); nothing outside the driver
+depends on their values.
+
+**What net80211 gives:** scanning, association, WPA/WPA2-PSK with the
+EAPOL 4-way and group handshakes in the kernel (no supplicant needed for
+home networks), CCMP/TKIP, rate control (AMRR, RA for 11n), and 802.11 to
+Ethernet conversion, so NDIS sees an ordinary Ethernet adapter through the
+existing glue.
+
+**Kernel randomness:** 98 has no kernel RNG, and WPA nonces must be
+unpredictable: `wifi/kex80211_rand.c` is a SHA-256 hash DRBG seeded from
+RDSEED/RDRAND when present, TSC jitter across 64 timer ticks, system time
+and the performance counter, stirred on every request, state forwarded
+after every request.
+
+**Configuration (next):** network name and passphrase as the adapter's
+Advanced properties first (NDIS params read at initialize; PSK from the
+passphrase with PBKDF2-HMAC-SHA1 in the driver, as `ifconfig` does on
+OpenBSD), then a Control Panel applet with a scan list, writing the same
+values and asking the driver to reassociate (private OID).
+
+**Radio drivers (ISC, all by or derived from Damien Bergamini):**
+
+| Driver | Chips | Typical adapters | Firmware |
+|---|---|---|---|
+| urtwn + ic/rtwn | RTL8188CUS/CE, RTL8188EU, RTL8192CU | most cheap "nano" dongles (pre-2018), TP-Link TL-WN725N v2/v3 | Realtek blobs, redistributable binary |
+| run | RT2870, RT3070/3071/3072, RT5370/5372 | many 2009-2016 dongles, popular in retro setups | rt2870.bin / rt3070, Ralink/MediaTek redistributable |
+| athn (USB) | AR9271, AR7010+AR9280 | TP-Link TL-WN722N v1, Alfa AWUS036NHA | open-ath9k-htc-firmware: open source (ClearBSD/ISC) |
+| rsu | RTL8188SU/8191SU/8192SU | older Realtek | Realtek blob |
+| otus | AR9170 | old Netgear WNDA3100 | Atheros, redistributable |
+
+Firmware is shipped as separate files next to the driver (mere
+aggregation, as linux-firmware is), and is only what each vendor allows
+redistributing. None of this can be tested in QEMU (no emulated USB
+Wi-Fi); it needs real adapters.

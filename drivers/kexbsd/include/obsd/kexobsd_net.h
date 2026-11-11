@@ -12,19 +12,9 @@
 
 #include "obsd/kexobsd.h"
 
-/* ---- queue(3) subset ------------------------------------------------------------- */
-#define LIST_HEAD(name, type) struct name { struct type *lh_first; }
-#define LIST_ENTRY(type) struct { struct type *le_next; struct type **le_prev; }
-#define LIST_FIRST(h) ((h)->lh_first)
-#define LIST_NEXT(e, f) ((e)->f.le_next)
-#define LIST_INIT(h) ((h)->lh_first = NULL)
-#define LIST_FOREACH(v, h, f) for ((v) = LIST_FIRST(h); (v); (v) = LIST_NEXT(v, f))
-#define TAILQ_HEAD(name, type) struct name { struct type *tqh_first; struct type **tqh_last; }
-#define TAILQ_ENTRY(type) struct { struct type *tqe_next; struct type **tqe_prev; }
-#define TAILQ_FIRST(h) ((h)->tqh_first)
-#define TAILQ_NEXT(e, f) ((e)->f.tqe_next)
-#define TAILQ_FOREACH(v, h, f) for ((v) = TAILQ_FIRST(h); (v); (v) = TAILQ_NEXT(v, f))
-#define TAILQ_INIT(h) do { (h)->tqh_first = NULL; (h)->tqh_last = &(h)->tqh_first; } while (0)
+#undef SLIST_ENTRY   /* the Windows type; OpenBSD code means the queue(3) macro */
+#include "sys/queue.h"
+#include "sys/ioctl.h"
 
 /* ---- mbuf(9) -------------------------------------------------------------------- */
 #define MSIZE 256
@@ -39,9 +29,16 @@ struct pkthdr
 	uint16_t ether_vtag;
 	uint16_t ph_mss;
 	uint16_t ph_flowid;
+	void *ph_cookie;
 	uint8_t ph_loopcnt;
 	unsigned int ph_rtableid;
 	unsigned int ph_ifidx;
+};
+
+struct m_ext
+{
+	caddr_t ext_buf;
+	unsigned int ext_size;
 };
 
 struct mbuf
@@ -51,12 +48,14 @@ struct mbuf
 	caddr_t m_data;
 	unsigned int m_len;
 	int m_flags;
+	int m_type;
 	struct pkthdr m_pkthdr;
-	caddr_t m_buf;          /* start of the storage */
-	unsigned int m_bufsize;
+	struct m_ext m_ext;     /* storage: m_dat, or the cluster when M_EXT */
 	void *m_alloc;          /* what to free */
 	char m_dat[MHLEN];
 };
+#define m_buf m_ext.ext_buf
+#define m_bufsize m_ext.ext_size
 
 #define M_EXT 0x0001
 #define M_PKTHDR 0x0002
@@ -87,6 +86,12 @@ struct mbuf
 #define M_FLOWID 0x4000
 
 #define MT_DATA 1
+#define MT_CONTROL 6
+#define MINCLSIZE (MHLEN + 1)
+#define M_COPYALL 1000000000
+#define M_DATABUF(m) ((m)->m_buf)
+#define M_SIZE(m) ((m)->m_bufsize)
+#define M_READONLY(m) 0
 #define mtod(m, t) ((t) ((m)->m_data))
 #define M_LEADINGSPACE(m) ((unsigned int) ((m)->m_data - (m)->m_buf))
 #define M_TRAILINGSPACE(m) ((m)->m_bufsize - M_LEADINGSPACE(m) - (m)->m_len)
@@ -110,6 +115,33 @@ struct mbuf *obsd_m_devget(const char *buf, int len, int off);
 #define m_defrag(m, how) obsd_m_defrag((m), (how))
 #define m_copydata(m, o, l, c) obsd_m_copydata((m), (o), (l), (c))
 #define m_devget(b, l, o) obsd_m_devget((b), (l), (o))
+int obsd_m_dup_pkthdr(struct mbuf *to, struct mbuf *from, int how);
+struct mbuf *obsd_m_pullup(struct mbuf *m, int len);
+struct mbuf *obsd_m_prepend(struct mbuf *m, int len, int how);
+void obsd_m_align(struct mbuf *m, int len);
+struct mbuf *obsd_m_dup_pkt(struct mbuf *m, unsigned int adj, int how);
+struct mbuf *obsd_m_split(struct mbuf *m, int len, int how);
+void obsd_m_cat(struct mbuf *m, struct mbuf *n);
+#define m_dup_pkthdr(t, f, h) obsd_m_dup_pkthdr((t), (f), (h))
+#define m_pullup(m, l) obsd_m_pullup((m), (l))
+#define M_PREPEND(m, l, h) ((m) = obsd_m_prepend((m), (l), (h)))
+#define m_prepend(m, l, h) obsd_m_prepend((m), (l), (h))
+#define m_align(m, l) obsd_m_align((m), (l))
+#define m_dup_pkt(m, a, h) obsd_m_dup_pkt((m), (a), (h))
+#define m_split(m, l, h) obsd_m_split((m), (l), (h))
+#define m_cat(m, n) obsd_m_cat((m), (n))
+#define m_leadingspace(m) M_LEADINGSPACE(m)
+#define m_trailingspace(m) M_TRAILINGSPACE(m)
+#define m_tag_find(m, t, p) ((struct m_tag *) NULL)
+#define m_tag_get(t, l, h) ((struct m_tag *) NULL)
+#define m_tag_delete(m, t) ((void) 0)
+struct m_tag
+{
+	int m_tag_id;
+	int m_tag_len;
+};
+#define PACKET_TAG_DLT 0x0100
+
 
 /* the network glue loads a chain into a map */
 int obsd_bus_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *m, int flags);
@@ -160,6 +192,29 @@ static __inline__ unsigned int ml_purge(struct mbuf_list *ml)
 	return n;
 }
 
+/* mbuf_queue: a locked mbuf_list */
+struct mbuf_queue
+{
+	struct mutex mq_mtx;
+	struct mbuf_list mq_list;
+	unsigned int mq_maxlen;
+	unsigned int mq_drops;
+};
+#define MBUF_QUEUE_INITIALIZER(len, ipl) { { { 0 } }, MBUF_LIST_INITIALIZER(), (len), 0 }
+void obsd_mq_init(struct mbuf_queue *mq, unsigned int maxlen);
+int obsd_mq_enqueue(struct mbuf_queue *mq, struct mbuf *m);
+struct mbuf *obsd_mq_dequeue(struct mbuf_queue *mq);
+unsigned int obsd_mq_purge(struct mbuf_queue *mq);
+#define mq_init(mq, len, ipl) obsd_mq_init((mq), (len))
+#define mq_enqueue(mq, m) obsd_mq_enqueue((mq), (m))
+#define mq_dequeue(mq) obsd_mq_dequeue(mq)
+#define mq_purge(mq) obsd_mq_purge(mq)
+#define mq_len(mq) ((mq)->mq_list.ml_len)
+#define mq_empty(mq) (mq_len(mq) == 0)
+#define mq_full(mq) (mq_len(mq) >= (mq)->mq_maxlen)
+#define mq_drops(mq) ((mq)->mq_drops)
+#define IFQ_MAXLEN 256
+
 /* ---- Ethernet ---------------------------------------------------------------------- */
 #define ETHER_ADDR_LEN 6
 #define ETHER_TYPE_LEN 2
@@ -175,6 +230,15 @@ static __inline__ unsigned int ml_purge(struct mbuf_list *ml)
 #define ETHERTYPE_IP 0x0800
 #define ETHERTYPE_IPV6 0x86DD
 #define ETHERTYPE_VLAN 0x8100
+#define ETHERTYPE_EAPOL 0x888E
+#define ETHERTYPE_PAE ETHERTYPE_EAPOL
+#define ETHERTYPE_ARP 0x0806
+#define ETHERTYPE_QINQ 0x88A8
+extern const uint8_t etherbroadcastaddr[ETHER_ADDR_LEN];
+extern const uint8_t etheranyaddr[ETHER_ADDR_LEN];
+uint32_t ether_crc32_le_update(uint32_t crc, const uint8_t *buf, size_t len);
+uint32_t ether_crc32_le(const uint8_t *buf, size_t len);
+uint32_t ether_crc32_be(const uint8_t *buf, size_t len);
 #define ETHER_IS_MULTICAST(a) (*(a) & 0x01)
 #define ETHER_IS_BROADCAST(a) (((a)[0] & (a)[1] & (a)[2] & (a)[3] & (a)[4] & (a)[5]) == 0xff)
 #define ETHER_IS_EQ(a, b) (memcmp((a), (b), ETHER_ADDR_LEN) == 0)
@@ -358,6 +422,8 @@ struct if_sffpage
 #define IFSFF_ADDR_DDM 0xa2
 
 struct ifmediareq;
+struct sockaddr;
+struct rtentry;
 struct ifnet
 {
 	void *if_softc;
@@ -374,10 +440,18 @@ struct ifnet
 	struct ifqueue if_snd;
 	struct ifiqueue if_rcv;
 	int (*if_ioctl)(struct ifnet *, u_long, caddr_t);
+	int (*if_output)(struct ifnet *, struct mbuf *, struct sockaddr *, struct rtentry *);
+	unsigned int if_index;
+	int if_type;
+	unsigned char if_addrlen, if_hdrlen;
+	unsigned short if_rtlabelid;
+	void *if_l2com;
 	void (*if_qstart)(struct ifqueue *);
 	void (*if_start)(struct ifnet *);
 	void (*if_watchdog)(struct ifnet *);
 	uint64_t if_ipackets, if_opackets, if_ierrors, if_oerrors, if_collisions, if_iqdrops;
+	uint64_t if_ibytes, if_obytes, if_imcasts, if_omcasts;
+	int if_priority;
 	struct
 	{
 		uint64_t ifi_ipackets, ifi_opackets, ifi_ierrors, ifi_oerrors, ifi_collisions, ifi_iqdrops;
@@ -422,7 +496,41 @@ void obsd_if_link_state_change(struct ifnet *ifp);
 int obsd_ifiq_input(struct ifiqueue *ifiq, struct mbuf_list *ml);
 void obsd_ifq_clr_oactive(struct ifqueue *ifq);
 int obsd_ether_ioctl(struct ifnet *ifp, struct arpcom *ac, u_long cmd, caddr_t data);
+/* a function, as in OpenBSD: a macro would also rewrite ifp->if_start(ifp) */
+void if_start(struct ifnet *ifp);
 #define if_attach(ifp) obsd_if_attach(ifp)
+#define IF_WIRELESS_DEFAULT_PRIORITY 4
+#define if_addgroup(ifp, g) 0
+#define if_deactivate(ifp) ((void) 0)
+#define rtm_80211info(ifp, d) ((void) 0)
+struct if_ieee80211_data
+{
+	uint8_t ifie_channel;
+	uint8_t ifie_nwid_len;
+	uint8_t ifie_nwid[32];
+	uint8_t ifie_addr[6];
+	uint32_t ifie_flags;
+	uint32_t ifie_xflags;
+};
+int obsd_if_enqueue(struct ifnet *ifp, struct mbuf *m);
+#define if_enqueue(ifp, m) obsd_if_enqueue((ifp), (m))
+static __inline__ int ifq_enqueue(struct ifqueue *ifq, struct mbuf *m)
+{
+	if (ml_len(&ifq->ifq_ml) >= ifq->ifq_maxlen)
+	{
+		ifq->ifq_qdrops++;
+		obsd_m_freem(m);
+		return ENOBUFS;
+	}
+	ml_enqueue(&ifq->ifq_ml, m);
+	return 0;
+}
+int obsd_ether_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst, struct rtentry *rt);
+#define ether_output(ifp, m, d, rt) obsd_ether_output((ifp), (m), (d), (rt))
+int obsd_ether_addmulti(struct ifreq *ifr, struct arpcom *ac);
+int obsd_ether_delmulti(struct ifreq *ifr, struct arpcom *ac);
+#define ether_addmulti(ifr, ac) obsd_ether_addmulti((ifr), (ac))
+#define ether_delmulti(ifr, ac) obsd_ether_delmulti((ifr), (ac))
 #define ether_ifattach(ifp) obsd_ether_ifattach(ifp)
 #define if_detach(ifp) obsd_if_detach(ifp)
 #define ether_ifdetach(ifp) ((void) 0)
@@ -498,22 +606,67 @@ int obsd_ether_ioctl(struct ifnet *ifp, struct arpcom *ac, u_long cmd, caddr_t d
 #define IFM_INST(x) (((x) & IFM_IMASK) >> 56)
 #define IFM_OPTIONS(x) ((x) & (IFM_OMASK | IFM_GMASK))
 
+/* IEEE 802.11 media words. KernelExEx's own values (no ABI outside the
+ * driver binary depends on them); subtypes are laid out so the MCS words
+ * are ranges, as net80211 assumes. */
+#define IFM_IEEE80211 0x00000400
+#define IFM_IEEE80211_FH1 3
+#define IFM_IEEE80211_FH2 4
+#define IFM_IEEE80211_DS1 5
+#define IFM_IEEE80211_DS2 6
+#define IFM_IEEE80211_DS5 7
+#define IFM_IEEE80211_DS11 8
+#define IFM_IEEE80211_DS22 9
+#define IFM_IEEE80211_OFDM6 10
+#define IFM_IEEE80211_OFDM9 11
+#define IFM_IEEE80211_OFDM12 12
+#define IFM_IEEE80211_OFDM18 13
+#define IFM_IEEE80211_OFDM24 14
+#define IFM_IEEE80211_OFDM36 15
+#define IFM_IEEE80211_OFDM48 16
+#define IFM_IEEE80211_OFDM54 17
+#define IFM_IEEE80211_OFDM72 18
+#define IFM_IEEE80211_HT_MCS0 20
+#define IFM_IEEE80211_HT_MCS76 (IFM_IEEE80211_HT_MCS0 + 76)
+#define IFM_IEEE80211_VHT_MCS0 100
+#define IFM_IEEE80211_VHT_MCS9 (IFM_IEEE80211_VHT_MCS0 + 9)
+#define IFM_IEEE80211_HE_MCS0 110
+#define IFM_IEEE80211_HE_MCS11 (IFM_IEEE80211_HE_MCS0 + 11)
+#define IFM_IEEE80211_ADHOC 0x0000000100000000ULL
+#define IFM_IEEE80211_HOSTAP 0x0000000200000000ULL
+#define IFM_IEEE80211_IBSS 0x0000000400000000ULL
+#define IFM_IEEE80211_MONITOR 0x0000000800000000ULL
+#define IFM_IEEE80211_11A 0x0000000000010000ULL
+#define IFM_IEEE80211_11B 0x0000000000020000ULL
+#define IFM_IEEE80211_11G 0x0000000000030000ULL
+#define IFM_IEEE80211_FH 0x0000000000040000ULL
+#define IFM_IEEE80211_11N 0x0000000000050000ULL
+#define IFM_IEEE80211_11AC 0x0000000000060000ULL
+#define IFM_IEEE80211_11AX 0x0000000000070000ULL
+#define IFM_MODE(x) ((x) & IFM_MMASK)
+#define IFM_INST_ANY ((uint64_t) -1)
+#define IFM_MAKEWORD(type, subtype, options, instance) \
+	((uint64_t) (type) | (uint64_t) (subtype) | (uint64_t) (options) | ((uint64_t) (instance) << 56))
+
 struct ifmedia_entry
 {
+	TAILQ_ENTRY(ifmedia_entry) ifm_list;
 	uint64_t ifm_media;
 	unsigned int ifm_data;
 	void *ifm_aux;
 };
-#define IFMEDIA_MAX 32
+TAILQ_HEAD(ifmedia_list, ifmedia_entry);
+typedef int (*ifm_change_cb_t)(struct ifnet *);
+typedef void (*ifm_stat_cb_t)(struct ifnet *, struct ifmediareq *);
 struct ifmedia
 {
 	uint64_t ifm_mask;
 	uint64_t ifm_media;
 	struct ifmedia_entry *ifm_cur;
-	struct ifmedia_entry ifm_list[IFMEDIA_MAX];
-	int ifm_count;
-	int (*ifm_change)(struct ifnet *);
-	void (*ifm_status)(struct ifnet *, struct ifmediareq *);
+	struct ifmedia_list ifm_list;
+	size_t ifm_nwords;
+	ifm_change_cb_t ifm_change_cb;
+	ifm_stat_cb_t ifm_status_cb;
 };
 struct ifmediareq
 {
@@ -525,20 +678,29 @@ struct ifmediareq
 	int ifm_count;
 	uint64_t *ifm_ulist;
 };
-void obsd_ifmedia_init(struct ifmedia *ifm, uint64_t dontcare, int (*change)(struct ifnet *),
-                       void (*status)(struct ifnet *, struct ifmediareq *));
+void obsd_ifmedia_init(struct ifmedia *ifm, uint64_t dontcare, ifm_change_cb_t change, ifm_stat_cb_t status);
 void obsd_ifmedia_add(struct ifmedia *ifm, uint64_t mword, int data, void *aux);
 void obsd_ifmedia_set(struct ifmedia *ifm, uint64_t mword);
+void obsd_ifmedia_delete_instance(struct ifmedia *ifm, uint64_t inst);
+uint64_t obsd_ifmedia_baudrate(uint64_t mword);
+int obsd_ifmedia_match(struct ifmedia *ifm, uint64_t target, uint64_t mask);
 #define ifmedia_init(ifm, d, c, s) obsd_ifmedia_init((ifm), (d), (c), (s))
 #define ifmedia_add(ifm, w, d, a) obsd_ifmedia_add((ifm), (w), (d), (a))
 #define ifmedia_set(ifm, w) obsd_ifmedia_set((ifm), (w))
 #define ifmedia_ioctl(ifp, ifr, ifm, cmd) ENOTTY
-#define ifmedia_delete_instance(ifm, i) ((ifm)->ifm_count = 0)
+#define ifmedia_delete_instance(ifm, i) obsd_ifmedia_delete_instance((ifm), (i))
+#define ifmedia_baudrate(w) obsd_ifmedia_baudrate(w)
+#define ifmedia_match(ifm, t, m) obsd_ifmedia_match((ifm), (t), (m))
 
 /* ---- bpf, kstat: not configured ---------------------------------------------------- */
 #define BPF_DIRECTION_IN 1
 #define BPF_DIRECTION_OUT 2
 #define bpf_mtap_ether(b, m, d) ((void) 0)
+#define bpf_mtap(b, m, d) ((void) 0)
+#define bpf_mtap_hdr(b, h, l, m, d) ((void) 0)
+#define DLT_EN10MB 1
+#define DLT_IEEE802_11 105
+#define DLT_IEEE802_11_RADIO 127
 struct kstat;
 
 /* ---- IP headers (offload paths reference them; the glue never sets
@@ -549,7 +711,7 @@ struct in_addr
 };
 struct ip
 {
-	uint8_t ip_hl_v;
+	uint8_t ip_hl : 4, ip_v : 4;
 	uint8_t ip_tos;
 	uint16_t ip_len;
 	uint16_t ip_id;
@@ -559,7 +721,6 @@ struct ip
 	uint16_t ip_sum;
 	struct in_addr ip_src, ip_dst;
 } __packed;
-#define ip_hl ip_hl_v
 struct ip6_hdr
 {
 	uint32_t ip6_flow;
@@ -581,6 +742,28 @@ struct udphdr
 	uint16_t uh_sport, uh_dport, uh_ulen, uh_sum;
 } __packed;
 #define IPPROTO_IP 0
+#define IPTOS_DSCP_CS0 0x00
+#define IPTOS_DSCP_CS1 0x20
+#define IPTOS_DSCP_AF11 0x28
+#define IPTOS_DSCP_AF12 0x30
+#define IPTOS_DSCP_AF13 0x38
+#define IPTOS_DSCP_CS2 0x40
+#define IPTOS_DSCP_AF21 0x48
+#define IPTOS_DSCP_AF22 0x50
+#define IPTOS_DSCP_AF23 0x58
+#define IPTOS_DSCP_CS3 0x60
+#define IPTOS_DSCP_AF31 0x68
+#define IPTOS_DSCP_AF32 0x70
+#define IPTOS_DSCP_AF33 0x78
+#define IPTOS_DSCP_CS4 0x80
+#define IPTOS_DSCP_AF41 0x88
+#define IPTOS_DSCP_AF42 0x90
+#define IPTOS_DSCP_AF43 0x98
+#define IPTOS_DSCP_CS5 0xa0
+#define IPTOS_DSCP_VA 0xb0
+#define IPTOS_DSCP_EF 0xb8
+#define IPTOS_DSCP_CS6 0xc0
+#define IPTOS_DSCP_CS7 0xe0
 #define IPPROTO_TCP 6
 #define IPPROTO_UDP 17
 #define IPPROTO_IPV6 41

@@ -72,13 +72,7 @@ KEXBSD_API int kexusb_xfer_submit(kexusb_xfer *x, void *pipe, int in, void *buf,
 KEXBSD_API void kexusb_xfer_cancel(kexusb_xfer *x);
 
 /* ---- worker threads: where BSD driver code runs ------------------------------- */
-struct kexbsd_work
-{
-	struct kexbsd_work *next;
-	void (*fn)(void *);
-	void *arg;
-	volatile int queued;
-};
+/* struct kexbsd_work: kexbsd/kern.h */
 typedef struct kexbsd_worker kexbsd_worker;
 KEXBSD_API kexbsd_worker *kexbsd_worker_create(const char *name);
 KEXBSD_API void kexbsd_worker_destroy(kexbsd_worker *w);

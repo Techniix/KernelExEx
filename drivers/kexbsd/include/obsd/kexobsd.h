@@ -63,6 +63,22 @@ typedef long ssize_t_obsd;
 #define __KERNEL_RCSID(n, s)
 #define __FBSDID(s)
 
+#define NBBY 8
+#define ALIGNED_POINTER(p, t) 1   /* x86 */
+#define bsearch obsd_bsearch
+const void *obsd_bsearch(const void *key, const void *base, size_t n, size_t size,
+                         int (*cmp)(const void *, const void *));
+typedef long suseconds_t;
+#define timersub(a, b, r) do { (r)->tv_sec = (a)->tv_sec - (b)->tv_sec; (r)->tv_usec = (a)->tv_usec - (b)->tv_usec; \
+	if ((r)->tv_usec < 0) { (r)->tv_sec--; (r)->tv_usec += 1000000; } } while (0)
+#define timeradd(a, b, r) do { (r)->tv_sec = (a)->tv_sec + (b)->tv_sec; (r)->tv_usec = (a)->tv_usec + (b)->tv_usec; \
+	if ((r)->tv_usec >= 1000000) { (r)->tv_sec++; (r)->tv_usec -= 1000000; } } while (0)
+#define timercmp(a, b, op) (((a)->tv_sec == (b)->tv_sec) ? ((a)->tv_usec op (b)->tv_usec) : ((a)->tv_sec op (b)->tv_sec))
+#define log(level, ...) kexbsd_printf(__VA_ARGS__)
+#define __BEGIN_DECLS
+#define __END_DECLS
+#define __bounded(x)
+#define __attribute_unused__ __attribute__((unused))
 #define nitems(a) (sizeof(a) / sizeof((a)[0]))
 #define roundup(x, y) ((((x) + ((y) - 1)) / (y)) * (y))
 #define howmany(x, y) (((x) + ((y) - 1)) / (y))
@@ -79,7 +95,9 @@ typedef long ssize_t_obsd;
 #define KASSERT(e) do { if (!(e)) kexbsd_printf("kexbsd: assertion failed: %s (%s:%d)\n", #e, __FILE__, __LINE__); } while (0)
 #define KASSERTMSG(e, ...) KASSERT(e)
 #define CTASSERT(x) _Static_assert(x, #x)
-#define panic(...) do { kexbsd_printf("kexbsd: panic: " __VA_ARGS__); kexbsd_printf("\n"); } while (0)
+/* panic(9): log it, then stop the machine with a bug check (as a BSD kernel would) */
+__attribute__((noreturn)) void obsd_panic(const char *fmt, ...);
+#define panic(...) obsd_panic(__VA_ARGS__)
 
 /* x86 is little-endian */
 #define _LITTLE_ENDIAN 1234
@@ -106,6 +124,11 @@ typedef long ssize_t_obsd;
 #define htobe32(x) __builtin_bswap32(x)
 #define betoh16(x) __builtin_bswap16(x)
 #define betoh32(x) __builtin_bswap32(x)
+#define htobe64(x) __builtin_bswap64(x)
+#define betoh64(x) __builtin_bswap64(x)
+#define be64toh(x) __builtin_bswap64(x)
+#define be32toh(x) __builtin_bswap32(x)
+#define be16toh(x) __builtin_bswap16(x)
 #define htons(x) __builtin_bswap16(x)
 #define ntohs(x) __builtin_bswap16(x)
 #define htonl(x) __builtin_bswap32(x)
@@ -120,7 +143,23 @@ void *memset(void *d, int c, size_t n);
 int memcmp(const void *a, const void *b, size_t n);
 size_t strlen(const char *s);
 size_t strlcpy(char *d, const char *s, size_t n);
+int strcmp(const char *a, const char *b);
+int abs(int v);
 #define bcopy(s, d, n) memmove((d), (s), (n))
+static __inline__ void explicit_bzero(void *p, size_t n)
+{
+	volatile unsigned char *q = (volatile unsigned char *) p;
+	while (n--)
+		*q++ = 0;
+}
+static __inline__ int timingsafe_bcmp(const void *a, const void *b, size_t n)
+{
+	const unsigned char *p = (const unsigned char *) a, *q = (const unsigned char *) b;
+	int r = 0;
+	while (n--)
+		r |= *p++ ^ *q++;
+	return r != 0;
+}
 #define bzero(d, n) memset((d), 0, (n))
 #define bcmp(a, b, n) memcmp((a), (b), (n))
 
@@ -222,6 +261,56 @@ int obsd_timeout_pending(struct timeout *t);
 #define timeout_del_barrier(t) obsd_timeout_del(t)
 #define timeout_pending(t) obsd_timeout_pending(t)
 #define timeout_initialized(t) ((t)->to_set)
+
+/* ---- task(9): queued work, run on a kexbsd worker thread ------------------------- */
+struct taskq;
+struct task
+{
+	struct kexbsd_work t_work;
+	void (*t_func)(void *);
+	void *t_arg;
+	struct taskq *t_tq;
+};
+#define TASK_INITIALIZER(f, a) { { NULL, NULL, NULL, 0 }, (f), (a), NULL }
+#define task_set(t, f, a) ((t)->t_func = (f), (t)->t_arg = (a), (t)->t_work.queued = 0, (t)->t_tq = NULL)
+#define task_pending(t) ((t)->t_work.queued)
+int obsd_task_add(struct taskq *tq, struct task *t);
+int obsd_task_del(struct taskq *tq, struct task *t);
+struct taskq *obsd_taskq_create(const char *name);
+struct taskq *obsd_systq(void);
+#define task_add(tq, t) obsd_task_add((tq), (t))
+#define task_del(tq, t) obsd_task_del((tq), (t))
+#define taskq_create(name, n, ipl, fl) obsd_taskq_create(name)
+#define taskq_barrier(tq) ((void) 0)
+#define taskq_del_barrier(tq, t) obsd_task_del((tq), (t))
+#define systq obsd_systq()
+#define systqmp obsd_systq()
+#define net_tq(i) obsd_systq()
+
+/* ---- bit strings, misc kernel ------------------------------------------------------- */
+#define setbit(a, i) (((unsigned char *) (a))[(i) / NBBY] |= 1 << ((i) % NBBY))
+#define clrbit(a, i) (((unsigned char *) (a))[(i) / NBBY] &= ~(1 << ((i) % NBBY)))
+#define isset(a, i) (((const unsigned char *) (a))[(i) / NBBY] & (1 << ((i) % NBBY)))
+#define isclr(a, i) ((((const unsigned char *) (a))[(i) / NBBY] & (1 << ((i) % NBBY))) == 0)
+#define swap64(x) __builtin_bswap64(x)
+struct proc;
+#define curproc ((struct proc *) 0)
+#define suser(p) 0
+/* ioctl data comes from the glue, already in kernel memory */
+static __inline__ int copyin(const void *u, void *k, size_t n) { memcpy(k, u, n); return 0; }
+static __inline__ int copyout(const void *k, void *u, size_t n) { memcpy(u, k, n); return 0; }
+#define LOG_ERR 3
+#define LOG_WARNING 4
+#define LOG_NOTICE 5
+#define LOG_INFO 6
+#define LOG_DEBUG 7
+#define arc4random() ((uint32_t) obsd_random())
+#define arc4random_uniform(n) ((uint32_t) (obsd_random() % (n)))
+#define arc4random_buf(p, n) obsd_random_buf((p), (n))
+uint32_t obsd_random(void);
+void obsd_random_buf(void *p, size_t n);
+extern volatile time_t obsd_time_uptime;
+#define getuptime() ((time_t) (kexbsd_ticks() / hz))
 
 /* ---- autoconf(9) ---------------------------------------------------------- */
 struct device
