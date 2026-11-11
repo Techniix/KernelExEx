@@ -32,6 +32,7 @@
   !include "WinVer.nsh"
   !include "nsDialogs.nsh"
   !include "WordFunc.nsh"
+  !include "drivers\chipset\kexchip_ids.nsh"
 
 ;--------------------------------
 ;General
@@ -448,6 +449,75 @@ SectionEnd
 
 SectionGroupEnd
 
+Section /o "Intel chipset support (ICH2 to ICH10, 845 to P45)" SECKEXCHIP
+  ;INFs only: they name the chipset's devices and load Windows' own drivers
+  SetOutPath "$INSTDIR\drivers\chipset"
+  File "drivers\chipset\kexchip.inf"
+  File "drivers\chipset\kexide.inf"
+  File "drivers\chipset\kexuhci.inf"
+  SetOutPath "$INSTDIR"
+  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+  StrCmp $0 "" 0 +2
+    StrCpy $0 "$WINDIR\INF"
+  ${WordFind} "$0" "$INSTDIR\drivers\chipset" "E+1{" $1
+  IfErrors 0 kexchip_listed
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\chipset"
+  kexchip_listed:
+  Call KexChipRedetect
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexChip" "1"
+SectionEnd
+
+;Devices of ours that Windows found no driver for (Other devices) are
+;forgotten, so Windows finds them again at the next start, with our INFs.
+;Devices that work are left alone. (A device whose wizard was cancelled is
+;not kept at all: Windows asks again at every start and finds our INF.)
+Function KexChipRedetect
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R5
+  Push $R6
+  Push $R7
+  StrCpy $R0 0
+  kcr_loop:
+    EnumRegKey $R1 HKLM "Enum\PCI" $R0
+    StrCmp $R1 "" kcr_done
+    IntOp $R0 $R0 + 1
+    StrCpy $R2 $R1 13
+    StrCmp $R2 "VEN_8086&DEV_" 0 kcr_loop
+    StrCpy $R3 $R1 4 13
+    ClearErrors
+    ${WordFind} "${KEXCHIP_IDS0}" ";$R3;" "E+1{" $R2
+    IfErrors 0 kcr_ours
+    ClearErrors
+    ${WordFind} "${KEXCHIP_IDS1}" ";$R3;" "E+1{" $R2
+    IfErrors kcr_loop kcr_ours
+  kcr_ours:
+    StrCpy $R6 0
+    kcr_inst:
+      EnumRegKey $R5 HKLM "Enum\PCI\$R1" $R6
+      StrCmp $R5 "" kcr_loop
+      ReadRegStr $R7 HKLM "Enum\PCI\$R1\$R5" "Class"
+      ;no driver: no class yet, or "Unknown" (Other devices, "do not install")
+      StrCmp $R7 "" +2
+      StrCmp $R7 "Unknown" 0 kcr_keep
+        DetailPrint "Will detect again: PCI\$R1"
+        DeleteRegKey HKLM "Enum\PCI\$R1\$R5"
+        Goto kcr_inst
+      kcr_keep:
+      IntOp $R6 $R6 + 1
+      Goto kcr_inst
+  kcr_done:
+  Pop $R7
+  Pop $R6
+  Pop $R5
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
 SectionGroup "Network adapter drivers" SECNETDRV
 
 Section /o "Intel PRO/1000 (OpenBSD em driver)" SECKEXEM
@@ -571,6 +641,7 @@ SectionEnd
 
 SectionGroupEnd
 
+LangString DESC_KEXCHIP ${LANG_ENGLISH} "Names every part of Intel chipsets newer than Windows 98 (ICH2 to ICH10: SMBus, LPC, USB, IDE/SATA, bridges) so Device Manager shows no unknown devices, and sets them up with Windows' own drivers."
 LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
 LangString DESC_KEXRNDIS ${LANG_ENGLISH} "USB network adapters that speak RNDIS, including USB tethering from an Android phone, with OpenBSD's urndis driver."
 LangString DESC_KEXCDCE ${LANG_ENGLISH} "USB Ethernet adapters that follow the CDC Ethernet standard (many USB-C and Realtek RTL8152/8153 adapters)."
@@ -626,6 +697,7 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
   !insertmacro MUI_DESCRIPTION_TEXT ${SECXINPUT} $(DESC_XINPUT)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXPAD} $(DESC_KEXPAD)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECNETDRV} $(DESC_NETDRV)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXCHIP} $(DESC_KEXCHIP)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRL} $(DESC_KEXRL)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRNDIS} $(DESC_KEXRNDIS)
@@ -668,6 +740,17 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\kexpad"
     RMDir "$INSTDIR\drivers"
   un_kexpad_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexChip"
+  StrCmp $0 "1" 0 un_kexchip_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\chipset" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete "$INSTDIR\drivers\chipset\kexchip.inf"
+    Delete "$INSTDIR\drivers\chipset\kexide.inf"
+    Delete "$INSTDIR\drivers\chipset\kexuhci.inf"
+    RMDir "$INSTDIR\drivers\chipset"
+    RMDir "$INSTDIR\drivers"
+  un_kexchip_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexEm"
   StrCmp $0 "1" 0 un_kexem_done
     ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
