@@ -49,6 +49,8 @@ LAYOUT = {
     "input/kexpad/kexpad.sys": "kexpad:kexpad.sys",
     "input/kexpad/kexpad.inf": "input/kexpad/kexpad.inf",
     "drivers/kexnet/kexem.sys": "kexnet:kexem.sys",
+    "drivers/kexnet/kexrl.sys": "kexnet:kexrl.sys",
+    "drivers/kexnet/kexrl.inf": "drivers/kexnet/rl/kexrl.inf",
     "drivers/kexnet/kexbsd.sys": "kexnet:kexbsd/kexbsd.sys",
     "drivers/kexnet/kexem.inf": "drivers/kexnet/kexem.inf",
     "drivers/kexnet/kexrndis.sys": "kexnet:kexrndis.sys",

@@ -468,6 +468,24 @@ Section /o "Intel PRO/1000 (OpenBSD em driver)" SECKEXEM
   WriteRegStr HKLM "Software\KernelEx\Components" "KexEm" "1"
 SectionEnd
 
+Section /o "Realtek RTL8139/810x Fast Ethernet (onboard RTL8100C and others)" SECKEXRL
+  ;kexrl.sys, kexbsd.sys and the INF stay together in one folder added to
+  ;DevicePath, so Windows offers the driver when it finds a Realtek RTL8139 family adapter.
+  SetOutPath "$INSTDIR\drivers\kexrl"
+  File "drivers\kexnet\kexrl.sys"
+  File "drivers\kexnet\kexbsd.sys"
+  File "drivers\kexnet\kexrl.inf"
+  SetOutPath "$INSTDIR"
+  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+  StrCmp $0 "" 0 +2
+    StrCpy $0 "$WINDIR\INF"
+  ${WordFind} "$0" "$INSTDIR\drivers\kexrl" "E+1{" $1
+  IfErrors 0 kexrl_listed
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexrl"
+  kexrl_listed:
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexRl" "1"
+SectionEnd
+
 Section /o "USB RNDIS adapters and phone tethering (OpenBSD urndis)" SECKEXRNDIS
   SetOutPath "$INSTDIR\drivers\kexrndis"
   File "drivers\kexnet\kexrndis.sys"
@@ -558,6 +576,7 @@ LangString DESC_KEXRNDIS ${LANG_ENGLISH} "USB network adapters that speak RNDIS,
 LangString DESC_KEXCDCE ${LANG_ENGLISH} "USB Ethernet adapters that follow the CDC Ethernet standard (many USB-C and Realtek RTL8152/8153 adapters)."
 LangString DESC_KEXRTWN ${LANG_ENGLISH} "Wi-Fi with WPA2 for Realtek USB adapters: RTL8188CU/EU/FU, RTL8192CU/EU, RTL8723BU, RTL8812AU and RTL8821AU, including TP-Link Archer T2U, T2U Plus and T2U Nano, TL-WN722N v2/v3 and TL-WN725N. FreeBSD's rtwn driver with OpenBSD's wireless stack. Set the network name and passphrase in the adapter's Advanced properties."
 LangString DESC_KEXURTWN ${LANG_ENGLISH} "Wi-Fi with WPA2 for the Realtek USB adapters FreeBSD's rtwn does not list, with OpenBSD's urtwn driver and wireless stack."
+LangString DESC_KEXRL ${LANG_ENGLISH} "Realtek RTL8139, RTL8139C/C+/D, RTL8100/8100C and RTL8101L 10/100 adapters, onboard or on a card (D-Link DFE-530TX+/538TX, SMC 1211TX and many others). Our own driver: Windows 98 has none for these."
 LangString DESC_KEXEM ${LANG_ENGLISH} "Intel PRO/1000 gigabit adapters (82540 to I350, ICH/PCH onboard), with OpenBSD's em driver. Windows uses it when it finds one."
 
 LangString DESC_GAMEPAD ${LANG_ENGLISH} "Support for modern game controllers."
@@ -608,6 +627,7 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXPAD} $(DESC_KEXPAD)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECNETDRV} $(DESC_NETDRV)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRL} $(DESC_KEXRL)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRNDIS} $(DESC_KEXRNDIS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXCDCE} $(DESC_KEXCDCE)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRTWN} $(DESC_KEXRTWN)
@@ -659,6 +679,17 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\kexem"
     RMDir "$INSTDIR\drivers"
   un_kexem_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexRl"
+  StrCmp $0 "1" 0 un_kexrl_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\kexrl" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\kexrl\kexrl.sys"
+    Delete /REBOOTOK "$INSTDIR\drivers\kexrl\kexbsd.sys"
+    Delete "$INSTDIR\drivers\kexrl\kexrl.inf"
+    RMDir "$INSTDIR\drivers\kexrl"
+    RMDir "$INSTDIR\drivers"
+  un_kexrl_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexRndis"
   StrCmp $0 "1" 0 un_kexrndis_done
     ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"

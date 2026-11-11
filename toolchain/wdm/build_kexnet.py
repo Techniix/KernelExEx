@@ -48,6 +48,8 @@ def main():
         # obsd_usb.c in every driver: the glue (obsd_net.c) serves PCI and USB drivers
         "kexem": ([SRC / "kexem.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", BSD / "lib" / "obsd_kern.c", em / "if_em.c", em / "if_em_hw.c", rt],
                   ["-I", str(SRC / "em")]),
+        "kexrl": ([SRC / "rl" / "kexrl.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", BSD / "lib" / "obsd_kern.c", rt],
+                  ["-I", str(SRC)]),
         "kexrndis": ([SRC / "kexrndis.c", SRC / "urndis" / "dev" / "usb" / "if_urndis.c"] + USBLIB, ["-I", str(SRC / "urndis")]),
         "kexcdce": ([SRC / "cdce" / "kexcdce.c"] + USBLIB, ["-I", str(SRC)]),
         "kexurtwn": ([SRC / "urtwn" / "kexurtwn.c", SRC / "urtwn" / "dev" / "ic" / "rtwn.c"] + WIFI,

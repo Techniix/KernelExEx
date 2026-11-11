@@ -315,9 +315,11 @@ list.
 | XInput | `xinput1_1`-`1_4`, `xinput9_1_0`, controller database | builds, in installer | to be decided |
 | Xbox controller driver | `kexpad.sys`, 360 protocol (173 pads); later One/Series | builds, in installer; untested on hardware | to be decided |
 | Intel PRO/1000 driver | `kexem.sys` + `kexbsd.sys`: OpenBSD em(4) through kexbsd, 192 adapters | DHCP + ping in QEMU (e1000); untested on hardware | to be decided |
+| Realtek RTL8139/810x Ethernet | `kexrl.sys`: own GPLv2 driver; RTL8139/C/C+/D, RTL8100/8100C (MSI 848P Neo2-V onboard), RTL8101L and 19 OEM cards | DHCP, ping 4/4 and 30/30 at 1450 bytes in QEMU (rtl8139); untested on hardware | to be decided |
 | USB RNDIS / phone tethering | `kexrndis.sys`: OpenBSD urndis(4) through kexbsd's USB layer | DHCP + ping in QEMU (usb-net on UHCI); untested on hardware | to be decided |
 | USB CDC Ethernet | `kexcdce.sys`: own GPLv2 CDC ECM driver (OpenBSD cdce is BSD-4) | DHCP + ping in QEMU (usb-net ECM); untested on hardware | to be decided |
-| Realtek USB Wi-Fi | `kexurtwn.sys`: OpenBSD urtwn + net80211, WPA2-PSK (CCMP) by default; 98 adapters incl. TP-Link TL-WN722N v2/v3, TL-WN725N | builds, crypto self-test passes; needs hardware (no USB Wi-Fi in QEMU) | to be decided |
+| Realtek USB Wi-Fi (new chips) | `kexrtwn.sys`: FreeBSD rtwn (RTL8188CU/EU/FU, 8192CU/EU, 8723BU, 8812AU, 8821AU) on OpenBSD net80211; 115 adapters incl. TP-Link Archer T2U/T2U Plus/T2U Nano | loads on 98, declines non-Realtek devices; needs hardware (no USB Wi-Fi in QEMU) | to be decided |
+| Realtek USB Wi-Fi (older) | `kexurtwn.sys`: OpenBSD urtwn + net80211, WPA2-PSK (CCMP) by default; the 20 adapters FreeBSD's table lacks | builds, crypto self-test passes; needs hardware | to be decided |
 | Gamepad Configurator | mapping, test, profiles | planned | to be decided |
 | Per-program mixer | audio API library, mixer, tray icon | planned | to be decided |
 | USB audio driver | headsets and microphones | research | to be decided |
