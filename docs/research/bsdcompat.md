@@ -82,6 +82,19 @@ cannot address it).
 2. Network front end (NDIS 5 miniport) with OpenBSD `em` (Intel
    8254x/8257x, `ifnet`-based, testable in QEMU with `-nic model=e1000`).
    Realtek via a Linux `r8169` port (see Licences).
+   - Stage 1 done (2026-11-11): `kexem.sys` (drivers/kexnet) loads on 98 SE
+     as an NDIS 5 miniport, starts kexbsd, maps BAR0, reads the MAC and
+     reports link through a kexbsd callout + task. Debugcon output in QEMU:
+     `kexbsd: framework ready`, `em0: Intel 8086:100e rev 03 ...`,
+     `em0: address 52:54:00:12:34:56`, `em0: link up, 1000 Mbit/s`.
+     Device Manager lists it under Network adapters as
+     "Intel 82540EM (KernelExEx)". Not yet exercised at runtime:
+     HalGetBusData (NDIS gave the config space), interrupts, bus_dma.
+   - Stage 2: OpenBSD personality headers, mbuf/ifnet glue, if_em.c.
+   - Test VM note: the old image had no PCI bus device at all (it was
+     installed without `*PNP0A03`), which is why its network never worked.
+     Added through Add New Hardware > System devices > PCI bus; the
+     snapshot with PCI and kexem installed is vm/net-kexem.img.
 3. WiFi: net80211 and `athn`/`run`/`urtwn` (docs/research/wifi.md), which
    need the USB front end.
 4. xHCI and EHCI host controllers (USB front end, replaces 98's USBD role for
