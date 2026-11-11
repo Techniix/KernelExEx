@@ -1,0 +1,6 @@
+DBCLASS_ClassDispatch
+DBCLASS_FilterDispatch
+DBCLASS_RegisterBusFilter
+DBCLASS_RegisterController
+DBCLASS_SetD0_Complete
+DBCLASS_UnRegisterController

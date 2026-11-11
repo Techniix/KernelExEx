@@ -14,8 +14,12 @@ HalReadDmaCounter
 HalSetBusDataByOffset
 HalTranslateBusAddress
 KeAcquireSpinLockRaiseToSynch
+KeGetCurrentIrql
+KeQueryPerformanceCounter
 KeStallExecutionProcessor
 KfAcquireSpinLock
+KfLowerIrql
+KfRaiseIrql
 KfReleaseSpinLock
 READ_PORT_BUFFER_UCHAR
 READ_PORT_BUFFER_ULONG

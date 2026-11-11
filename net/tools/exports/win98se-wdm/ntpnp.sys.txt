@@ -1,0 +1,3 @@
+IoInvalidateDeviceRelations
+IoOpenDeviceRegistryKey
+IoRequestDeviceEject

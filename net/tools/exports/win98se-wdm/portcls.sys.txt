@@ -1,0 +1,15 @@
+PcAddAdapterDevice
+PcDispatchIrp
+PcGetDeviceProperty
+PcGetTimeInterval
+PcInitializeAdapterDriver
+PcNewInterruptSync
+PcNewMiniport
+PcNewPort
+PcNewRegistryKey
+PcNewResourceSublist
+PcNewServiceGroup
+PcRegisterAdapterPowerManagement
+PcRegisterPhysicalConnection
+PcRegisterSubdevice
+PcRequestNewPowerState

@@ -1,0 +1,5 @@
+USBCAMD_AdapterReceivePacket
+USBCAMD_ControlVendorCommand
+USBCAMD_DriverEntry
+USBCAMD_GetRegistryKeyValue
+USBCAMD_SelectAlternateInterface
