@@ -27,6 +27,26 @@ extern "C" {
 #include <malloc.h>
 #include "debug.h"
 
+#ifdef KEX_DEBUGCON
+/* debug builds for emulators: messages go to I/O port 0xE9, which QEMU
+ * (-debugcon file:...) and Bochs capture */
+#include <vxdwraps.h>
+
+void debug_printf(const char* fmt, ...)
+{
+	char buf[512];
+	va_list ap;
+	const char* p;
+	va_start(ap, fmt);
+	_Vsprintf(buf, (char*) fmt, ap);
+	va_end(ap);
+	for (p = "VKRNLEX: "; *p; p++)
+		__asm__ volatile("outb %0, $0xe9" : : "a"(*p));
+	for (p = buf; *p; p++)
+		__asm__ volatile("outb %0, $0xe9" : : "a"(*p));
+	__asm__ volatile("outb %0, $0xe9" : : "a"('\n'));
+}
+#else
 void debug_printf(const char* fmt, ...)
 {
 	char* newfmt = (char*) alloca(strlen(fmt) + 10);
@@ -40,3 +60,4 @@ void debug_printf(const char* fmt, ...)
     VMMCall(_Debug_Printf_Service)
     __asm add esp, 2*4
 }
+#endif

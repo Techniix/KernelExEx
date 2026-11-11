@@ -32,7 +32,19 @@ void dbgvprintf(const char* format, void* _argp)
 	va_list argp = (va_list) _argp;
 	int cnt = vsnprintf(msg, sizeof(msg), format, argp);
 
+#ifdef KEX_DEBUGCON
+	/* emulator debug console (QEMU -debugcon, Bochs port E9): Windows 9x
+	 * does not trap ring-3 access to this port */
+	{
+		const char* p;
+		for (p = msg; *p && p < msg + sizeof(msg); p++)
+			__asm__ volatile("outb %0, $0xe9" : : "a"(*p));
+		if (cnt > 0 && msg[cnt < (int) sizeof(msg) ? cnt - 1 : sizeof(msg) - 2] != '\n')
+			__asm__ volatile("outb %0, $0xe9" : : "a"('\n'));
+	}
+#else
 	OutputDebugString(msg);
+#endif
 }
 
 void dbgprintf(const char* format, ...)
@@ -43,3 +55,14 @@ void dbgprintf(const char* format, ...)
 	va_end(argp);
 }
 
+
+#ifdef KEX_DEBUGCON
+extern "C" int __cdecl kex_dbg_printf(const char* format, ...)
+{
+	va_list argp;
+	va_start(argp, format);
+	dbgvprintf(format, argp);
+	va_end(argp);
+	return 0;
+}
+#endif

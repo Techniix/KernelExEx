@@ -67,9 +67,9 @@ bool ModuleInitializer::initialize_modules()
 {
 	while (init < size)
 	{
-		DBGPRINTF(("Post-Initializing %s [PID=%08x]\n", 
+		DBGPRINTF(("Post-Initializing %s [PID=%08x] MODREF %p flags %04x imports %d\n", 
 				(*ppmteModTable)[data[init]->mteIndex]->pszModName, 
-				GetCurrentProcessId()));
+				GetCurrentProcessId(), data[init], data[init]->flags, data[init]->cImportedModules));
 
 		init++;
 

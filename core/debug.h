@@ -24,6 +24,12 @@
 
 #define DEBUGMSG_MAXLEN 256
 
+#ifdef KEX_DEBUGCON
+#define KEX_ASSERT_BREAK() do { } while (0)   /* keep running; the log has it */
+#else
+#define KEX_ASSERT_BREAK() DebugBreak()
+#endif
+
 #ifndef _DEBUG
 
 #define DBGPRINTF(x) do { } while (0)
@@ -37,7 +43,7 @@
 		do \
 		{ \
 			dbgprintf("ASSERTION FAILED: file: %s, line: %d\n", __FILE__, __LINE__); \
-			DebugBreak(); \
+			KEX_ASSERT_BREAK(); \
 		} \
 		while (0)
 

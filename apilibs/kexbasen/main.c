@@ -89,8 +89,19 @@ BOOL APIENTRY DllMain(HINSTANCE instance, DWORD reason, BOOL load_static)
 	switch (reason) 
 	{
 	case DLL_PROCESS_ATTACH:
+#ifdef KEX_DEBUGCON
+		KEXDBG_PUTS("kexbasen: DllMain PROCESS_ATTACH\n");
+#endif
 		if (!init())
+		{
+#ifdef KEX_DEBUGCON
+			KEXDBG_PUTS("kexbasen: init failed\n");
+#endif
 			return FALSE;
+		}
+#ifdef KEX_DEBUGCON
+		KEXDBG_PUTS("kexbasen: init done\n");
+#endif
 		break;
 	case DLL_PROCESS_DETACH:
 		uninit();

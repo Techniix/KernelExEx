@@ -145,9 +145,26 @@ void write_footer(void* ptr, size_t usable, int fs, DWORD value)
 		footer->dd = (DWORD) value;
 }
 
+#ifdef KEX_DEBUGCON
+/* debug builds: report jemalloc use before malloc_init_hard() has run */
+static void report_early_use(const char* what, void* caller)
+{
+	char line[128];
+	const char* p;
+	wsprintfA(line, "kexbasen: %s before jemalloc init, caller %08x, initialized=%d\n", what, (DWORD) caller,
+	          (int) malloc_initialized);
+	for (p = line; *p; p++)
+		__asm__ volatile("outb %0, $0xe9" : : "a"(*p));
+}
+#endif
+
 /* MAKE_EXPORT HeapCreate_new=HeapCreate */
 HANDLE WINAPI HeapCreate_new(DWORD flOptions, DWORD dwInitialSize, DWORD dwMaximumSize)
 {
+#ifdef KEX_DEBUGCON
+	if (!malloc_initialized)
+		report_early_use("HeapCreate", __builtin_return_address(0));
+#endif
 	if (flOptions & HEAP_SHARED || dwMaximumSize != 0)
 		return HeapCreate(flOptions, dwInitialSize, dwMaximumSize);
 	if (flOptions & HEAP_GENERATE_EXCEPTIONS)
@@ -166,8 +183,13 @@ BOOL WINAPI HeapDestroy_new(HANDLE hHeap)
 }
 
 /* MAKE_EXPORT HeapAlloc_new=HeapAlloc */
+
 LPVOID WINAPI HeapAlloc_new(HANDLE hHeap, DWORD dwFlags, DWORD dwBytes)
 {
+#ifdef KEX_DEBUGCON
+	if ((hHeap == JM_HEAP_NORM || hHeap == JM_HEAP_EXCP) && !malloc_initialized)
+		report_early_use("HeapAlloc", __builtin_return_address(0));
+#endif
 	if (hHeap == JM_HEAP_NORM || hHeap == JM_HEAP_EXCP)
 	{
 		LPVOID ret;

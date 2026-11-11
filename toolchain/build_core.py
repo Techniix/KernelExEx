@@ -45,7 +45,7 @@ def run(cmd, **kw):
 
 
 class Build:
-    def __init__(self, sdk: Path, out: Path, jobs: int):
+    def __init__(self, sdk: Path, out: Path, jobs: int, debugcon: bool = False):
         self.sdk, self.out, self.jobs = sdk, out, jobs
         self.obj = out / "obj"
         self.lib = out / "lib"
@@ -66,12 +66,16 @@ class Build:
             "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-fwrapv",
             "-fno-asynchronous-unwind-tables", "-fno-stack-protector", "-fno-ident",
             "-fno-builtin", "-fno-threadsafe-statics", "-fno-use-cxa-atexit",
-            "-mno-stack-arg-probe",
             "-DWIN32", "-D_WINDOWS", "-DNDEBUG", "-D_MBCS",
             "-DWINVER=0x0500", "-D__MSVCRT_VERSION__=0x600", "-D__USE_MINGW_ANSI_STDIO=0",
             "-D__CRT__NO_INLINE", "-D_CRTIMP=", "-D__NO_CTYPE_INLINES", "-D__NO_ISOCEXT",
             "-w",
         ]
+        self.debugcon = debugcon
+        if debugcon:
+            # debug messages to I/O port 0xE9 (QEMU -debugcon, Bochs); for emulators only
+            self.base = [f for f in self.base if f != "-DNDEBUG"] + ["-D_DEBUG", "-DKEX_DEBUGCON", 
+                                                                         "-include", str(ROOT / "common/kexdbgcon.h")]
         self.overlay = None
 
     # ---- compiling -------------------------------------------------
@@ -119,9 +123,20 @@ class Build:
         # miscompiled by clang into: mov reg,[__imp__X] / call dword ptr [reg], which
         # dereferences the function's code. See common/asmimp.h for the fix.
         bad = []
+        bigframe = []
         for i in range(0, len(objs), 40):
             dis = run(["llvm-objdump", "-d", "-r", "--no-show-raw-insn", "--x86-asm-syntax=intel", *objs[i:i + 40]])
             lines = [l for l in dis.splitlines() if l.strip()]
+            # Windows grows stacks one guard page at a time: a frame of a page or more must
+            # be probed (__alloca / ___chkstk_ms). Ring 0 (the VxD) has a fixed stack instead.
+            if name != "vxd":
+                func = "?"
+                for line in lines:
+                    if line.endswith(">:"):
+                        func = line.split("<", 1)[-1][:-2]
+                    m = re.search(r"\bsub\s+esp, (0x[0-9a-f]+)", line)
+                    if m and int(m.group(1), 16) >= 0x1000:
+                        bigframe.append(f"{func}: {line.strip()}")
             for k, line in enumerate(lines):
                 m = re.search(r"IMAGE_REL_I386_DIR32\s+(__imp__\S+)", line)
                 if not m or k == 0 or k + 1 >= len(lines):
@@ -129,6 +144,8 @@ class Build:
                 load = re.search(r"\bmov\s+(e\w\w), dword ptr \[", lines[k - 1])
                 if load and re.search(r"ptr \[%s\]" % load.group(1), lines[k + 1]):
                     bad.append(f"{m.group(1)}: {lines[k + 1].strip()}")
+        if bigframe:
+            sys.exit(f"{name}: stack frames of 4 KB or more without a stack probe:\n  " + "\n  ".join(bigframe[:10]))
         if bad:
             sys.exit(f"{name}: inline assembly dereferences an imported function (use IMP() from asmimp.h):\n  "
                      + "\n  ".join(bad[:10]))
@@ -252,7 +269,7 @@ def build_kexcrt(b: Build):
         srcs.append(stem.with_suffix(".cpp") if stem.with_suffix(".cpp").exists() else stem.with_suffix(".c"))
     renamed = [s for s in srcs if s.name in ("snprintf.c", "vsnprintf.c")]
     plain = [s for s in srcs if s not in renamed]
-    flags = [f"-I{d}", "-D_CTYPE_DISABLE_MACROS"]
+    flags = [f"-I{d}", "-D_CTYPE_DISABLE_MACROS", "-DKEX_NO_PRINTF_REDIRECT"]
     objs = b.compile("kexcrt", plain + sorted((ROOT / "toolchain/rt").glob("*.[cS]")), flags)
     objs += b.compile("kexcrt", renamed, flags + ["-include", str(ROOT / "toolchain/rt/kexcrt_pre.h")])
     b.archive("kexcrt", objs)
@@ -313,6 +330,8 @@ def ctor_order(srcs):
 def build_core(b: Build):
     d = ROOT / "core"
     release_skip = {"debug.cpp", "debugproto.cpp", "apihook.cpp"}
+    if b.debugcon:
+        release_skip.discard("debug.cpp")
     srcs = [f for f in dsp_sources(d / "core.dsp") if f.name not in release_skip]
     objs = b.compile("core", ctor_order(srcs), [f"-I{d}", f"-I{ROOT / 'common'}", "-DKEXCORE_EXPORTS", "-D_USRDLL",
                                                 "-D_WIN32_WINNT=0x0410", *COMPAT])
@@ -446,10 +465,11 @@ def build_vxd(b: Build):
     converted to the LE format by toolchain/vxd/le_link.py."""
     d = ROOT / "vxd"
     tv = ROOT / "toolchain/vxd"
-    srcs = [s for s in dsp_sources(d / "vxd.dsp") if s.name.lower() != "debug.cpp"]
+    srcs = [s for s in dsp_sources(d / "vxd.dsp") if b.debugcon or s.name.lower() != "debug.cpp"]
     srcs += [tv / "vxdwraps.c", tv / "vxdrt.c"]
     flags = [f"-I{tv / 'include'}", f"-I{d}", f"-I{ROOT / 'common'}", "-D_WIN32_WINNT=0x0410",
-             "-mgeneral-regs-only", "-fno-jump-tables", *COMPAT]
+             # ring 0: the stack is fixed and locked, so no page-by-page probing
+             "-mgeneral-regs-only", "-fno-jump-tables", "-mno-stack-arg-probe", *COMPAT]
     objs = b.compile("vxd", ctor_order(srcs), flags)
     if run(["llvm-objdump", "-h", *objs]).count(".ctors"):
         sys.exit("vxd: static constructors are not run in a VxD")
@@ -483,8 +503,10 @@ def main():
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("-j", type=int, default=os.cpu_count() or 4)
     ap.add_argument("--only", action="append")
+    ap.add_argument("--debugcon", action="store_true",
+                    help="debug build that logs to I/O port 0xE9 (QEMU -debugcon, Bochs); never ship it")
     a = ap.parse_args()
-    b = Build(a.sdk.resolve(), a.out.resolve(), a.j)
+    b = Build(a.sdk.resolve(), a.out.resolve(), a.j, a.debugcon)
     mingw_inc = Path((b.sdk / "MINGW_INCLUDE").read_text().strip())
     TREES = [ROOT / x for x in ("core", "common", "kexcrt", "sheet", "kexCOM", "auxiliary", "kexcontrol", "verify",
                                 "vxd")]

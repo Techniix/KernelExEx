@@ -18,7 +18,7 @@ adapters "out of the box" we have to bring the drivers ourselves.
 |---|---|---|---|---|
 | 1 | wpa_supplicant on top of vendor 98 drivers | the few with NDIS 5.1 WPA requests | small | keep as a bonus path |
 | 2 | Port Linux drivers (mac80211 + cfg80211 + a chip driver) into an NDIS miniport through a Linux-API shim | everything Linux supports, in principle | very large: mac80211 assumes the whole Linux kernel (RCU, workqueues, skbuffs, NAPI, firmware loader, crypto API) | reference, not the base |
-| 3 | Port BSD drivers + their 802.11 layer (`net80211`) through a shim, as Haiku does with FreeBSD's | the main open chipsets | large but bounded: net80211 plus one driver is tens of thousands of lines, with a small OS interface | **recommended** |
+| 3 | Port BSD drivers + their 802.11 layer (`net80211`) through a shim, as Haiku does with FreeBSD's | the main open chipsets | large but bounded: net80211 plus one driver is tens of thousands of lines, with a small OS interface | **chosen** (decided 2026-11-10) |
 | 4 | Linux on another core owns the adapter (the multikernel split in `gpu.md`) and forwards Ethernet frames | anything Linux supports | rides on the GPU project | later, for multi-core machines |
 | 5 | Run Linux drivers unmodified inside a tiny Linux kernel in a VxD | everything | enormous, fragile | no |
 

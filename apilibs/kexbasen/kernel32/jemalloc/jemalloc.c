@@ -5214,8 +5214,26 @@ malloc_print_stats(void)
  * implementation has to take pains to avoid infinite recursion during
  * initialization.
  */
-#if (defined(MOZ_MEMORY_WINDOWS) || defined(MOZ_MEMORY_DARWIN)) && !defined(MOZ_MEMORY_WINCE)
+#if defined(MOZ_MEMORY_DARWIN) && !defined(MOZ_MEMORY_WINCE)
 #define	malloc_init() false
+#elif defined(MOZ_MEMORY_WINDOWS) && !defined(MOZ_MEMORY_WINCE)
+/*
+ * KernelExEx: initialise on first use. KernelEx redirects other modules'
+ * heap calls here, and on Windows 9x one of them (msvcrt.dll) can be
+ * initialised before kexbasen.dll's DllMain has run init_jemalloc().
+ * Nothing else runs that early in a new process, so this needs no lock.
+ */
+bool malloc_init_hard(void);
+
+static inline bool
+malloc_init(void)
+{
+
+	if (malloc_initialized == false)
+		return (malloc_init_hard());
+
+	return (false);
+}
 #else
 static inline bool
 malloc_init(void)
