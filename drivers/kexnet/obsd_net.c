@@ -589,6 +589,7 @@ void obsd_if_attach(struct ifnet *ifp)
 
 void obsd_ether_ifattach(struct ifnet *ifp)
 {
+	ifp->if_sadl = (struct sockaddr_dl *) ((struct arpcom *) ifp)->ac_enaddr;
 	ifp->if_mtu = ETHERMTU;
 	if (!ifp->if_hardmtu)
 		ifp->if_hardmtu = ETHERMTU;
@@ -1002,6 +1003,56 @@ static const NDIS_OID supported[] = {
 
 static VOID NTAPI mp_shutdown(PVOID ctx);
 
+/* a string from the adapter's registry key; NDIS on 9x may hand back ANSI
+ * or UTF-16, so both are accepted (non-ASCII characters become '?') */
+static void read_string(NDIS_HANDLE ch, const char *name, char *out, size_t cap)
+{
+	NDIS_STATUS st;
+	PNDIS_CONFIGURATION_PARAMETER par;
+	NDIS_STRING key;
+	WCHAR wname[32];
+	size_t i;
+	out[0] = 0;
+	for (i = 0; name[i] && i < nitems(wname) - 1; i++)
+		wname[i] = (WCHAR) name[i];
+	wname[i] = 0;
+	key.Buffer = wname;
+	key.Length = (USHORT) (i * sizeof(WCHAR));
+	key.MaximumLength = (USHORT) ((i + 1) * sizeof(WCHAR));
+	NdisReadConfiguration(&st, &par, ch, &key, NdisParameterString);
+	if (st != NDIS_STATUS_SUCCESS || par->ParameterType != NdisParameterString)
+		return;
+	{
+		const unsigned char *b = (const unsigned char *) par->ParameterData.StringData.Buffer;
+		size_t len = par->ParameterData.StringData.Length, n = 0;
+		int wide = len >= 2 && b[1] == 0;
+		size_t step = wide ? 2 : 1;
+		for (i = 0; i + step <= len && n + 1 < cap; i += step)
+		{
+			unsigned int c = wide ? (unsigned int) (b[i] | b[i + 1] << 8) : b[i];
+			if (!c)
+				break;
+			out[n++] = c < 0x80 ? (char) c : '?';
+		}
+		out[n] = 0;
+	}
+}
+
+struct wifi_call
+{
+	KEXNET_ADAPTER *a;
+	char ssid[33];
+	char pass[65];
+	int tkip;
+	int result;
+};
+
+static void wifi_call_fn(void *arg)
+{
+	struct wifi_call *c = (struct wifi_call *) arg;
+	c->result = c->a->drv->wifi_config(c->a->ifp, c->ssid, c->pass, c->tkip);
+}
+
 static void apply_flags(KEXNET_ADAPTER *a, int flags)
 {
 	struct ifreq ifr;
@@ -1273,6 +1324,22 @@ attached:
 				memcpy(((struct arpcom *) a->ifp)->ac_enaddr, addr, ETHER_ADDR_LEN);
 				device_printf(a->dev, "using network address %s from the registry\n",
 				              obsd_ether_sprintf((const unsigned char *) addr));
+			}
+			if (drv->wifi_config)
+			{
+				struct wifi_call wc;
+				char tk[4];
+				memset(&wc, 0, sizeof(wc));
+				wc.a = a;
+				read_string(ch, "NetworkName", wc.ssid, sizeof(wc.ssid));
+				read_string(ch, "Passphrase", wc.pass, sizeof(wc.pass));
+				read_string(ch, "AllowTKIP", tk, sizeof(tk));
+				wc.tkip = tk[0] == '1';
+				if (a->worker)
+					kexbsd_worker_call(a->worker, wifi_call_fn, &wc);
+				else
+					wifi_call_fn(&wc);
+				explicit_bzero(wc.pass, sizeof(wc.pass));
 			}
 			NdisCloseConfiguration(ch);
 		}

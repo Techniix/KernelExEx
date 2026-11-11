@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the OpenBSD network drivers in drivers/kexnet as NDIS 5 miniports:
 kexem.sys (em, Intel PRO/1000), kexrndis.sys (urndis, USB RNDIS) and
-kexcdce.sys (our own CDC ECM driver).
+kexcdce.sys (our own CDC ECM driver), kexurtwn.sys (urtwn + net80211).
 Builds kexbsd.sys first (they import from it).
 
 usage: build_kexnet.py [--out DIR] [--sdk DIR] [--debugcon]
@@ -42,13 +42,15 @@ def main():
     tables = {"kexbsd.sys": wdm.exports_of(bsdout / "kexbsd.sys")}
     USBLIB = [SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", BSD / "lib" / "obsd_kern.c", rt]
     WIFI = USBLIB + sorted((SRC / "wifi" / "net80211").glob("*.c")) + sorted((SRC / "wifi" / "crypto").glob("*.c")) \
-        + [SRC / "wifi" / "kex80211_rand.c", BSD / "lib" / "subr_tree.c"]
+        + [SRC / "wifi" / "kex80211_rand.c", SRC / "wifi" / "kex80211_cfg.c", SRC / "wifi" / "kex80211_pbkdf2.c", BSD / "lib" / "subr_tree.c"]
     drivers = {
         # obsd_usb.c in every driver: the glue (obsd_net.c) serves PCI and USB drivers
         "kexem": ([SRC / "kexem.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", BSD / "lib" / "obsd_kern.c", em / "if_em.c", em / "if_em_hw.c", rt],
                   ["-I", str(SRC / "em")]),
         "kexrndis": ([SRC / "kexrndis.c", SRC / "urndis" / "dev" / "usb" / "if_urndis.c"] + USBLIB, ["-I", str(SRC / "urndis")]),
         "kexcdce": ([SRC / "cdce" / "kexcdce.c"] + USBLIB, ["-I", str(SRC)]),
+        "kexurtwn": ([SRC / "urtwn" / "kexurtwn.c", SRC / "urtwn" / "dev" / "ic" / "rtwn.c"] + WIFI,
+                     ["-I", str(SRC / "urtwn"), "-I", str(SRC / "wifi"), "-I", str(SRC)]),
         # the wireless stack alone, to prove it links (never installed)
         "kexwlan_linktest": ([SRC / "wifi" / "kexwlan_linktest.c"] + WIFI, ["-I", str(SRC / "wifi"), "-I", str(SRC)]),
     }

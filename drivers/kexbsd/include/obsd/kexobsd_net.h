@@ -422,6 +422,13 @@ struct if_sffpage
 #define IFSFF_ADDR_DDM 0xa2
 
 struct ifmediareq;
+/* the link-level address: if_sadl points at the arpcom's ac_enaddr, so
+ * LLADDR(ifp->if_sadl) is the current address */
+struct sockaddr_dl
+{
+	uint8_t sdl_data[6];
+};
+#define LLADDR(s) ((caddr_t) ((s)->sdl_data))
 struct sockaddr;
 struct rtentry;
 struct ifnet
@@ -442,6 +449,7 @@ struct ifnet
 	int (*if_ioctl)(struct ifnet *, u_long, caddr_t);
 	int (*if_output)(struct ifnet *, struct mbuf *, struct sockaddr *, struct rtentry *);
 	unsigned int if_index;
+	struct sockaddr_dl *if_sadl;
 	int if_type;
 	unsigned char if_addrlen, if_hdrlen;
 	unsigned short if_rtlabelid;

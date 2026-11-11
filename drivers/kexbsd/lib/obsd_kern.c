@@ -138,3 +138,92 @@ uint32_t ether_crc32_be(const uint8_t *buf, size_t len)
 		}
 	return crc;
 }
+
+/* ---- loadfirmware(9) ---------------------------------------------------------------- */
+static int read_file(const WCHAR *path, unsigned char **buf, size_t *len)
+{
+	UNICODE_STRING us;
+	OBJECT_ATTRIBUTES oa;
+	IO_STATUS_BLOCK iosb;
+	FILE_STANDARD_INFORMATION fsi;
+	HANDLE h;
+	NTSTATUS st;
+	unsigned char *b;
+	RtlInitUnicodeString(&us, path);
+	InitializeObjectAttributes(&oa, &us, OBJ_CASE_INSENSITIVE, NULL, NULL);
+	st = ZwCreateFile(&h, GENERIC_READ | SYNCHRONIZE, &oa, &iosb, NULL, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ,
+	                  FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE, NULL, 0);
+	if (!NT_SUCCESS(st))
+		return ENOENT;
+	st = ZwQueryInformationFile(h, &iosb, &fsi, sizeof(fsi), FileStandardInformation);
+	if (!NT_SUCCESS(st) || fsi.EndOfFile.HighPart || !fsi.EndOfFile.LowPart || fsi.EndOfFile.LowPart > 4 * 1024 * 1024)
+	{
+		ZwClose(h);
+		return EIO;
+	}
+	b = (unsigned char *) kexbsd_malloc(fsi.EndOfFile.LowPart, M_DEVBUF, M_NOWAIT);
+	if (!b)
+	{
+		ZwClose(h);
+		return ENOMEM;
+	}
+	st = ZwReadFile(h, NULL, NULL, NULL, &iosb, b, fsi.EndOfFile.LowPart, NULL, NULL);
+	ZwClose(h);
+	if (!NT_SUCCESS(st) || iosb.Information != fsi.EndOfFile.LowPart)
+	{
+		kexbsd_free(b, M_DEVBUF);
+		return EIO;
+	}
+	*buf = b;
+	*len = fsi.EndOfFile.LowPart;
+	return 0;
+}
+
+static void append(WCHAR *d, size_t cap, const char *s)
+{
+	size_t n = 0;
+	while (d[n])
+		n++;
+	while (*s && n + 1 < cap)
+		d[n++] = (WCHAR) (unsigned char) *s++;
+	d[n] = 0;
+}
+
+int obsd_loadfirmware(const char *name, unsigned char **buf, size_t *len)
+{
+	static const char *const dirs[] = { "\\SystemRoot\\SYSTEM\\KEXFW\\", "\\SystemRoot\\KEXFW\\",
+	                                    "\\DosDevices\\C:\\WINDOWS\\SYSTEM\\KEXFW\\" };
+	char shortname[16];
+	const char *p = name;
+	unsigned int i, n = 0;
+	/* 8.3 fallback: "urtwn-rtl8188eu" -> "8188EU.FW" */
+	for (i = 0; name[i]; i++)
+		if (name[i] == '-')
+			p = name + i + 1;
+	if ((p[0] == 'r' || p[0] == 'R') && (p[1] == 't' || p[1] == 'T') && (p[2] == 'l' || p[2] == 'L'))
+		p += 3;
+	while (*p && n < 8)
+	{
+		char c = *p++;
+		shortname[n++] = (char) (c >= 'a' && c <= 'z' ? c - 32 : c);
+	}
+	memcpy(shortname + n, ".FW", 4);
+	for (i = 0; i < nitems(dirs); i++)
+	{
+		WCHAR path[128];
+		int pass;
+		for (pass = 0; pass < 2; pass++)
+		{
+			path[0] = 0;
+			append(path, nitems(path), dirs[i]);
+			append(path, nitems(path), pass ? shortname : name);
+			if (!read_file(path, buf, len))
+			{
+				kexbsd_printf("kexbsd: firmware %s: %u bytes\n", pass ? shortname : name, (unsigned) *len);
+				return 0;
+			}
+		}
+	}
+	kexbsd_printf("kexbsd: firmware %s (%s) not found in SYSTEM\\KEXFW\n", name, shortname);
+	return ENOENT;
+}

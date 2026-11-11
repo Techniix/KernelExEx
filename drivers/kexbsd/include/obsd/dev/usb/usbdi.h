@@ -187,6 +187,16 @@ int usbd_ratecheck(struct timeval *last);
 #define usbd_ref_decr(dev) ((void) 0)
 #define usbd_ref_wait(dev) ((void) 0)
 
+struct usb_devno
+{
+	uint16_t ud_vendor;
+	uint16_t ud_product;
+};
+const struct usb_devno *usbd_match_device(const struct usb_devno *tbl, unsigned int nentries, unsigned int sz,
+                                          uint16_t vendor, uint16_t product);
+#define usb_lookup(tbl, vendor, product) \
+	usbd_match_device((const struct usb_devno *) (tbl), sizeof(tbl) / sizeof((tbl)[0]), sizeof((tbl)[0]), (vendor), (product))
+
 /* usb_task: runs on the device's worker */
 struct usb_task
 {

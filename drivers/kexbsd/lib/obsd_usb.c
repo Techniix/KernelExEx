@@ -549,6 +549,18 @@ usbd_status usbd_open_pipe_intr(struct usbd_interface *iface, uint8_t address, u
 	return e == USBD_IN_PROGRESS ? USBD_NORMAL_COMPLETION : e;
 }
 
+const struct usb_devno *usbd_match_device(const struct usb_devno *tbl, unsigned int nentries, unsigned int sz,
+                                          uint16_t vendor, uint16_t product)
+{
+	while (nentries--)
+	{
+		if (tbl->ud_vendor == vendor && (tbl->ud_product == product || tbl->ud_product == 0xffff))
+			return tbl;
+		tbl = (const struct usb_devno *) ((const char *) tbl + sz);
+	}
+	return NULL;
+}
+
 /* ---- tasks ------------------------------------------------------------------------- */
 static void task_thunk(void *arg)
 {
@@ -585,6 +597,8 @@ int obsd_usb_attach(PDEVICE_OBJECT lower, kexbsd_worker *worker, obsd_usb_match_
 	dev->kdev = kexusb_open(lower);
 	dev->worker = worker;
 	dev->config_index = -1;
+	/* Windows 98 SE has no USB 2.0 stack: every device runs at full speed */
+	dev->speed = USB_SPEED_FULL;
 	if (!dev->kdev ||
 	    kexusb_get_descriptor(dev->kdev, UDESC_DEVICE, 0, 0, &dev->ddesc, sizeof(dev->ddesc), &got) != KEXUSB_OK ||
 	    got < sizeof(dev->ddesc))

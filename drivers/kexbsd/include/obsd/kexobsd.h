@@ -312,6 +312,11 @@ void obsd_random_buf(void *p, size_t n);
 extern volatile time_t obsd_time_uptime;
 #define getuptime() ((time_t) (kexbsd_ticks() / hz))
 
+/* loadfirmware(9): files in WINDOWS\SYSTEM\KEXFW (the INFs put them there);
+ * the buffer is freed with free(buf, M_DEVBUF, len) */
+int obsd_loadfirmware(const char *name, unsigned char **buf, size_t *len);
+#define loadfirmware(n, b, l) obsd_loadfirmware((n), (b), (l))
+
 /* ---- autoconf(9) ---------------------------------------------------------- */
 struct device
 {

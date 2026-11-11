@@ -500,11 +500,34 @@ Section /o "USB CDC Ethernet adapters (KernelExEx driver)" SECKEXCDCE
   WriteRegStr HKLM "Software\KernelEx\Components" "KexCdce" "1"
 SectionEnd
 
+Section /o "Realtek USB Wi-Fi: TP-Link TL-WN722N v2/v3, TL-WN725N and others (OpenBSD urtwn)" SECKEXURTWN
+  SetOutPath "$INSTDIR\drivers\kexurtwn"
+  File "drivers\kexnet\kexurtwn.sys"
+  File "drivers\kexnet\kexbsd.sys"
+  File "drivers\kexnet\kexurtwn.inf"
+  ;Realtek firmware, redistributable in binary form (LICENSE.TXT)
+  File "drivers\kexnet\urtwn-fw\8188EU.FW"
+  File "drivers\kexnet\urtwn-fw\8192CU.FW"
+  File "drivers\kexnet\urtwn-fw\8192CT.FW"
+  File "drivers\kexnet\urtwn-fw\8192EU.FW"
+  File "/oname=FWLICENSE.TXT" "drivers\kexnet\urtwn-fw\LICENSE.TXT"
+  SetOutPath "$INSTDIR"
+  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+  StrCmp $0 "" 0 +2
+    StrCpy $0 "$WINDIR\INF"
+  ${WordFind} "$0" "$INSTDIR\drivers\kexurtwn" "E+1{" $1
+  IfErrors 0 kexurtwn_listed
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexurtwn"
+  kexurtwn_listed:
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexUrtwn" "1"
+SectionEnd
+
 SectionGroupEnd
 
 LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
 LangString DESC_KEXRNDIS ${LANG_ENGLISH} "USB network adapters that speak RNDIS, including USB tethering from an Android phone, with OpenBSD's urndis driver."
 LangString DESC_KEXCDCE ${LANG_ENGLISH} "USB Ethernet adapters that follow the CDC Ethernet standard (many USB-C and Realtek RTL8152/8153 adapters)."
+LangString DESC_KEXURTWN ${LANG_ENGLISH} "Wi-Fi with WPA2 for Realtek USB adapters (RTL8188CUS/EU, RTL8192CU/EU), including TP-Link TL-WN722N v2/v3 and TL-WN725N v2/v3, with OpenBSD's urtwn and wireless stack. Set the network name and passphrase in the adapter's Advanced properties."
 LangString DESC_KEXEM ${LANG_ENGLISH} "Intel PRO/1000 gigabit adapters (82540 to I350, ICH/PCH onboard), with OpenBSD's em driver. Windows uses it when it finds one."
 
 LangString DESC_GAMEPAD ${LANG_ENGLISH} "Support for modern game controllers."
@@ -557,6 +580,7 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRNDIS} $(DESC_KEXRNDIS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXCDCE} $(DESC_KEXCDCE)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXURTWN} $(DESC_KEXURTWN)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ;--------------------------------
@@ -626,6 +650,19 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\kexcdce"
     RMDir "$INSTDIR\drivers"
   un_kexcdce_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexUrtwn"
+  StrCmp $0 "1" 0 un_kexurtwn_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\kexurtwn" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\kexurtwn\kexurtwn.sys"
+    Delete /REBOOTOK "$INSTDIR\drivers\kexurtwn\kexbsd.sys"
+    Delete "$INSTDIR\drivers\kexurtwn\*.FW"
+    Delete "$INSTDIR\drivers\kexurtwn\FWLICENSE.TXT"
+    Delete "$INSTDIR\drivers\kexurtwn\kexurtwn.inf"
+    RMDir "$INSTDIR\drivers\kexurtwn"
+    RMDir "$INSTDIR\drivers"
+  un_kexurtwn_done:
   DeleteRegKey HKLM "Software\KernelEx\Components"
 
   ;Put back the proxy settings saved before Protoweb was turned on

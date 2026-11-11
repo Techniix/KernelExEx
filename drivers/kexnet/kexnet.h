@@ -26,7 +26,12 @@ struct kexnet_driver
 	/* 1: a USB driver (match/attach take a struct usb_attach_arg); it runs
 	 * on its own worker thread, and isr/intr_enable are unused */
 	int usb;
+	/* Wi-Fi drivers: apply network name and passphrase (adapter
+	 * properties) before the interface comes up; kex80211_configure */
+	int (*wifi_config)(struct ifnet *ifp, const char *ssid, const char *pass, int allow_tkip);
 };
+
+int kex80211_configure(struct ifnet *ifp, const char *ssid, const char *pass, int allow_tkip);
 
 NTSTATUS kexnet_register(PDRIVER_OBJECT drv, PUNICODE_STRING reg, const struct kexnet_driver *d);
 
