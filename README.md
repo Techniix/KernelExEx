@@ -301,6 +301,19 @@ list.
     it also writes USB sticks. It is a separate program (CSMWrap's SeaBIOS
     is LGPLv3, decision 42) with a command line and a simple window.
 
+44. **Our own version numbers** (to decide): KernelExEx releases need a
+    scheme of their own instead of carrying on KernelEx's 4.x numbers, used
+    the same way by the installer, the Properties tab, every driver's
+    `DriverVer`/file version and the test builds.
+45. **Logo** (planned): an original KernelExEx logo, shown in the
+    installer (welcome and finish pages, header, icon) and at the top of
+    this README.
+46. **Boot logo badge** (planned, optional, off by default): a small
+    KernelExEx badge on the Windows 98 startup screen. The installer draws
+    it onto the user's own boot logo at install time (`LOGO.SYS`, 320x400,
+    256 colours; the built-in logo if there is none), keeps the original
+    and puts it back on uninstall. No Microsoft artwork is shipped.
+
 ## Installer components
 
 | Component | Contents | Status | Ticked by default |
