@@ -439,7 +439,8 @@ python3 toolchain/nsis/build_nsis.py --nsis-src ../nsis --scons-src ../scons \
 # Xbox 360-protocol controller driver (WDM, imports checked against 98 SE)
 python3 toolchain/wdm/build_kexpad.py --out ../build/kexpad --sdk ../build/sdk
 
-# network drivers: kexbsd.sys + kexem.sys (OpenBSD em) + kexrndis.sys (OpenBSD urndis)
+# network drivers: kexbsd.sys + kexem.sys (OpenBSD em), kexrndis.sys (OpenBSD urndis),
+# kexcdce.sys (our CDC ECM), kexurtwn.sys (OpenBSD urtwn + net80211)
 python3 toolchain/wdm/build_kexnet.py --out ../build/kexnet --sdk ../build/sdk
 
 # installer (absolute paths)
