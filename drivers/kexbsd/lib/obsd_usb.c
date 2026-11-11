@@ -597,8 +597,8 @@ int obsd_usb_attach(PDEVICE_OBJECT lower, kexbsd_worker *worker, obsd_usb_match_
 	dev->kdev = kexusb_open(lower);
 	dev->worker = worker;
 	dev->config_index = -1;
-	/* Windows 98 SE has no USB 2.0 stack: every device runs at full speed */
-	dev->speed = USB_SPEED_FULL;
+	/* high speed on KernelExEx's USB 2.0 driver, full speed on Windows' own stack */
+	dev->speed = dev->kdev && kexusb_high_speed(dev->kdev) ? USB_SPEED_HIGH : USB_SPEED_FULL;
 	if (!dev->kdev ||
 	    kexusb_get_descriptor(dev->kdev, UDESC_DEVICE, 0, 0, &dev->ddesc, sizeof(dev->ddesc), &got) != KEXUSB_OK ||
 	    got < sizeof(dev->ddesc))

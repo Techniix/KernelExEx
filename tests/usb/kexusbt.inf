@@ -1,0 +1,36 @@
+; kexusbt.inf - KernelExEx USB test driver (QEMU USB mass storage). Tests only.
+[Version]
+Signature="$CHICAGO$"
+Class=USB
+ClassGUID={36FC9E60-C465-11CF-8056-444553540000}
+Provider=%KEX%
+
+[Manufacturer]
+%KEX%=Models
+
+[Models]
+%dev%=KexUsbt,USB\VID_46F4&PID_0001
+
+[KexUsbt]
+AddReg=KexUsbt.AddReg
+CopyFiles=KexUsbt.CopyFiles
+
+[KexUsbt.AddReg]
+HKR,,DevLoader,,*ntkern
+HKR,,NTMPDriver,,kexusbt.sys
+
+[KexUsbt.CopyFiles]
+kexusbt.sys
+
+[DestinationDirs]
+KexUsbt.CopyFiles=10,system32\drivers
+
+[SourceDisksNames]
+1="KernelExEx USB test",,0
+
+[SourceDisksFiles]
+kexusbt.sys=1
+
+[Strings]
+KEX="KernelExEx"
+dev="KernelExEx USB test (QEMU storage)"

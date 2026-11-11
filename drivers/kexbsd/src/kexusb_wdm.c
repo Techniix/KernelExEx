@@ -10,6 +10,7 @@
 #include <usb.h>
 #include <usbdlib.h>   /* macros only: no usbd.sys imports, see build_config_request */
 #include <usbioctl.h>
+#include "kex_usbbusif.h"
 
 #define TAG 'busK'
 
@@ -80,6 +81,43 @@ kexusb_dev *kexusb_open(PDEVICE_OBJECT lower)
 	if (d)
 		d->lower = lower;
 	return d;
+}
+
+/* 1 when the device runs at high speed: asks the USBDI bus interface, which
+ * KernelExEx's USB 2.0 driver offers (Windows 98's own USB 1.1 stack has
+ * none, so its devices are full speed). PASSIVE_LEVEL only. */
+int kexusb_high_speed(kexusb_dev *d)
+{
+	KEX_USB_BUS_INTERFACE_USBDI_V1 bi;
+	KEVENT ev;
+	IO_STATUS_BLOCK iosb;
+	PIRP irp;
+	PIO_STACK_LOCATION sl;
+	NTSTATUS st;
+	int hs = 0;
+	RtlZeroMemory(&bi, sizeof(bi));
+	KeInitializeEvent(&ev, NotificationEvent, FALSE);
+	irp = IoBuildSynchronousFsdRequest(IRP_MJ_PNP, d->lower, NULL, 0, NULL, &ev, &iosb);
+	if (!irp)
+		return 0;
+	irp->IoStatus.Status = STATUS_NOT_SUPPORTED;
+	sl = IoGetNextIrpStackLocation(irp);
+	sl->MinorFunction = IRP_MN_QUERY_INTERFACE;
+	sl->Parameters.QueryInterface.InterfaceType = &KEX_USB_BUS_INTERFACE_USBDI_GUID;
+	sl->Parameters.QueryInterface.Size = KEX_USBDI_V1_SIZE;
+	sl->Parameters.QueryInterface.Version = 1;
+	sl->Parameters.QueryInterface.Interface = (PINTERFACE) &bi;
+	st = IoCallDriver(d->lower, irp);
+	if (st == STATUS_PENDING)
+	{
+		KeWaitForSingleObject(&ev, Executive, KernelMode, FALSE, NULL);
+		st = iosb.Status;
+	}
+	if (NT_SUCCESS(st) && bi.Version >= 1 && bi.IsDeviceHighSpeed)
+		hs = bi.IsDeviceHighSpeed(bi.BusContext) ? 1 : 0;
+	if (NT_SUCCESS(st) && bi.InterfaceDereference)
+		bi.InterfaceDereference(bi.BusContext);
+	return hs;
 }
 
 void kexusb_close(kexusb_dev *d)

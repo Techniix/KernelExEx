@@ -534,6 +534,63 @@ Section /o "AC'97 audio (Intel ICH, nVidia nForce, AMD; any AC'97 codec)" SECKEX
   WriteRegStr HKLM "Software\KernelEx\Components" "KexAc97" "1"
 SectionEnd
 
+Section /o "USB 2.0 (EHCI: Intel, VIA, NEC, nVidia, AMD, SiS, ALi and others)" SECKEXEHCI
+  ;a WDM bus driver: Windows finds it in this folder when it finds the USB 2.0 controller
+  SetOutPath "$INSTDIR\drivers\usb2"
+  File "drivers\usb2\kexehci.sys"
+  File "drivers\usb2\kexehci.inf"
+  SetOutPath "$INSTDIR"
+  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+  StrCmp $0 "" 0 +2
+    StrCpy $0 "$WINDIR\INF"
+  ${WordFind} "$0" "$INSTDIR\drivers\usb2" "E+1{" $1
+  IfErrors 0 kexehci_listed
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\usb2"
+  kexehci_listed:
+  Call KexEhciRedetect
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexEhci" "1"
+SectionEnd
+
+;USB 2.0 controllers Windows found no driver for are forgotten, so Windows
+;finds them again at the next start, with our INF (as KexChipRedetect does).
+Function KexEhciRedetect
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R5
+  Push $R6
+  Push $R7
+  StrCpy $R0 0
+  ker_loop:
+    EnumRegKey $R1 HKLM "Enum\PCI" $R0
+    StrCmp $R1 "" ker_done
+    IntOp $R0 $R0 + 1
+    StrCpy $R6 0
+    ker_inst:
+      EnumRegKey $R5 HKLM "Enum\PCI\$R1" $R6
+      StrCmp $R5 "" ker_loop
+      ReadRegStr $R2 HKLM "Enum\PCI\$R1\$R5" "CompatibleIDs"
+      ClearErrors
+      ${WordFind} "$R2" "CC_0C0320" "E+1{" $R7
+      IfErrors ker_keep
+      ReadRegStr $R7 HKLM "Enum\PCI\$R1\$R5" "Class"
+      StrCmp $R7 "" +2
+      StrCmp $R7 "Unknown" 0 ker_keep
+        DetailPrint "Will detect again: PCI\$R1"
+        DeleteRegKey HKLM "Enum\PCI\$R1\$R5"
+        Goto ker_inst
+      ker_keep:
+      IntOp $R6 $R6 + 1
+      Goto ker_inst
+  ker_done:
+  Pop $R7
+  Pop $R6
+  Pop $R5
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
 SectionGroup "Network adapter drivers" SECNETDRV
 
 Section /o "Intel PRO/1000 (OpenBSD em driver)" SECKEXEM
@@ -658,6 +715,7 @@ SectionEnd
 SectionGroupEnd
 
 LangString DESC_KEXCHIP ${LANG_ENGLISH} "Names every part of Intel chipsets newer than Windows 98 (ICH2 to ICH10: SMBus, LPC, USB, IDE/SATA, bridges) so Device Manager shows no unknown devices, and sets them up with Windows' own drivers."
+LangString DESC_KEXEHCI ${LANG_ENGLISH} "USB 2.0 speed for the USB 2.0 ports of any EHCI controller (the Intel ICH4 to ICH10 and later chipsets, VIA, NEC and other add-in cards). Windows 98 runs them at USB 1.1 speed only. USB 1.1 mice, keyboards and printers stay on Windows' own drivers."
 LangString DESC_KEXAC97 ${LANG_ENGLISH} "Sound for onboard AC'97 audio (Intel ICH to ICH7, nVidia nForce 1 to 4, AMD-8111) with any AC'97 codec, such as the Realtek ALC655 on the MSI 848P Neo2-V. Windows 98 has no driver for these."
 LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
 LangString DESC_KEXRNDIS ${LANG_ENGLISH} "USB network adapters that speak RNDIS, including USB tethering from an Android phone, with OpenBSD's urndis driver."
@@ -716,6 +774,7 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
   !insertmacro MUI_DESCRIPTION_TEXT ${SECNETDRV} $(DESC_NETDRV)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXCHIP} $(DESC_KEXCHIP)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAC97} $(DESC_KEXAC97)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEHCI} $(DESC_KEXEHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRL} $(DESC_KEXRL)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRNDIS} $(DESC_KEXRNDIS)
@@ -768,6 +827,16 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\audio"
     RMDir "$INSTDIR\drivers"
   un_kexac97_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexEhci"
+  StrCmp $0 "1" 0 un_kexehci_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\usb2" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\usb2\kexehci.sys"
+    Delete "$INSTDIR\drivers\usb2\kexehci.inf"
+    RMDir "$INSTDIR\drivers\usb2"
+    RMDir "$INSTDIR\drivers"
+  un_kexehci_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexChip"
   StrCmp $0 "1" 0 un_kexchip_done
     ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"

@@ -49,6 +49,7 @@ struct kexusb_iface_pipes
 typedef void (*kexusb_done_fn)(void *ctx, int status, unsigned int actlen);
 
 KEXBSD_API kexusb_dev *kexusb_open(PDEVICE_OBJECT lower);
+KEXBSD_API int kexusb_high_speed(kexusb_dev *d);
 KEXBSD_API void kexusb_close(kexusb_dev *d);
 KEXBSD_API int kexusb_get_descriptor(kexusb_dev *d, uint8_t type, uint8_t index, uint16_t langid, void *buf,
                                      unsigned int len, unsigned int *got);

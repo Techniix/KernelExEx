@@ -316,6 +316,7 @@ list.
 | Xbox controller driver | `kexpad.sys`, 360 protocol (173 pads); later One/Series | builds, in installer; untested on hardware | to be decided |
 | Intel PRO/1000 driver | `kexem.sys` + `kexbsd.sys`: OpenBSD em(4) through kexbsd, 192 adapters | DHCP + ping in QEMU (e1000); untested on hardware | to be decided |
 | AC'97 audio | `kexac97.sys`: own GPLv2 WDM audio driver (PortCls WaveCyclic + Topology); Intel ICH to ICH7, nForce 1-4, AMD-8111/768, any AC'97 codec (ALC655 on the 848P Neo2-V) | QEMU AC97: installs, startup and Welcome sounds play (captured and compared with the source WAV), volume icon; untested on hardware | to be decided |
+| USB 2.0 | `kexehci.sys`: own GPLv2 EHCI driver, a complete stack for high-speed devices (control, bulk, interrupt; USB 2.0 hubs with split transactions); full/low-speed devices go to the USB 1.1 controllers and Windows' own drivers. Gives each device a PDO with Windows 98's usual IDs, so Windows' class drivers and ours load unchanged; KernelExEx USB drivers learn they run at high speed. Every EHCI controller (113 named, plus any by PCI class). No isochronous transfers yet | QEMU ICH9 EHCI: Windows' own HID driver runs a high-speed tablet (pointer and buttons), unplug and replug; bulk test with a USB disk: INQUIRY, 4 MB read, 64 KB write/read-back; full-speed device handed to the UHCI companion. Hubs and split transactions untested (QEMU has no USB 2.0 hub) | to be decided |
 | Intel chipset INFs | `kexchip.inf`, `kexide.inf`, `kexuhci.inf` from pci.ids: ICH2 to ICH10, 845 to P45 | QEMU: ICH9 UHCI installs and runs; untested on hardware | to be decided |
 | Realtek RTL8139/810x Ethernet | `kexrl.sys`: own GPLv2 driver; RTL8139/C/C+/D, RTL8100/8100C (MSI 848P Neo2-V onboard), RTL8101L and 19 OEM cards | DHCP, ping 4/4 and 30/30 at 1450 bytes in QEMU (rtl8139); untested on hardware | to be decided |
 | USB RNDIS / phone tethering | `kexrndis.sys`: OpenBSD urndis(4) through kexbsd's USB layer | DHCP + ping in QEMU (usb-net on UHCI); untested on hardware | to be decided |
@@ -450,6 +451,10 @@ python3 toolchain/nsis/build_nsis.py --nsis-src ../nsis --scons-src ../scons \
 # Xbox 360-protocol controller driver (WDM, imports checked against 98 SE)
 python3 toolchain/wdm/build_kexpad.py --out ../build/kexpad --sdk ../build/sdk
 
+# USB 2.0: kexehci.sys (EHCI); --tests also builds tests/usb/kexusbt.sys (QEMU USB disk test)
+python3 toolchain/wdm/build_kexusb.py --out ../build/kexusb
+python3 drivers/usb/ehci/gen_inf.py ../thirdparty/pciids/pci.ids drivers/usb/ehci/kexehci.inf
+
 # audio: kexac97.sys (AC'97, WDM PortCls)
 python3 toolchain/wdm/build_kexaudio.py --out ../build/kexaudio
 # network drivers: kexbsd.sys + kexem.sys (OpenBSD em), kexrndis.sys (OpenBSD urndis),
@@ -458,7 +463,8 @@ python3 toolchain/wdm/build_kexnet.py --out ../build/kexnet --sdk ../build/sdk
 
 # installer (absolute paths)
 python3 toolchain/build_installer.py --core $PWD/../build/core --net $PWD/../build/win9x \
-    --kexpad $PWD/../build/kexpad --kexnet $PWD/../build/kexnet --nsis $PWD/../build/nsis \
+    --kexpad $PWD/../build/kexpad --kexnet $PWD/../build/kexnet --kexaudio $PWD/../build/kexaudio \
+    --kexusb $PWD/../build/kexusb --nsis $PWD/../build/nsis \
     --out $PWD/../build/installer
 ```
 
