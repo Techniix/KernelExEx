@@ -356,6 +356,13 @@ list.
 | Framebuffer display driver | VBE / GOP | planned | to be decided |
 | Developer SDK | headers, import libraries, porting guide | planned | to be decided |
 
+## Hardware test builds
+
+Builds for testing on real machines are on the
+[`test-builds`](https://github.com/Techniix/KernelExEx/tree/test-builds) branch, one zip per build
+with its own install and test steps, each linked to the commit it was built from. That branch holds
+only the zips, so `main` stays small.
+
 ## Requirements
 
 - Windows 98 SE or Windows ME.
