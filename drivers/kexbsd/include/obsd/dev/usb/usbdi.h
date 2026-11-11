@@ -105,6 +105,7 @@ struct usbd_pipe
 	void *handle;
 	uint8_t ep;
 	uint8_t type;
+	uint16_t maxpkt;
 	int in;
 	/* interrupt pipes opened with usbd_open_pipe_intr keep resubmitting */
 	struct usbd_xfer *intr_xfer;
@@ -128,6 +129,7 @@ struct usbd_xfer
 	struct kexbsd_work work;   /* the callback, queued to the worker */
 	KEVENT done;               /* for USBD_SYNCHRONOUS */
 	volatile int busy;
+	int zlp_sent;               /* USBD_FORCE_SHORT_XFER: the terminating packet went */
 };
 
 struct usb_attach_arg
@@ -162,6 +164,8 @@ usbd_status usbd_transfer(struct usbd_xfer *xfer);
 void usbd_get_xfer_status(struct usbd_xfer *xfer, void **priv, void **buffer, uint32_t *count,
                           usbd_status *status);
 usbd_status usbd_do_request(struct usbd_device *dev, usb_device_request_t *req, void *data);
+usbd_status usbd_get_string_desc(struct usbd_device *dev, int index, int langid, usb_string_descriptor_t *sdesc,
+                                 int *sizep);
 usbd_status usbd_do_request_flags(struct usbd_device *dev, usb_device_request_t *req, void *data, uint16_t flags,
                                   int *actlen, uint32_t timeout);
 usb_interface_descriptor_t *usbd_get_interface_descriptor(struct usbd_interface *iface);

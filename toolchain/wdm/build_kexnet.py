@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build the OpenBSD network drivers in drivers/kexnet as NDIS 5 miniports:
-kexem.sys (em, Intel PRO/1000) and kexrndis.sys (urndis, USB RNDIS).
+kexem.sys (em, Intel PRO/1000), kexrndis.sys (urndis, USB RNDIS) and
+kexcdce.sys (our own CDC ECM driver).
 Builds kexbsd.sys first (they import from it).
 
 usage: build_kexnet.py [--out DIR] [--sdk DIR] [--debugcon]
@@ -45,6 +46,7 @@ def main():
                   ["-I", str(SRC / "em")]),
         "kexrndis": ([SRC / "kexrndis.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c",
                       SRC / "urndis" / "dev" / "usb" / "if_urndis.c", rt], ["-I", str(SRC / "urndis")]),
+        "kexcdce": ([SRC / "cdce" / "kexcdce.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", rt], ["-I", str(SRC)]),
     }
     for name, (srcs, inc) in drivers.items():
         dout = out / name

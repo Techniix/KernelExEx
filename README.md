@@ -316,6 +316,7 @@ list.
 | Xbox controller driver | `kexpad.sys`, 360 protocol (173 pads); later One/Series | builds, in installer; untested on hardware | to be decided |
 | Intel PRO/1000 driver | `kexem.sys` + `kexbsd.sys`: OpenBSD em(4) through kexbsd, 192 adapters | DHCP + ping in QEMU (e1000); untested on hardware | to be decided |
 | USB RNDIS / phone tethering | `kexrndis.sys`: OpenBSD urndis(4) through kexbsd's USB layer | DHCP + ping in QEMU (usb-net on UHCI); untested on hardware | to be decided |
+| USB CDC Ethernet | `kexcdce.sys`: own GPLv2 CDC ECM driver (OpenBSD cdce is BSD-4) | DHCP + ping in QEMU (usb-net ECM); untested on hardware | to be decided |
 | Gamepad Configurator | mapping, test, profiles | planned | to be decided |
 | Per-program mixer | audio API library, mixer, tray icon | planned | to be decided |
 | USB audio driver | headsets and microphones | research | to be decided |

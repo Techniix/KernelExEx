@@ -53,6 +53,8 @@ LAYOUT = {
     "drivers/kexnet/kexem.inf": "drivers/kexnet/kexem.inf",
     "drivers/kexnet/kexrndis.sys": "kexnet:kexrndis.sys",
     "drivers/kexnet/kexrndis.inf": "drivers/kexnet/kexrndis.inf",
+    "drivers/kexnet/kexcdce.sys": "kexnet:kexcdce.sys",
+    "drivers/kexnet/kexcdce.inf": "drivers/kexnet/cdce/kexcdce.inf",
     "net/certs/roots.pem": "net/certs/roots.pem",
     "apilibs/core.ini": "apilibs/CORE.INI",
     "apilibs/settings.reg": "apilibs/settings.reg",

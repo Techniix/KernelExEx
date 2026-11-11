@@ -1,0 +1,107 @@
+; kexcdce.inf - KernelExEx USB CDC Ethernet (ECM) adapters for Windows 98 SE / ME
+
+[Version]
+Signature="$CHICAGO$"
+Class=Net
+ClassGUID={4d36e972-e325-11ce-bfc1-08002be10318}
+Provider=%KEX%
+
+[Manufacturer]
+%KEX%=Models
+
+[Models]
+%dev0%=cdce0.ndi,USB\Class_02&SubClass_06&Prot_00
+%dev1%=cdce1.ndi,USB\VID_0BDA&PID_8152
+%dev2%=cdce2.ndi,USB\VID_0BDA&PID_8153
+%dev3%=cdce3.ndi,USB\VID_17EF&PID_7205
+%dev4%=cdce4.ndi,USB\VID_2357&PID_0601
+
+[cdce0.ndi]
+AddReg=cdce0.id,kexcdce.reg
+CopyFiles=kexcdce.copy
+DeviceID=USB\Class_02&SubClass_06&Prot_00
+MaxInstance=8
+
+[cdce0.id]
+HKR,Ndi,DeviceID,,"USB\Class_02&SubClass_06&Prot_00"
+HKR,Ndi,MaxInstance,,8
+
+[cdce1.ndi]
+AddReg=cdce1.id,kexcdce.reg
+CopyFiles=kexcdce.copy
+DeviceID=USB\VID_0BDA&PID_8152
+MaxInstance=8
+
+[cdce1.id]
+HKR,Ndi,DeviceID,,"USB\VID_0BDA&PID_8152"
+HKR,Ndi,MaxInstance,,8
+
+[cdce2.ndi]
+AddReg=cdce2.id,kexcdce.reg
+CopyFiles=kexcdce.copy
+DeviceID=USB\VID_0BDA&PID_8153
+MaxInstance=8
+
+[cdce2.id]
+HKR,Ndi,DeviceID,,"USB\VID_0BDA&PID_8153"
+HKR,Ndi,MaxInstance,,8
+
+[cdce3.ndi]
+AddReg=cdce3.id,kexcdce.reg
+CopyFiles=kexcdce.copy
+DeviceID=USB\VID_17EF&PID_7205
+MaxInstance=8
+
+[cdce3.id]
+HKR,Ndi,DeviceID,,"USB\VID_17EF&PID_7205"
+HKR,Ndi,MaxInstance,,8
+
+[cdce4.ndi]
+AddReg=cdce4.id,kexcdce.reg
+CopyFiles=kexcdce.copy
+DeviceID=USB\VID_2357&PID_0601
+MaxInstance=8
+
+[cdce4.id]
+HKR,Ndi,DeviceID,,"USB\VID_2357&PID_0601"
+HKR,Ndi,MaxInstance,,8
+
+[kexcdce.reg]
+HKR,,DevLoader,,"*ndis"
+HKR,,DeviceVxDs,,kexcdce.sys
+HKR,,EnumPropPages,,"netdi.dll,EnumPropPages"
+HKR,NDIS,LogDriverName,,kexcdce
+HKR,NDIS,MajorNdisVersion,1,05
+HKR,NDIS,MinorNdisVersion,1,00
+HKR,Ndi,HelpText,,%HELP%
+HKR,Ndi\Interfaces,DefUpper,,"ndis3"
+HKR,Ndi\Interfaces,DefLower,,"ethernet"
+HKR,Ndi\Interfaces,UpperRange,,"ndis3"
+HKR,Ndi\Interfaces,LowerRange,,"ethernet"
+HKR,Ndi\Install,ndis3,,kexcdce.ndis3
+
+[kexcdce.ndis3]   ; netdi runs this with no source path: the files come from the device section
+
+[kexcdce.copy]
+kexcdce.sys
+kexbsd.sys
+
+[DestinationDirs]
+kexcdce.copy=11
+
+[SourceDisksNames]
+1=%DISK%,,
+
+[SourceDisksFiles]
+kexcdce.sys=1
+kexbsd.sys=1
+
+[Strings]
+KEX="KernelExEx"
+DISK="KernelExEx drivers"
+HELP="USB network adapter using the CDC Ethernet (ECM) standard, with the KernelExEx CDC Ethernet driver."
+dev0="USB CDC Ethernet adapter (KernelExEx)"
+dev1="Realtek RTL8152 USB Ethernet (KernelExEx)"
+dev2="Realtek RTL8153 USB Gigabit Ethernet (KernelExEx)"
+dev3="Lenovo USB Ethernet (RTL8153) (KernelExEx)"
+dev4="TP-Link UE300 USB Gigabit Ethernet (RTL8153) (KernelExEx)"

@@ -290,6 +290,17 @@ usbd_status usbd_do_request(struct usbd_device *dev, usb_device_request_t *req, 
 	return usbd_do_request_flags(dev, req, data, 0, NULL, USBD_DEFAULT_TIMEOUT);
 }
 
+usbd_status usbd_get_string_desc(struct usbd_device *dev, int index, int langid, usb_string_descriptor_t *sdesc,
+                                 int *sizep)
+{
+	unsigned int got = 0;
+	int r = kexusb_get_descriptor(dev->kdev, UDESC_STRING, (uint8_t) index, (uint16_t) langid, sdesc,
+	                              sizeof(*sdesc), &got);
+	if (sizep)
+		*sizep = (int) got;
+	return r == KEXUSB_OK && got >= 2 ? USBD_NORMAL_COMPLETION : (r ? from_kexusb(r) : USBD_SHORT_XFER);
+}
+
 /* ---- pipes ------------------------------------------------------------------------- */
 usbd_status usbd_open_pipe(struct usbd_interface *iface, uint8_t address, uint8_t flags, struct usbd_pipe **pipe)
 {
@@ -306,6 +317,7 @@ usbd_status usbd_open_pipe(struct usbd_interface *iface, uint8_t address, uint8_
 			p->handle = iface->pipes.pipes[i].handle;
 			p->ep = address;
 			p->type = iface->pipes.pipes[i].type;
+			p->maxpkt = iface->pipes.pipes[i].maxpkt;
 			p->in = (address & UE_DIR_IN) != 0;
 			*pipe = p;
 			return USBD_NORMAL_COMPLETION;
@@ -450,6 +462,16 @@ static void xfer_done(void *ctx, int r, unsigned int actlen)
 	x->status = from_kexusb(r);
 	if (x->status == USBD_NORMAL_COMPLETION && x->pipe->in && actlen < x->length && !(x->flags & USBD_SHORT_XFER_OK))
 		x->status = USBD_SHORT_XFER;
+	/* an OUT transfer that ends on a packet boundary needs a zero-length
+	 * packet to end it, when the driver asks (USBD_FORCE_SHORT_XFER) */
+	if (x->status == USBD_NORMAL_COMPLETION && !x->pipe->in && (x->flags & USBD_FORCE_SHORT_XFER) &&
+	    !x->zlp_sent && x->length && x->pipe->maxpkt && x->length % x->pipe->maxpkt == 0)
+	{
+		x->zlp_sent = 1;
+		if (kexusb_xfer_submit(x->kx, x->pipe->handle, 0, x->buffer, 0, 1, xfer_done, x) == KEXUSB_OK)
+			return;
+	}
+	x->actlen = x->zlp_sent ? x->length : actlen;
 	if (x->flags & USBD_SYNCHRONOUS)
 	{
 		x->busy = 0;
@@ -469,6 +491,7 @@ usbd_status usbd_transfer(struct usbd_xfer *x)
 	if (!x->buffer && x->length)
 		return USBD_INVAL;
 	x->busy = 1;
+	x->zlp_sent = 0;
 	KeClearEvent(&x->done);
 #ifdef KEX_DEBUGCON
 	{
