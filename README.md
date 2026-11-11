@@ -281,10 +281,25 @@ list.
     - boots both ways: the usual BIOS El Torito entry and a UEFI entry that
       starts CSMWrap first, so the same ISO or USB stick works on old and
       UEFI-only machines;
-    - offers a **boot loader** choice in that branch: standard BIOS boot, or
-      UEFI (an EFI system partition with CSMWrap set up on the target disk).
+    - offers a **boot loader** choice: standard BIOS boot, or UEFI (an EFI
+      system partition with CSMWrap set up on the target disk). Setup
+      partitions the disk *before* its components page, and the EFI
+      partition has to exist by then, so the choice is made twice in a
+      way that reads as one:
+      1. the patched disc's start menu (the "Start Windows 98 Setup from
+         CD-ROM" menu) gets "Install Windows 98 with KernelExEx (BIOS
+         boot)" and "... (UEFI boot)". The UEFI entry runs a small
+         partitioning step first (MBR: 100 MB FAT EFI partition + FAT32
+         for Windows), then starts setup;
+      2. the **KernelExEx > Boot loader** item in the components tree shows
+         the choice already made and installs CSMWrap and the boot entry
+         onto the EFI partition. If no EFI partition exists, the UEFI
+         option is greyed out with a note, rather than failing later.
+      Booted from UEFI firmware, the disc starts CSMWrap and then the same
+      menu, so one image works on old BIOS machines and UEFI-only ones.
     The patcher works on the user's own image and ships no Microsoft files;
-    it also writes USB sticks.
+    it also writes USB sticks. It is a separate program (CSMWrap's SeaBIOS
+    is LGPLv3, decision 42) with a command line and a simple window.
 
 ## Installer components
 
