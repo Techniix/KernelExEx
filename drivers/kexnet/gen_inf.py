@@ -14,7 +14,8 @@ def main():
     src = if_em.read_text()
     table = src[src.index("em_devices[] = {"):]
     table = table[:table.index("};")]
-    names = re.findall(r"PCI_PRODUCT_INTEL_(\w+)", table)
+    # EP80579 (ICP_xxxx) needs its GCU companion function: not supported (kexem.c)
+    names = [n for n in re.findall(r"PCI_PRODUCT_INTEL_(\w+)", table) if not n.startswith("EP80579")]
     ids, descs = {}, {}
     for line in pcidevs.read_text().splitlines():
         m = re.match(r"product\s+INTEL\s+(\w+)\s+0x([0-9a-fA-F]+)\s+(.*)", line)
@@ -44,12 +45,16 @@ def main():
         "[Intel]",
     ]
     for n in seen:
-        lines.append(f"%em_{ids[n]:04X}%=kexem.ndi,PCI\\VEN_8086&DEV_{ids[n]:04X}")
+        lines.append(f"%em_{ids[n]:04X}%=em_{ids[n]:04X}.ndi,PCI\\VEN_8086&DEV_{ids[n]:04X}")
+    # Windows 9x's network class installer (netdi) only takes a device as a
+    # network component, and binds protocols to it, with its DeviceID in the
+    # install section and under Ndi; so every device gets its own section.
+    for n in seen:
+        pid = f"PCI\\VEN_8086&DEV_{ids[n]:04X}"
+        lines += ["", f"[em_{ids[n]:04X}.ndi]", f"AddReg=em_{ids[n]:04X}.id,kexem.reg,kexem.params",
+                  "CopyFiles=kexem.sys.copy,kexbsd.copy", f"DeviceID={pid}", "MaxInstance=8",
+                  "", f"[em_{ids[n]:04X}.id]", f'HKR,Ndi,DeviceID,,"{pid}"', 'HKR,Ndi,MaxInstance,,8']
     lines += [
-        "",
-        "[kexem.ndi]",
-        "AddReg=kexem.reg,kexem.params",
-        "CopyFiles=kexem.sys.copy,kexbsd.copy",
         "",
         "[kexem.reg]",
         'HKR,,DevLoader,,"*ndis"',
@@ -65,7 +70,7 @@ def main():
         'HKR,Ndi\\Interfaces,LowerRange,,"ethernet"',
         "HKR,Ndi\\Install,ndis3,,kexem.ndis3",
         "",
-        "[kexem.ndis3]",
+        "[kexem.ndis3]",   # netdi runs this with no source path: the files come from the device section
         "",
         "[kexem.params]",
         "HKR,Ndi\\params\\NetworkAddress,ParamDesc,,%NETADDR%",

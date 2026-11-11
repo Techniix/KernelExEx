@@ -448,6 +448,31 @@ SectionEnd
 
 SectionGroupEnd
 
+SectionGroup "Network adapter drivers" SECNETDRV
+
+Section /o "Intel PRO/1000 (OpenBSD em driver)" SECKEXEM
+  ;kexem.sys, kexbsd.sys and the INF stay together in one folder added to
+  ;DevicePath, so Windows offers the driver when it finds an Intel adapter.
+  SetOutPath "$INSTDIR\drivers\kexem"
+  File "drivers\kexnet\kexem.sys"
+  File "drivers\kexnet\kexbsd.sys"
+  File "drivers\kexnet\kexem.inf"
+  SetOutPath "$INSTDIR"
+  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+  StrCmp $0 "" 0 +2
+    StrCpy $0 "$WINDIR\INF"
+  ${WordFind} "$0" "$INSTDIR\drivers\kexem" "E+1{" $1
+  IfErrors 0 kexem_listed
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexem"
+  kexem_listed:
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexEm" "1"
+SectionEnd
+
+SectionGroupEnd
+
+LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
+LangString DESC_KEXEM ${LANG_ENGLISH} "Intel PRO/1000 gigabit adapters (82540 to I350, ICH/PCH onboard), with OpenBSD's em driver. Windows uses it when it finds one."
+
 LangString DESC_GAMEPAD ${LANG_ENGLISH} "Support for modern game controllers."
 LangString DESC_XINPUT ${LANG_ENGLISH} "XInput (xinput1_3.dll) for games that need it. Works with any controller Windows sees; layouts follow the SDL controller database."
 LangString DESC_KEXPAD ${LANG_ENGLISH} "Driver for Xbox 360 and compatible USB pads (8BitDo, PowerA, PDP, Hori and others). Windows uses it when you plug one in."
@@ -494,6 +519,8 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
   !insertmacro MUI_DESCRIPTION_TEXT ${SECGAMEPAD} $(DESC_GAMEPAD)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECXINPUT} $(DESC_XINPUT)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXPAD} $(DESC_KEXPAD)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECNETDRV} $(DESC_NETDRV)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ;--------------------------------
@@ -530,6 +557,17 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\kexpad"
     RMDir "$INSTDIR\drivers"
   un_kexpad_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexEm"
+  StrCmp $0 "1" 0 un_kexem_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\kexem" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\kexem\kexem.sys"
+    Delete /REBOOTOK "$INSTDIR\drivers\kexem\kexbsd.sys"
+    Delete "$INSTDIR\drivers\kexem\kexem.inf"
+    RMDir "$INSTDIR\drivers\kexem"
+    RMDir "$INSTDIR\drivers"
+  un_kexem_done:
   DeleteRegKey HKLM "Software\KernelEx\Components"
 
   ;Put back the proxy settings saved before Protoweb was turned on

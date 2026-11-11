@@ -299,6 +299,7 @@ list.
 | RetroZilla | browser with Protoweb settings | planned | to be decided |
 | XInput | `xinput1_1`-`1_4`, `xinput9_1_0`, controller database | builds, in installer | to be decided |
 | Xbox controller driver | `kexpad.sys`, 360 protocol (173 pads); later One/Series | builds, in installer; untested on hardware | to be decided |
+| Intel PRO/1000 driver | `kexem.sys` + `kexbsd.sys`: OpenBSD em(4) through kexbsd, 192 adapters | DHCP + ping in QEMU (e1000); untested on hardware | to be decided |
 | Gamepad Configurator | mapping, test, profiles | planned | to be decided |
 | Per-program mixer | audio API library, mixer, tray icon | planned | to be decided |
 | USB audio driver | headsets and microphones | research | to be decided |
@@ -420,9 +421,13 @@ python3 toolchain/nsis/build_nsis.py --nsis-src ../nsis --scons-src ../scons \
 # Xbox 360-protocol controller driver (WDM, imports checked against 98 SE)
 python3 toolchain/wdm/build_kexpad.py --out ../build/kexpad --sdk ../build/sdk
 
-# installer
-python3 toolchain/build_installer.py --core ../build/core --net ../build/win9x \
-    --kexpad ../build/kexpad --nsis ../build/nsis --out ../build/installer
+# Intel PRO/1000 driver: kexbsd.sys + kexem.sys (OpenBSD em through kexbsd)
+python3 toolchain/wdm/build_kexem.py --out ../build/kexnet --sdk ../build/sdk
+
+# installer (absolute paths)
+python3 toolchain/build_installer.py --core $PWD/../build/core --net $PWD/../build/win9x \
+    --kexpad $PWD/../build/kexpad --kexnet $PWD/../build/kexnet --nsis $PWD/../build/nsis \
+    --out $PWD/../build/installer
 ```
 
 Design notes for the network modules are in `net/docs/ARCHITECTURE.md`.
@@ -437,6 +442,8 @@ Design notes for the network modules are in `net/docs/ARCHITECTURE.md`.
 | `toolchain/nsis/` | Cross-build of NSIS for Windows 9x installers |
 | `toolchain/wdm/` | WDM driver build: `build_kexpad.py`, import libraries with exact names |
 | `input/xinput/` | XInput DLL and the SDL-format mapping engine (`kxpad.c`) |
+| `drivers/kexbsd/` | kexbsd.sys: BSD kernel interfaces on 98 SE WDM; `include/obsd/` is the OpenBSD personality |
+| `drivers/kexnet/` | OpenBSD network drivers as NDIS 5 miniports (`obsd_net.c`), `kexem.sys`, vendored em sources |
 | `input/kexpad/` | HID minidriver for Xbox 360-protocol pads; `gen_inf.py` makes the INF from Linux `xpad` |
 | `input/gamepad/` | Controller database shipped with XInput |
 | `input/tests/` | Host tests for the mapping engine and the 360 report translation |

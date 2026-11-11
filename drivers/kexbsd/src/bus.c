@@ -134,7 +134,9 @@ uint32_t pci_read_config(device_t dev, int reg, int width)
 	int i;
 	if (reg < 0 || reg + width > 256)
 		return 0xFFFFFFFFu;
-	/* 98 SE has HalGetBusData (from offset 0) but not ...ByOffset */
+	if (dev->cfg_read)
+		return dev->cfg_read(dev, reg, width);
+	/* HalGetBusData reads from offset 0; writes go through ...ByOffset */
 	if (HalGetBusData(PCIConfiguration, dev->bus, slot_number(dev), cfg, reg + width) < (ULONG) (reg + width))
 		return 0xFFFFFFFFu;
 	for (i = width - 1; i >= 0; i--)
@@ -144,6 +146,11 @@ uint32_t pci_read_config(device_t dev, int reg, int width)
 
 void pci_write_config(device_t dev, int reg, uint32_t val, int width)
 {
+	if (dev->cfg_write)
+	{
+		dev->cfg_write(dev, reg, val, width);
+		return;
+	}
 	HalSetBusDataByOffset(PCIConfiguration, dev->bus, slot_number(dev), &val, (ULONG) reg, (ULONG) width);
 }
 

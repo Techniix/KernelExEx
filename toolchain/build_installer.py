@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # path in the installer script -> where it comes from
 # ("core:" = build_core.py output, "net:" = build_win9x.py output,
-#  "kexpad:" = toolchain/wdm/build_kexpad.py output, else repository)
+#  "kexpad:" = toolchain/wdm/build_kexpad.py output, "kexnet:" = build_kexem.py
+#  output, else repository)
 LAYOUT = {
     "Core/Release/KernelEx.dll": "core:KernelEx.dll",
     "apilibs/kexbases/Release/kexbases.dll": "core:kexbases.dll",
@@ -47,6 +48,9 @@ LAYOUT = {
     "input/gamepad/gamecontrollerdb.txt": "input/gamepad/gamecontrollerdb.txt",
     "input/kexpad/kexpad.sys": "kexpad:kexpad.sys",
     "input/kexpad/kexpad.inf": "input/kexpad/kexpad.inf",
+    "drivers/kexnet/kexem.sys": "kexnet:kexem.sys",
+    "drivers/kexnet/kexbsd.sys": "kexnet:kexbsd/kexbsd.sys",
+    "drivers/kexnet/kexem.inf": "drivers/kexnet/kexem.inf",
     "net/certs/roots.pem": "net/certs/roots.pem",
     "apilibs/core.ini": "apilibs/CORE.INI",
     "apilibs/settings.reg": "apilibs/settings.reg",
@@ -66,6 +70,7 @@ def main():
     ap.add_argument("--core", required=True, type=Path)
     ap.add_argument("--net", required=True, type=Path)
     ap.add_argument("--kexpad", type=Path, default=ROOT.parent / "build" / "kexpad")
+    ap.add_argument("--kexnet", type=Path, default=ROOT.parent / "build" / "kexnet")
     ap.add_argument("--nsis", required=True, type=Path, help="NSIS install prefix (bin/makensis)")
     ap.add_argument("--out", required=True, type=Path)
     a = ap.parse_args()
@@ -80,6 +85,8 @@ def main():
             path = a.net / src[4:]
         elif src.startswith("kexpad:"):
             path = a.kexpad / src[7:]
+        elif src.startswith("kexnet:"):
+            path = a.kexnet / src[7:]
         else:
             path = ROOT / src
         if not path.is_file():

@@ -90,7 +90,50 @@ cannot address it).
      Device Manager lists it under Network adapters as
      "Intel 82540EM (KernelExEx)". Not yet exercised at runtime:
      HalGetBusData (NDIS gave the config space), interrupts, bus_dma.
-   - Stage 2: OpenBSD personality headers, mbuf/ifnet glue, if_em.c.
+   - Stage 2 done (2026-11-11): OpenBSD's em(4), one patched line, runs
+     as `kexem.sys` and passes traffic on 98 SE. In QEMU: DHCP lease
+     10.0.2.15, `ping 10.0.2.2` 3/3 at 1-7 ms, and kextls reached
+     github.com over TCP and correctly refused the sandbox's intercepting
+     certificate (12037). Pieces:
+     - OpenBSD personality, `drivers/kexbsd/include/obsd/`: kexobsd.h
+       (types, malloc with sized free, spl/locks as no-ops under NDIS
+       serialization, timeout(9), autoconf, PCI, bus_dma), kexobsd_net.h
+       (mbuf, mbuf_list, ifnet, ifqueue, if_rxring, ifmedia, Ethernet),
+       one-line stubs for every sys/net/netinet header.
+     - NetBSD-style bus_dma in kexbsd.sys (`src/obsd_dma.c`, `obsd_*`
+       exports): segment maps, contiguous dmamem, chain loads.
+     - NDIS glue, `drivers/kexnet/obsd_net.c`, any OpenBSD Ethernet driver:
+       Initialize -> match/attach -> SIOCSIFFLAGS(IFF_UP); Send -> mbuf on
+       if_snd -> if_qstart; if_input -> NdisMEthIndicateReceive;
+       ifq_clr_oactive -> NdisMSendResourcesAvailable; timeout(9) on NDIS
+       miniport timers; ISR hook + HandleInterrupt; link state -> media
+       connect/disconnect; packet filter and multicast list -> IFF_PROMISC /
+       IFF_ALLMULTI / ac_multiaddrs + the driver's iff.
+   - Windows 98 SE facts this needed (all checked against 98 SE binaries):
+     - An NDIS_BUFFER is NDIS's own structure, not an MDL: the NT macros
+       NdisQueryBuffer/NdisQueryPacket read garbage (a page fault in the
+       first send). ndis.sys exports NdisQueryBuffer and
+       NdisGetFirstBufferFromPacket; only `Next` (first field) is shared.
+     - The miniport block offsets the receive/status/send macros use match
+       mingw's ndis.h: ndis.vxd stores EthFilterDprIndicateReceive at
+       +0x164, EthRxComplete +0x170, NdisMIndicateStatus +0x17C, its
+       Complete +0x180, SendComplete +0xEC, SendResourcesAvailable +0xF0,
+       TransferDataComplete +0x184 (found at the assignments in ndis.vxd).
+     - NdisMSetTimer is not exported; NdisSetTimer on the miniport timer
+       works (Microsoft's el90x.sys does the same).
+     - netdi only treats a device as a network component (and binds
+       protocols to it) when its install section has `DeviceID=` and
+       `HKR,Ndi,DeviceID`; the INF gives every device its own section.
+       Netdi runs Ndi\Install's ndis3 section without a source path, so it
+       must not copy files.
+     - If Windows crashes while a protocol is starting on an adapter, the
+       config manager marks that protocol devnode problem 11 (CM_PROB_LIAR)
+       and never starts it again: TCP/IP silently stays unbound. Seen after
+       the NdisQueryBuffer crash; reinstalling the adapter clears it.
+       Worth a line in the troubleshooting docs.
+     - The test VM image had no PCI bus devnode (*PNP0A03) at all; that is
+       why its network never worked. vm/net-kexem2.img is the snapshot with
+       PCI, kexem installed and TCP/IP bound.
    - Test VM note: the old image had no PCI bus device at all (it was
      installed without `*PNP0A03`), which is why its network never worked.
      Added through Add New Hardware > System devices > PCI bus; the

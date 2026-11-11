@@ -45,6 +45,10 @@ struct kexbsd_device
 	struct resource res[KEXBSD_MAX_RES];
 	int nres;
 	void *frontend;        /* the front end's own context */
+	/* optional: the front end's own configuration space access (an NDIS
+	 * miniport uses NdisRead/WritePciSlotInformation); NULL = HAL */
+	uint32_t (*cfg_read)(struct kexbsd_device *dev, int reg, int width);
+	void (*cfg_write)(struct kexbsd_device *dev, int reg, uint32_t val, int width);
 };
 typedef struct kexbsd_device *device_t;
 
@@ -178,6 +182,7 @@ KEXBSD_API int bus_setup_intr(device_t dev, struct resource *r, int flags, drive
 KEXBSD_API int bus_teardown_intr(device_t dev, struct resource *r, void *cookie);
 
 /* ---- bus_dma(9) ---------------------------------------------------------------- */
+#ifndef KEXBSD_OPENBSD   /* the OpenBSD personality has its own (obsd/kexobsd.h) */
 typedef struct kexbsd_dma_tag *bus_dma_tag_t;
 typedef struct kexbsd_dmamap *bus_dmamap_t;
 typedef struct
@@ -215,5 +220,7 @@ KEXBSD_API int bus_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf, bus
                                bus_dmamap_callback_t *cb, void *arg, int flags);
 KEXBSD_API void bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map);
 KEXBSD_API void bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, int op);
+
+#endif /* KEXBSD_OPENBSD */
 
 #endif

@@ -1,0 +1,25 @@
+--- a/dev/pci/if_em.c	2026-11-11 00:55:52.440162892 -0500
++++ b/dev/pci/if_em.c	2026-11-11 00:55:52.457768124 -0500
+@@ -256,6 +256,9 @@
+ int  em_detach(struct device *, int);
+ int  em_activate(struct device *, int);
+ int  em_intr(void *);
++#ifdef KEXBSD
++uint32_t kexem_take_icr(struct em_softc *);
++#endif
+ int  em_allocate_legacy(struct em_softc *);
+ void em_start(struct ifqueue *);
+ int  em_ioctl(struct ifnet *, u_long, caddr_t);
+@@ -1034,7 +1037,12 @@
+ 	struct ifnet	*ifp = &sc->sc_ac.ac_if;
+ 	u_int32_t	reg_icr, test_icr;
+ 
++#ifdef KEXBSD
++	/* KernelExEx: the ISR read ICR to claim the interrupt (see kexem.c) */
++	test_icr = reg_icr = kexem_take_icr(sc);
++#else
+ 	test_icr = reg_icr = E1000_READ_REG(&sc->hw, ICR);
++#endif
+ 	if (sc->hw.mac_type >= em_82571)
+ 		test_icr = (reg_icr & E1000_ICR_INT_ASSERTED);
+ 	if (!test_icr)
