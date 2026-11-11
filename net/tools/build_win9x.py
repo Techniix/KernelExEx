@@ -14,6 +14,8 @@ ASLR/NX flags, no mingw-w64 runtime (net/rt replaces the few pieces needed).
 Usage: build_win9x.py --sdk <dir from prepare_sdk.py> --out <dir> [-j N]
 """
 import argparse
+import json
+import re
 import concurrent.futures
 import os
 import subprocess
@@ -203,6 +205,17 @@ def main():
             return 1
         if m.get("kill_at"):
             write_import_lib(name, objs, out)
+        if name == "kexuni":
+            # with KernelEx active, a forwarded function imported here would be
+            # redirected straight back to kexuni and recurse forever
+            api = json.loads((NET.parent / "docs/api.json").read_text())
+            fwd = {f["name"] for v in api["dlls"].values() for f in v["functions"] if f.get("kind") == "mslu"}
+            dump = subprocess.run(["llvm-objdump", "-p", str(dll)], capture_output=True, text=True).stdout
+            imported = set(re.findall(r"^\s+\d+\s+(\w+)$", dump, re.M))
+            loops = sorted(imported & fwd)
+            if loops:
+                print(f"kexuni imports functions KernelEx forwards to it: {', '.join(loops)}")
+                return 1
         print(f"built {dll} ({dll.stat().st_size // 1024} KB)")
 
     # the on-target self-test programs

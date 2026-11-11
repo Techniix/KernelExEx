@@ -259,7 +259,7 @@ DWORD KXU(FormatMessageW)(DWORD flags, LPCVOID src, DWORD id, DWORD lang, LPWSTR
 			for (i = 0; conv && i < cnt; i++)
 			{
 				conv[i] = in[i];
-				if (in[i] > 0xFFFF && !IsBadStringPtrW((LPCWSTR) in[i], 32767))
+				if (in[i] > 0xFFFF && !kxu_bad_wstr((LPCWSTR) in[i], 32767))
 					conv[i] = (DWORD_PTR) kxu_w2a((LPCWSTR) in[i]);
 			}
 			if (conv)
@@ -634,10 +634,31 @@ DWORD KXU(QueryDosDeviceW)(LPCWSTR dev, LPWSTR buf, DWORD cch)
 	return r;
 }
 
+/* kexuni must not call any function KernelEx forwards to it (the build
+ * checks): with KernelEx active, IsBadStringPtrW would come straight back
+ * here. Probe one page at a time with IsBadReadPtr instead. */
+BOOL kxu_bad_wstr(LPCWSTR s, UINT_PTR max)
+{
+	const BYTE *p = (const BYTE *) s;
+	UINT_PTR i;
+	if (!max)
+		return FALSE;
+	if (!s)
+		return TRUE;
+	for (i = 0; i < max; i++, p += 2)
+	{
+		if (i == 0 || (((ULONG_PTR) p) & 0xFFF) == 0 || (((ULONG_PTR) p) & 0xFFF) == 0xFFF)
+			if (IsBadReadPtr(p, 2))
+				return TRUE;
+		if (!*(const WCHAR *) p)
+			return FALSE;
+	}
+	return FALSE;
+}
+
 BOOL KXU(IsBadStringPtrW)(LPCWSTR s, UINT_PTR max)
 {
-	/* 9x's own IsBadStringPtrW works; keep the forwarded name honest */
-	return IsBadStringPtrW(s, max);
+	return kxu_bad_wstr(s, max);
 }
 
 /* ---- profile (INI) files ---------------------------------------------- */

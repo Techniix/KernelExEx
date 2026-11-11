@@ -210,6 +210,30 @@ list.
 31. **Update service**, last: root certificates, controller database and
     components.
 
+32. **BSD drivers through one compatibility layer**, the same one the WiFi
+    drivers use: USB 3 host controllers (FreeBSD `xhci`), network cards
+    (FreeBSD `re` for Realtek 8111/8168, `em`/`igb` for Intel), Intel HD
+    Audio (FreeBSD `snd_hda`, OpenBSD `azalia`), SATA/AHCI and NVMe (FreeBSD
+    `ahci`, `nvme`), Bluetooth (NetBSD's stack: HCI, L2CAP, HID) and ACPI
+    power-off and sleep (ACPICA, dual BSD/GPL). FreeBSD `umass` is the
+    reference for `usbstor.sys`. Each is its own installer checkbox.
+33. **Device Manager tells the truth.** Every KernelExEx driver is installed
+    from an INF with the right device class, provider "KernelExEx" and a
+    name that says what drives the device (for example "Realtek RTL8168
+    Gigabit Ethernet (KernelExEx re)"). Driver files carry version
+    resources, so Driver File Details shows file, version and origin.
+    Failures reach Windows as Plug and Play problem codes, so the device
+    shows the usual yellow mark and status text. Each driver also writes a
+    short log to `%WINDIR%\KernelEx\logs` with the hardware IDs, chip
+    revision, firmware loaded and the reason for any failure.
+34. **Extra file systems, optional**: NTFS and ext2/3 drives, read-only first
+    (NetBSD `ntfs`, FreeBSD `ext2fs`), so 98 can open drives from modern PCs.
+35. **Clock sync** on OpenNTPD (ISC), and signed root-certificate updates
+    with OpenBSD `signify` (ISC).
+36. **SMB2/3** on libsmb2 (LGPL-2.1), see decision 25.
+37. **libarchive** (BSD-2) for zip, tar, ISO and 7z reading, including
+    archives opened as folders in Explorer; **zstd** (BSD) alongside 7-Zip.
+
 ## Installer components
 
 | Component | Contents | Status | Ticked by default |
@@ -240,6 +264,13 @@ list.
 | FTPS / SFTP | file transfer clients | planned | to be decided |
 | Bluetooth | adapter driver, HID, later audio | planned | to be decided |
 | Updates | update service | planned, last | to be decided |
+| USB 3 (xHCI) | FreeBSD xhci | planned | to be decided |
+| Network cards | FreeBSD re, em, igb | planned | to be decided |
+| SATA/AHCI, NVMe | FreeBSD ahci, nvme | planned | to be decided |
+| Bluetooth stack | NetBSD bluetooth | planned | to be decided |
+| ACPI power | ACPICA | planned | to be decided |
+| NTFS / ext2 read | NetBSD ntfs, FreeBSD ext2fs | planned | to be decided |
+| libarchive, zstd | archive formats | planned | to be decided |
 | Developer SDK | headers, import libraries, porting guide | planned | to be decided |
 
 ## Requirements

@@ -56,6 +56,9 @@ int kxu_bytes_for(UINT cp, LPCSTR a, int alen, int nchars);
  * (with the NUL) */
 DWORD kxu_ret_buf(LPCSTR a, LPWSTR w, DWORD cch);
 
+/* IsBadStringPtrW without calling it (it is one of the forwarded functions) */
+BOOL kxu_bad_wstr(LPCWSTR s, UINT_PTR max);
+
 /* structures */
 void kxu_logfont_w2a(const LOGFONTW *w, LOGFONTA *a);
 void kxu_logfont_a2w(const LOGFONTA *a, LOGFONTW *w);
