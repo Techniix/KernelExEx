@@ -212,7 +212,8 @@ list.
 
 32. **BSD drivers through one compatibility layer**, the same one the WiFi
     drivers use: USB 3 host controllers (FreeBSD `xhci`), network cards
-    (FreeBSD `re` for Realtek 8111/8168, `em`/`igb` for Intel), Intel HD
+    (Intel `em`/`igb`; Realtek 8111/8168 from Linux `r8169`, because every
+    BSD Realtek driver carries the GPL-incompatible advertising clause), Intel HD
     Audio (FreeBSD `snd_hda`, OpenBSD `azalia`), SATA/AHCI and NVMe (FreeBSD
     `ahci`, `nvme`), Bluetooth (NetBSD's stack: HCI, L2CAP, HID) and ACPI
     power-off and sleep (ACPICA, dual BSD/GPL). FreeBSD `umass` is the
