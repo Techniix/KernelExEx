@@ -43,6 +43,7 @@ LAYOUT = {
     "net-out/kexrt.dll": "net:kexrt.dll",
     "net-out/xinput1_3.dll": "net:xinput1_3.dll",
     "net-out/kexuni.dll": "net:kexuni.dll",
+    "net-out/kexntp.exe": "net:kexntp.exe",
     "input/gamepad/gamecontrollerdb.txt": "input/gamepad/gamecontrollerdb.txt",
     "input/kexpad/kexpad.sys": "kexpad:kexpad.sys",
     "input/kexpad/kexpad.inf": "input/kexpad/kexpad.inf",

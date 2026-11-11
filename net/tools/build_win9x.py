@@ -219,19 +219,25 @@ def main():
         print(f"built {dll} ({dll.stat().st_size // 1024} KB)")
 
     # the on-target self-test programs
-    tests = [(NET / "tests/win9x/kexnet_test.c", ["-lwinhttp", "-lbcrypt", "-luser32", "-lkernel32", "-lmsvcrt"]),
+    epoch = (NET / "certs/EPOCH").read_text().strip()
+    tests = [(NET / "tests/win9x/kexnet_test.c", ["-lwinhttp", "-lbcrypt", "-luser32", "-lkernel32", "-lmsvcrt"], []),
              (NET.parent / "apilibs/kexuni/tests/kexuni_test.c",
-              ["-lgdi32", "-luser32", "-ladvapi32", "-lkernel32", "-lmsvcrt"])]
-    for src, libs in tests:
+              ["-lgdi32", "-luser32", "-ladvapi32", "-lkernel32", "-lmsvcrt"], []),
+             # clock sync program (not a test, built the same way)
+             (NET / "kexntp/kexntp.c", ["-lws2_32", "-ladvapi32", "-lkernel32", "-lmsvcrt"],
+              [f"-DKEXNTP_BUILD_EPOCH={epoch}"], "windows")]
+    for entry in tests:
+        src, libs, defs = entry[:3]
+        subsystem = entry[3] if len(entry) > 3 else "console"
         obj = objdir / "tests" / (src.stem + ".o")
-        err = compile_one(src, obj, flags, False)
+        err = compile_one(src, obj, flags + defs, False)
         if err:
             print(err)
             return 1
         exe = out / (src.stem + ".exe")
         cmd = ["clang", *TARGET, "-fuse-ld=lld", "-nostdlib", "-o", str(exe), str(obj), *rt_objs,
                f"-L{a.sdk.resolve() / 'lib'}", f"-L{out}", *libs,
-               "-Wl,--entry=mainCRTStartup@0", "-Wl,--subsystem,console:4.0",
+               "-Wl,--entry=mainCRTStartup@0", f"-Wl,--subsystem,{subsystem}:4.0",
                "-Wl,--major-os-version,4", "-Wl,--minor-os-version,0", "-Wl,--image-base,0x400000",
                "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat", "-Wl,--file-alignment,4096",
                "-Wl,--gc-sections", "-Wl,--no-insert-timestamp", "-Wl,--disable-auto-import"]

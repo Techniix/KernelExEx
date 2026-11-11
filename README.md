@@ -267,7 +267,7 @@ list.
 | KernelEx core | Core, `kexbases`, `kexbasen`, VxD, Properties tab | builds | always installed |
 | Modern TLS and crypto | `kextls`, `winhttp`, `bcrypt`, root certificates | builds | to be decided |
 | Vista/7 APIs | `kexrt` | builds | to be decided |
-| Clock sync | SNTP client | planned | to be decided |
+| Clock sync | `kexntp.exe`: several servers, median, sanity checks | builds, in installer | to be decided |
 | Root certificate updates | signed updater | planned | to be decided |
 | Protoweb proxy | IE proxy for HTTP and FTP | in installer script | no (decided) |
 | RetroZilla | browser with Protoweb settings | planned | to be decided |

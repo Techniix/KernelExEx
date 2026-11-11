@@ -452,6 +452,17 @@ LangString DESC_GAMEPAD ${LANG_ENGLISH} "Support for modern game controllers."
 LangString DESC_XINPUT ${LANG_ENGLISH} "XInput (xinput1_3.dll) for games that need it. Works with any controller Windows sees; layouts follow the SDL controller database."
 LangString DESC_KEXPAD ${LANG_ENGLISH} "Driver for Xbox 360 and compatible USB pads (8BitDo, PowerA, PDP, Hori and others). Windows uses it when you plug one in."
 
+Section /o "Keep the clock right (internet time)" SECTIMESYNC
+  ;kexntp.exe: SNTP from several servers, median, sanity checks
+  SetOutPath "$INSTDIR"
+  File "net-out\kexntp.exe"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KernelExEx TimeSync" '"$INSTDIR\kexntp.exe"'
+  WriteRegDWORD HKLM "Software\KernelEx\TimeSync" "Enabled" 1
+  WriteRegStr HKLM "Software\KernelEx\Components" "TimeSync" "1"
+SectionEnd
+
+LangString DESC_TIMESYNC ${LANG_ENGLISH} "Sets the clock from internet time servers every 6 hours. Secure websites need a correct clock. Settings: HKLM\Software\KernelEx\TimeSync."
+
 ;--------------------------------
 ;Optional: Protoweb proxy (off unless the user ticks it)
 ;Sends plain HTTP and FTP through Protoweb's archive proxy. HTTPS is left
@@ -479,6 +490,7 @@ SectionEnd
 LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain HTTP and FTP go through wayback.protoweb.org:7851; HTTPS stays direct. Your old proxy settings are restored on uninstall."
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SECPROTOWEB} $(DESC_PROTOWEB)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECTIMESYNC} $(DESC_TIMESYNC)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECGAMEPAD} $(DESC_GAMEPAD)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECXINPUT} $(DESC_XINPUT)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXPAD} $(DESC_KEXPAD)
@@ -490,6 +502,13 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
 Section "Uninstall"
 
   SetDetailsView show
+
+  ;Time sync
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "TimeSync"
+  StrCmp $0 "1" 0 +4
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KernelExEx TimeSync"
+    DeleteRegKey HKLM "Software\KernelEx\TimeSync"
+    Delete /REBOOTOK "$INSTDIR\kexntp.exe"
 
   ;Game controllers
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "XInput"
