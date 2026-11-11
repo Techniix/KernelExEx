@@ -315,6 +315,7 @@ list.
 | XInput | `xinput1_1`-`1_4`, `xinput9_1_0`, controller database | builds, in installer | to be decided |
 | Xbox controller driver | `kexpad.sys`, 360 protocol (173 pads); later One/Series | builds, in installer; untested on hardware | to be decided |
 | Intel PRO/1000 driver | `kexem.sys` + `kexbsd.sys`: OpenBSD em(4) through kexbsd, 192 adapters | DHCP + ping in QEMU (e1000); untested on hardware | to be decided |
+| USB RNDIS / phone tethering | `kexrndis.sys`: OpenBSD urndis(4) through kexbsd's USB layer | DHCP + ping in QEMU (usb-net on UHCI); untested on hardware | to be decided |
 | Gamepad Configurator | mapping, test, profiles | planned | to be decided |
 | Per-program mixer | audio API library, mixer, tray icon | planned | to be decided |
 | USB audio driver | headsets and microphones | research | to be decided |
@@ -436,8 +437,8 @@ python3 toolchain/nsis/build_nsis.py --nsis-src ../nsis --scons-src ../scons \
 # Xbox 360-protocol controller driver (WDM, imports checked against 98 SE)
 python3 toolchain/wdm/build_kexpad.py --out ../build/kexpad --sdk ../build/sdk
 
-# Intel PRO/1000 driver: kexbsd.sys + kexem.sys (OpenBSD em through kexbsd)
-python3 toolchain/wdm/build_kexem.py --out ../build/kexnet --sdk ../build/sdk
+# network drivers: kexbsd.sys + kexem.sys (OpenBSD em) + kexrndis.sys (OpenBSD urndis)
+python3 toolchain/wdm/build_kexnet.py --out ../build/kexnet --sdk ../build/sdk
 
 # installer (absolute paths)
 python3 toolchain/build_installer.py --core $PWD/../build/core --net $PWD/../build/win9x \

@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # path in the installer script -> where it comes from
 # ("core:" = build_core.py output, "net:" = build_win9x.py output,
-#  "kexpad:" = toolchain/wdm/build_kexpad.py output, "kexnet:" = build_kexem.py
+#  "kexpad:" = toolchain/wdm/build_kexpad.py output, "kexnet:" = build_kexnet.py
 #  output, else repository)
 LAYOUT = {
     "Core/Release/KernelEx.dll": "core:KernelEx.dll",
@@ -51,6 +51,8 @@ LAYOUT = {
     "drivers/kexnet/kexem.sys": "kexnet:kexem.sys",
     "drivers/kexnet/kexbsd.sys": "kexnet:kexbsd/kexbsd.sys",
     "drivers/kexnet/kexem.inf": "drivers/kexnet/kexem.inf",
+    "drivers/kexnet/kexrndis.sys": "kexnet:kexrndis.sys",
+    "drivers/kexnet/kexrndis.inf": "drivers/kexnet/kexrndis.inf",
     "net/certs/roots.pem": "net/certs/roots.pem",
     "apilibs/core.ini": "apilibs/CORE.INI",
     "apilibs/settings.reg": "apilibs/settings.reg",

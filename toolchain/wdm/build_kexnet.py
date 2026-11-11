@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Build drivers/kexnet/kexem.sys, the NDIS 5 front end for OpenBSD em.
-Builds kexbsd.sys first (kexem imports from it).
+"""Build the OpenBSD network drivers in drivers/kexnet as NDIS 5 miniports:
+kexem.sys (em, Intel PRO/1000) and kexrndis.sys (urndis, USB RNDIS).
+Builds kexbsd.sys first (they import from it).
 
-usage: build_kexem.py [--out DIR] [--sdk DIR] [--debugcon]
+usage: build_kexnet.py [--out DIR] [--sdk DIR] [--debugcon]
 """
 import argparse
 import subprocess
@@ -27,7 +28,7 @@ def main():
     bsdout = out / "kexbsd"
     subprocess.run([sys.executable, Path(__file__).parent / "build_kexbsd.py", "--out", bsdout, "--sdk", a.sdk]
                    + (["--debugcon"] if a.debugcon else []), check=True)
-    extra = ["-I", str(BSD / "include" / "obsd"), "-I", str(BSD / "include"), "-I", str(SRC / "em"),
+    extra = ["-I", str(BSD / "include" / "obsd"), "-I", str(BSD / "include"),
              "-DNDIS_MINIPORT_DRIVER", "-DNDIS50_MINIPORT=1", "-DKEXBSD", "-DSMALL_KERNEL", "-fms-extensions", "-Wno-microsoft-anon-tag",   # ndis.h nests structs anonymously
              # OpenBSD's em sources, as they are: quiet the warnings they carry
              "-Wno-unused-variable", "-Wno-unused-but-set-variable", "-Wno-unused-function",
@@ -36,13 +37,23 @@ def main():
     if a.debugcon:
         extra.append("-DKEX_DEBUGCON")
     em = SRC / "em" / "dev" / "pci"
-    objs = wdm.compile([SRC / "kexem.c", SRC / "obsd_net.c", em / "if_em.c", em / "if_em_hw.c",
-                        wdm.ROOT / "net/rt/w9xrt_div.c"], out, Path(a.sdk), extra)
-    sysf = wdm.link("kexem", objs, out, extra_tables={"kexbsd.sys": wdm.exports_of(bsdout / "kexbsd.sys")})
-    print(wdm.run(["llvm-objdump", "-p", sysf]).split("DLL Name")[1:] and
-          "imports: " + ", ".join(l.split(":")[1].strip() for l in wdm.run(["llvm-objdump", "-p", sysf]).splitlines()
-                                  if "DLL Name" in l))
-    print(f"{sysf}: {sysf.stat().st_size} bytes")
+    rt = wdm.ROOT / "net/rt/w9xrt_div.c"
+    tables = {"kexbsd.sys": wdm.exports_of(bsdout / "kexbsd.sys")}
+    drivers = {
+        # obsd_usb.c in every driver: the glue (obsd_net.c) serves PCI and USB drivers
+        "kexem": ([SRC / "kexem.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", em / "if_em.c", em / "if_em_hw.c", rt],
+                  ["-I", str(SRC / "em")]),
+        "kexrndis": ([SRC / "kexrndis.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c",
+                      SRC / "urndis" / "dev" / "usb" / "if_urndis.c", rt], ["-I", str(SRC / "urndis")]),
+    }
+    for name, (srcs, inc) in drivers.items():
+        dout = out / name
+        dout.mkdir(exist_ok=True)
+        objs = wdm.compile(srcs, dout, Path(a.sdk), extra + inc)
+        sysf = wdm.link(name, objs, dout, extra_tables=tables)
+        (out / f"{name}.sys").write_bytes(sysf.read_bytes())
+        imports = [l.split(":")[1].strip() for l in wdm.run(["llvm-objdump", "-p", sysf]).splitlines() if "DLL Name" in l]
+        print(f"{out / (name + '.sys')}: {sysf.stat().st_size} bytes, imports {', '.join(imports)}")
 
 
 if __name__ == "__main__":

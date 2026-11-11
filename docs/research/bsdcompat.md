@@ -131,6 +131,19 @@ cannot address it).
        and never starts it again: TCP/IP silently stays unbound. Seen after
        the NdisQueryBuffer crash; reinstalling the adapter clears it.
        Worth a line in the troubleshooting docs.
+     - USB front end (2026-11-11): 98 SE's NDIS fills the miniport block's
+       PhysicalDeviceObject/NextDeviceObject (+0x10C/+0x110) for any bus,
+       although it has no NdisMGetDeviceProperty, so a USB network driver
+       is an ordinary NDIS miniport on the USB devnode that sends URBs to
+       NextDeviceObject. Layers: kexbsd.sys `kexusb_*` (URBs; Microsoft
+       headers only, no usbd.sys import so kexbsd loads without USB) and
+       worker threads; `lib/obsd_usb.c` (OpenBSD usbdi on top, linked into
+       each driver); the NDIS glue's USB mode runs the whole driver on one
+       worker thread (attach, ioctls, timeouts, transfer callbacks) and
+       raises to DISPATCH for NDIS indications. First driver: OpenBSD
+       urndis as `kexrndis.sys`: QEMU usb-net on UHCI gets a DHCP lease
+       and pings 4/4 at 2-10 ms. urndis needed one fix (packet filter
+       after INITIALIZE, see drivers/kexnet/urndis/README.md).
      - The test VM image had no PCI bus devnode (*PNP0A03) at all; that is
        why its network never worked. vm/net-kexem2.img is the snapshot with
        PCI, kexem installed and TCP/IP bound.

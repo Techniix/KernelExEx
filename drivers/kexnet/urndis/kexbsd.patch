@@ -1,0 +1,31 @@
+--- a/dev/usb/if_urndis.c	2026-11-11 06:04:33.864359770 -0500
++++ b/dev/usb/if_urndis.c	2026-11-11 06:04:33.892296767 -0500
+@@ -1071,6 +1071,28 @@
+ 	if (urndis_ctrl_init(sc) != RNDIS_STATUS_SUCCESS)
+ 		return;
+ 
++#ifdef KEXBSD
++	/*
++	 * KernelExEx: REMOTE_NDIS_INITIALIZE leaves the device in the
++	 * initialized state; it passes data again only once a packet filter
++	 * is set (RNDIS spec; QEMU usb-net and the Linux gadget used for
++	 * Android tethering both enforce it). Set it again, with DIRECTED so
++	 * unicast frames for us get through.
++	 */
++	{
++		u_int32_t filter;
++
++		sc->sc_filter = NDIS_PACKET_TYPE_DIRECTED |
++		    NDIS_PACKET_TYPE_BROADCAST | NDIS_PACKET_TYPE_ALL_MULTICAST;
++		filter = htole32(sc->sc_filter);
++		if (urndis_ctrl_set(sc, OID_GEN_CURRENT_PACKET_FILTER, &filter,
++		    sizeof(filter)) != RNDIS_STATUS_SUCCESS) {
++			printf("%s: unable to set data filters\n", DEVNAME(sc));
++			return;
++		}
++	}
++#endif
++
+ 	s = splnet();
+ 
+ 	if (urndis_tx_list_init(sc) == ENOBUFS) {

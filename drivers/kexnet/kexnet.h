@@ -23,6 +23,9 @@ struct kexnet_driver
 	int (*isr)(struct device *self);
 	void (*intr_enable)(struct device *self);
 	void (*shutdown)(struct device *self);   /* optional: quiesce DMA at power off */
+	/* 1: a USB driver (match/attach take a struct usb_attach_arg); it runs
+	 * on its own worker thread, and isr/intr_enable are unused */
+	int usb;
 };
 
 NTSTATUS kexnet_register(PDRIVER_OBJECT drv, PUNICODE_STRING reg, const struct kexnet_driver *d);

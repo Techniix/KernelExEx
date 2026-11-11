@@ -22,6 +22,7 @@
 #include <ndis.h>
 #include "obsd/kexobsd_net.h"
 #include "dev/pci/pcireg.h"
+#include "dev/usb/usbdi.h"
 #include "kexnet.h"
 
 /* ---- freestanding string functions ----------------------------------------------- */
@@ -132,7 +133,17 @@ typedef struct kexnet_adapter
 	unsigned int rxlen;
 	/* counters */
 	ULONG tx_ok, tx_err, rx_ok, rx_err, rx_nobuf;
+	/* USB drivers: everything of the driver runs on this thread */
+	kexbsd_worker *worker;
+	struct usbd_device *udev;
+	struct kexbsd_work start_work, flags_work, watchdog_work;
+	volatile int want_flags;
 } KEXNET_ADAPTER;
+
+/* NDIS wants its indications at DISPATCH_LEVEL; a USB driver makes them
+ * from its worker thread */
+#define TO_DISPATCH(old) KIRQL old = KeGetCurrentIrql(); if (old < DISPATCH_LEVEL) KeRaiseIrql(DISPATCH_LEVEL, &old)
+#define FROM_DISPATCH(old) do { if (old < DISPATCH_LEVEL) KeLowerIrql(old); } while (0)
 
 static const struct kexnet_driver *the_driver;
 static KEXNET_ADAPTER *adapters[MAX_ADAPTERS];
@@ -141,6 +152,15 @@ static struct obsd_dma_tag
 {
 	int unused;
 } dma_tag;
+
+/* drivers that never report link state (urndis) leave it UNKNOWN: then a
+ * running interface counts as connected */
+static int link_is_up(KEXNET_ADAPTER *a)
+{
+	if (a->ifp && a->ifp->if_link_state == LINK_STATE_UNKNOWN)
+		return (a->ifp->if_flags & IFF_RUNNING) != 0;
+	return a->link_up;
+}
 
 static KEXNET_ADAPTER *by_ifp(struct ifnet *ifp)
 {
@@ -282,8 +302,24 @@ void obsd_pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 	}
 }
 
-/* ---- timeout(9) on NDIS miniport timers -------------------------------------------- */
-CTASSERT(sizeof(NDIS_MINIPORT_TIMER) <= sizeof(((struct timeout *) 0)->to_impl));
+/* ---- timeout(9) on NDIS miniport timers -------------------------------------------- *
+ * The timer DPC runs the function serialized with the miniport (PCI
+ * drivers) or hands it to the driver's worker thread (USB drivers). */
+struct tmo_impl
+{
+	NDIS_MINIPORT_TIMER timer;
+	volatile ULONG pending;
+	kexbsd_worker *worker;
+	struct kexbsd_work work;
+};
+CTASSERT(sizeof(struct tmo_impl) <= sizeof(((struct timeout *) 0)->to_impl));
+#define IMPL(t) ((struct tmo_impl *) (t)->to_impl)
+
+static void timeout_run(void *arg)
+{
+	struct timeout *t = (struct timeout *) arg;
+	t->to_func(t->to_arg);
+}
 
 static VOID NTAPI timeout_thunk(PVOID s1, PVOID ctx, PVOID s2, PVOID s3)
 {
@@ -291,12 +327,16 @@ static VOID NTAPI timeout_thunk(PVOID s1, PVOID ctx, PVOID s2, PVOID s3)
 	(void) s1;
 	(void) s2;
 	(void) s3;
-	t->to_set = 1;
-	t->to_impl[sizeof(NDIS_MINIPORT_TIMER) / 4] = 0;   /* no longer pending */
-	t->to_func(t->to_arg);
+	IMPL(t)->pending = 0;
+	if (IMPL(t)->worker)
+	{
+		IMPL(t)->work.fn = timeout_run;
+		IMPL(t)->work.arg = t;
+		kexbsd_worker_post(IMPL(t)->worker, &IMPL(t)->work);
+	}
+	else
+		t->to_func(t->to_arg);
 }
-
-#define PENDING(t) ((t)->to_impl[sizeof(NDIS_MINIPORT_TIMER) / 4])
 
 void obsd_timeout_set(struct timeout *t, void (*fn)(void *), void *arg)
 {
@@ -308,21 +348,23 @@ void obsd_timeout_set(struct timeout *t, void (*fn)(void *), void *arg)
 		kexbsd_printf("kexnet: timeout_set outside attach is not supported\n");
 		return;
 	}
-	NdisMInitializeTimer((PNDIS_MINIPORT_TIMER) t->to_impl, attaching->handle, timeout_thunk, t);
+	NdisMInitializeTimer(&IMPL(t)->timer, attaching->handle, timeout_thunk, t);
+	IMPL(t)->worker = attaching->worker;
 	t->to_set = 1;
 }
 
 int obsd_timeout_add_msec(struct timeout *t, int msec)
 {
-	int was = (int) PENDING(t);
+	int was;
 	if (!t->to_set)
 		return 0;
+	was = (int) IMPL(t)->pending;
 	if (msec < 1)
 		msec = 1;
-	PENDING(t) = 1;
+	IMPL(t)->pending = 1;
 	/* 98 SE exports NdisSetTimer, which an NDIS_MINIPORT_TIMER (KTIMER, KDPC
 	 * first) satisfies; its DPC runs the miniport's function serialized */
-	NdisSetTimer((PNDIS_TIMER) t->to_impl, (UINT) msec);
+	NdisSetTimer((PNDIS_TIMER) &IMPL(t)->timer, (UINT) msec);
 	return !was;
 }
 
@@ -331,14 +373,14 @@ int obsd_timeout_del(struct timeout *t)
 	BOOLEAN cancelled = FALSE;
 	if (!t->to_set)
 		return 0;
-	NdisMCancelTimer((PNDIS_MINIPORT_TIMER) t->to_impl, &cancelled);
-	PENDING(t) = 0;
+	NdisMCancelTimer(&IMPL(t)->timer, &cancelled);
+	IMPL(t)->pending = 0;
 	return cancelled;
 }
 
 int obsd_timeout_pending(struct timeout *t)
 {
-	return t->to_set && PENDING(t);
+	return t->to_set && IMPL(t)->pending;
 }
 
 /* ---- mbuf(9) -------------------------------------------------------------------------- *
@@ -570,8 +612,10 @@ void obsd_if_link_state_change(struct ifnet *ifp)
 	a->link_up = up;
 	if (a != attaching)   /* NDIS asks for the state itself after initialize */
 	{
+		TO_DISPATCH(irql);
 		NdisMIndicateStatus(a->handle, up ? NDIS_STATUS_MEDIA_CONNECT : NDIS_STATUS_MEDIA_DISCONNECT, NULL, 0);
 		NdisMIndicateStatusComplete(a->handle);
+		FROM_DISPATCH(irql);
 	}
 }
 
@@ -579,10 +623,12 @@ void obsd_ifq_clr_oactive(struct ifqueue *ifq)
 {
 	KEXNET_ADAPTER *a = by_ifp(ifq->ifq_if);
 	ifq->ifq_oactive = 0;
-	if (a && a->need_resources)
+	if (a && a->need_resources && a != attaching)
 	{
+		TO_DISPATCH(irql);
 		a->need_resources = 0;
 		NdisMSendResourcesAvailable(a->handle);
+		FROM_DISPATCH(irql);
 	}
 }
 
@@ -591,6 +637,9 @@ int obsd_ifiq_input(struct ifiqueue *ifiq, struct mbuf_list *ml)
 	KEXNET_ADAPTER *a = by_ifp(ifiq->ifiq_if);
 	struct mbuf *m;
 	int any = 0;
+	KIRQL irql = KeGetCurrentIrql();
+	if (irql < DISPATCH_LEVEL)
+		KeRaiseIrql(DISPATCH_LEVEL, &irql);
 	while ((m = ml_dequeue(ml)) != NULL)
 	{
 		int len = m->m_pkthdr.len;
@@ -614,6 +663,7 @@ int obsd_ifiq_input(struct ifiqueue *ifiq, struct mbuf_list *ml)
 	}
 	if (any)
 		NdisMEthIndicateReceiveComplete(a->handle);
+	FROM_DISPATCH(irql);
 	return 0;
 }
 
@@ -662,13 +712,88 @@ static const NDIS_OID supported[] = {
 
 static VOID NTAPI mp_shutdown(PVOID ctx);
 
-static void set_flags(KEXNET_ADAPTER *a, int flags)
+static void apply_flags(KEXNET_ADAPTER *a, int flags)
 {
 	struct ifreq ifr;
 	memset(&ifr, 0, sizeof(ifr));
 	a->ifp->if_flags = (a->ifp->if_flags & ~(IFF_UP | IFF_PROMISC | IFF_ALLMULTI)) | flags;
 	ifr.ifr_flags = a->ifp->if_flags;
 	a->ifp->if_ioctl(a->ifp, SIOCSIFFLAGS, (caddr_t) &ifr);
+}
+
+static void flags_work(void *arg)
+{
+	KEXNET_ADAPTER *a = (KEXNET_ADAPTER *) arg;
+	apply_flags(a, a->want_flags);
+}
+
+struct flags_call
+{
+	KEXNET_ADAPTER *a;
+	int flags;
+};
+
+static void flags_call_fn(void *arg)
+{
+	struct flags_call *c = (struct flags_call *) arg;
+	apply_flags(c->a, c->flags);
+}
+
+/* PCI drivers: now (NDIS serializes). USB drivers: on the worker; waits
+ * only when the caller can (PASSIVE_LEVEL), otherwise queues */
+static void set_flags(KEXNET_ADAPTER *a, int flags)
+{
+	if (!a->worker || kexbsd_worker_is_current(a->worker))
+		apply_flags(a, flags);
+	else if (KeGetCurrentIrql() == PASSIVE_LEVEL)
+	{
+		struct flags_call c;
+		c.a = a;
+		c.flags = flags;
+		kexbsd_worker_call(a->worker, flags_call_fn, &c);
+	}
+	else
+	{
+		a->want_flags = flags;
+		a->flags_work.fn = flags_work;
+		a->flags_work.arg = a;
+		kexbsd_worker_post(a->worker, &a->flags_work);
+	}
+}
+
+static void start_output(KEXNET_ADAPTER *a)
+{
+	struct ifnet *ifp = a->ifp;
+	if (ifp->if_qstart)
+		ifp->if_qstart(&ifp->if_snd);
+	else if (ifp->if_start)
+		ifp->if_start(ifp);
+}
+
+static void start_work(void *arg)
+{
+	start_output((KEXNET_ADAPTER *) arg);
+}
+
+static void watchdog_work(void *arg)
+{
+	KEXNET_ADAPTER *a = (KEXNET_ADAPTER *) arg;
+	if (a->ifp->if_watchdog)
+		a->ifp->if_watchdog(a->ifp);
+}
+
+struct usb_attach_call
+{
+	KEXNET_ADAPTER *a;
+	PDEVICE_OBJECT lower;
+	int result;
+};
+
+static void usb_attach_fn(void *arg)
+{
+	struct usb_attach_call *c = (struct usb_attach_call *) arg;
+	KEXNET_ADAPTER *a = c->a;
+	c->result = obsd_usb_attach(c->lower, a->worker, a->drv->match, a->drv->attach, a->sc, &a->udev);
 }
 
 static int filter_flags(ULONG f)
@@ -718,6 +843,34 @@ static NDIS_STATUS NTAPI mp_initialize(PNDIS_STATUS open_err, PUINT medium_index
 	a->dev->frontend = a;
 	a->dev->cfg_read = cfg_read;
 	a->dev->cfg_write = cfg_write;
+
+	if (drv->usb)
+	{
+		/* 98 SE's NDIS fills the block's device objects for a miniport on
+		 * any bus (it has no NdisMGetDeviceProperty): URBs go to
+		 * NextDeviceObject, the USB hub's PDO for this device */
+		struct usb_attach_call c;
+		PNDIS_MINIPORT_BLOCK blk = (PNDIS_MINIPORT_BLOCK) handle;
+		NdisMSetAttributesEx(handle, a, 0, 0, NdisInterfaceInternal);
+		a->sc = (struct device *) kexbsd_malloc(drv->softc_size, M_DEVBUF, M_NOWAIT | M_ZERO);
+		a->worker = kexbsd_worker_create(drv->name);
+		if (!a->sc || !a->worker || !blk->NextDeviceObject)
+			goto fail;
+		kexbsd_snprintf(a->sc->dv_xname, sizeof(a->sc->dv_xname), "%s%d", drv->name, slot);
+		a->sc->dv_frontend = a->dev;
+		attaching = a;
+		c.a = a;
+		c.lower = blk->NextDeviceObject;
+		c.result = ENXIO;
+		kexbsd_worker_call(a->worker, usb_attach_fn, &c);
+		if (c.result || !a->ifp)
+		{
+			attaching = NULL;
+			device_printf(a->dev, "attach failed\n");
+			goto fail;
+		}
+		goto attached;
+	}
 
 	/* the ranges and interrupt Windows assigned */
 	NdisMQueryAdapterResources(&st, config, NULL, &rsize);
@@ -806,6 +959,7 @@ static NDIS_STATUS NTAPI mp_initialize(PNDIS_STATUS open_err, PUINT medium_index
 		device_printf(a->dev, "attach failed\n");
 		goto fail_attached;
 	}
+attached:
 	strlcpy(a->ifp->if_xname, a->sc->dv_xname, sizeof(a->ifp->if_xname));
 
 	/* a locally administered address from the adapter's Advanced properties */
@@ -846,6 +1000,8 @@ fail:
 			kexbsd_free(a->sc, M_DEVBUF);
 		if (a->dev)
 			kexbsd_device_destroy(a->dev);
+		if (a->worker)
+			kexbsd_worker_destroy(a->worker);
 		kexbsd_free(a, M_DEVBUF);
 	}
 	return NDIS_STATUS_ADAPTER_NOT_FOUND;
@@ -856,6 +1012,8 @@ static VOID NTAPI mp_halt(NDIS_HANDLE ctx)
 	KEXNET_ADAPTER *a = (KEXNET_ADAPTER *) ctx;
 	int i;
 	set_flags(a, 0);   /* the driver's stop: interrupts off, rings freed */
+	if (a->udev)
+		obsd_usb_detach(a->udev);
 	if (a->intr_registered)
 		NdisMDeregisterInterrupt(&a->intr);
 	for (i = 0; i < MAX_ADAPTERS; i++)
@@ -892,7 +1050,13 @@ static BOOLEAN NTAPI mp_check_hang(NDIS_HANDLE ctx)
 		if (a->ifp->if_timer <= 0)
 		{
 			a->ifp->if_timer = 0;
-			if (a->ifp->if_watchdog)
+			if (a->worker)
+			{
+				a->watchdog_work.fn = watchdog_work;
+				a->watchdog_work.arg = a;
+				kexbsd_worker_post(a->worker, &a->watchdog_work);
+			}
+			else if (a->ifp->if_watchdog)
 				a->ifp->if_watchdog(a->ifp);
 		}
 	}
@@ -924,7 +1088,7 @@ static NDIS_STATUS NTAPI mp_send(NDIS_HANDLE ctx, PNDIS_PACKET pkt, UINT flags)
 	struct mbuf *m;
 	caddr_t d;
 	(void) flags;
-	if (!(ifp->if_flags & IFF_RUNNING) || !a->link_up)
+	if (!(ifp->if_flags & IFF_RUNNING) || !link_is_up(a))
 	{
 		a->tx_err++;
 		TRACE("kexnet: send dropped (flags %x, link %d)\n", ifp->if_flags, a->link_up);
@@ -960,7 +1124,14 @@ static NDIS_STATUS NTAPI mp_send(NDIS_HANDLE ctx, PNDIS_PACKET pkt, UINT flags)
 	}
 	m->m_len = m->m_pkthdr.len = (int) total;
 	ml_enqueue(&ifp->if_snd.ifq_ml, m);
-	ifp->if_qstart(&ifp->if_snd);
+	if (a->worker)
+	{
+		a->start_work.fn = start_work;
+		a->start_work.arg = a;
+		kexbsd_worker_post(a->worker, &a->start_work);
+	}
+	else
+		start_output(a);
 	a->tx_ok++;
 	if (a->tx_ok <= 8)
 		TRACE("kexnet: send %u bytes, type %02x%02x\n", total, (unsigned char) m->m_data[12],
@@ -1056,7 +1227,7 @@ static NDIS_STATUS query(KEXNET_ADAPTER *a, NDIS_OID oid, PVOID buf, ULONG len, 
 		v = FRAME_MAX;
 		break;
 	case OID_GEN_LINK_SPEED:   /* 100 bit/s units */
-		v = a->link_up && a->ifp->if_baudrate ? (ULONG) (a->ifp->if_baudrate / 100) : 100000;
+		v = link_is_up(a) && a->ifp->if_baudrate ? (ULONG) (a->ifp->if_baudrate / 100) : 100000;
 		break;
 	case OID_GEN_TRANSMIT_BUFFER_SPACE:
 	case OID_GEN_RECEIVE_BUFFER_SPACE:
@@ -1080,7 +1251,7 @@ static NDIS_STATUS query(KEXNET_ADAPTER *a, NDIS_OID oid, PVOID buf, ULONG len, 
 		v = NDIS_MAC_OPTION_TRANSFERS_NOT_PEND | NDIS_MAC_OPTION_COPY_LOOKAHEAD_DATA | NDIS_MAC_OPTION_NO_LOOPBACK;
 		break;
 	case OID_GEN_MEDIA_CONNECT_STATUS:
-		v = a->link_up ? NdisMediaStateConnected : NdisMediaStateDisconnected;
+		v = link_is_up(a) ? NdisMediaStateConnected : NdisMediaStateDisconnected;
 		break;
 	case OID_GEN_MAXIMUM_SEND_PACKETS:
 		v = 1;

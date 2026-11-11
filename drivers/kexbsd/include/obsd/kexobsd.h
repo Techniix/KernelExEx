@@ -82,6 +82,12 @@ typedef long ssize_t_obsd;
 #define panic(...) do { kexbsd_printf("kexbsd: panic: " __VA_ARGS__); kexbsd_printf("\n"); } while (0)
 
 /* x86 is little-endian */
+#define _LITTLE_ENDIAN 1234
+#define _BIG_ENDIAN 4321
+#define _BYTE_ORDER _LITTLE_ENDIAN
+#define LITTLE_ENDIAN _LITTLE_ENDIAN
+#define BIG_ENDIAN _BIG_ENDIAN
+#define BYTE_ORDER _BYTE_ORDER
 #define htole16(x) ((uint16_t) (x))
 #define htole32(x) ((uint32_t) (x))
 #define htole64(x) ((uint64_t) (x))
@@ -148,6 +154,7 @@ static __inline__ int obsd_spl(void) { return 0; }
 #define splvm() obsd_spl()
 #define splhigh() obsd_spl()
 #define splsoftnet() obsd_spl()
+#define splusb() obsd_spl()
 #define splx(s) ((void) (s))
 #define splassert(x) ((void) 0)
 #define KERNEL_LOCK() ((void) 0)

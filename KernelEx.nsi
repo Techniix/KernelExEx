@@ -468,9 +468,26 @@ Section /o "Intel PRO/1000 (OpenBSD em driver)" SECKEXEM
   WriteRegStr HKLM "Software\KernelEx\Components" "KexEm" "1"
 SectionEnd
 
+Section /o "USB RNDIS adapters and phone tethering (OpenBSD urndis)" SECKEXRNDIS
+  SetOutPath "$INSTDIR\drivers\kexrndis"
+  File "drivers\kexnet\kexrndis.sys"
+  File "drivers\kexnet\kexbsd.sys"
+  File "drivers\kexnet\kexrndis.inf"
+  SetOutPath "$INSTDIR"
+  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+  StrCmp $0 "" 0 +2
+    StrCpy $0 "$WINDIR\INF"
+  ${WordFind} "$0" "$INSTDIR\drivers\kexrndis" "E+1{" $1
+  IfErrors 0 kexrndis_listed
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexrndis"
+  kexrndis_listed:
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexRndis" "1"
+SectionEnd
+
 SectionGroupEnd
 
 LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
+LangString DESC_KEXRNDIS ${LANG_ENGLISH} "USB network adapters that speak RNDIS, including USB tethering from an Android phone, with OpenBSD's urndis driver."
 LangString DESC_KEXEM ${LANG_ENGLISH} "Intel PRO/1000 gigabit adapters (82540 to I350, ICH/PCH onboard), with OpenBSD's em driver. Windows uses it when it finds one."
 
 LangString DESC_GAMEPAD ${LANG_ENGLISH} "Support for modern game controllers."
@@ -521,6 +538,7 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXPAD} $(DESC_KEXPAD)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECNETDRV} $(DESC_NETDRV)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRNDIS} $(DESC_KEXRNDIS)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ;--------------------------------
@@ -568,6 +586,17 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\kexem"
     RMDir "$INSTDIR\drivers"
   un_kexem_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexRndis"
+  StrCmp $0 "1" 0 un_kexrndis_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\kexrndis" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\kexrndis\kexrndis.sys"
+    Delete /REBOOTOK "$INSTDIR\drivers\kexrndis\kexbsd.sys"
+    Delete "$INSTDIR\drivers\kexrndis\kexrndis.inf"
+    RMDir "$INSTDIR\drivers\kexrndis"
+    RMDir "$INSTDIR\drivers"
+  un_kexrndis_done:
   DeleteRegKey HKLM "Software\KernelEx\Components"
 
   ;Put back the proxy settings saved before Protoweb was turned on
