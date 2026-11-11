@@ -269,6 +269,14 @@ list.
     beside KernelExEx, not linked into it: SeaBIOS is LGPLv3, which GPLv2
     code cannot absorb. Fixes we need go upstream to CSMWrap. Our
     framebuffer driver (decision 41) then uses the mode it sets.
+43. **Install media builder** (at the end): UEFI support only helps if it
+    works before Windows is installed. A tool builds bootable USB or CD
+    media from the user's own Windows 98 SE / ME CD: an EFI system
+    partition with CSMWrap, the Windows setup files, and KernelExEx added
+    to setup (an `msbatch.inf` with chosen components, run at the end of
+    Windows setup), plus the KernelExEx storage drivers so setup can see
+    AHCI and NVMe disks. No Microsoft files are shipped; the tool only
+    rearranges the user's CD.
 
 ## Installer components
 
@@ -313,7 +321,8 @@ list.
 | Sound Blaster emulation | DOS games, Control Panel applet | planned | to be decided |
 | CPU idle driver | HLT when idle | planned | to be decided |
 | Screen capture | Print Screen snipping tool | planned | to be decided |
-| UEFI boot shim | GOP framebuffer, legacy services | research | to be decided |
+| UEFI boot (CSMWrap) | legacy BIOS on UEFI-only boards | research | to be decided |
+| Install media builder | bootable USB/CD with KernelExEx in setup | planned, last | n/a (separate tool) |
 | More hardware | chipset INFs, EHCI, SD, serial, sensors | planned | to be decided |
 | Framebuffer display driver | VBE / GOP | planned | to be decided |
 | Developer SDK | headers, import libraries, porting guide | planned | to be decided |
