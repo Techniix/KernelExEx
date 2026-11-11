@@ -234,6 +234,32 @@ list.
 37. **libarchive** (BSD-2) for zip, tar, ISO and 7z reading, including
     archives opened as folders in Explorer; **zstd** (BSD) alongside 7-Zip.
 
+38. **Command-line tools** (optional component, all GPLv2-compatible):
+    BusyBox for Windows (`busybox-w32`, GPLv2: ls, grep, sed, awk, tar,
+    find, diff and more), curl on the KernelExEx TLS stack, the 7-Zip and
+    zstd command-line tools, OpenSSH `ssh`/`scp`/`sftp`, Info-ZIP
+    `zip`/`unzip`, Lua, and two editors (Vim, OpenBSD `mg`).
+39. **For era games and enthusiasts** (each optional):
+    - ISO/CUE virtual CD-ROM drive (mount images from Explorer);
+    - software MIDI synthesizer with SoundFonts (FluidSynth, LGPL), for
+      sound cards with no hardware MIDI;
+    - Sound Blaster emulation for DOS games in a DOS box on modern audio;
+    - Glide wrapper (OpenGlide, LGPL) for 3dfx-only games;
+    - gamepad-to-keyboard mapping for games without joystick support;
+    - CPU idle (HLT) driver to keep modern CPUs cool, and a slowdown tool
+      for speed-sensitive old games;
+    - screenshot and video capture.
+40. **More hardware, from BSD drivers** (via decision 32's layer):
+    chipset identification INFs generated from the PCI ID database, so
+    Device Manager names every device; USB 2 (EHCI); SD card readers
+    (`sdhci`); PCI serial and parallel cards (`puc`); SMBus and temperature
+    sensors (`ichsmb`, `coretemp`, `amdtemp`) with a small hardware monitor.
+41. **Graphics**: a universal framebuffer display driver (VESA VBE, and a
+    UEFI GOP handover for machines without legacy BIOS) for any modern
+    card at native resolution in 32-bit colour, 2D only. 3D acceleration on
+    modern GPUs follows `docs/research/gpu.md`; BSD has no GPU drivers of
+    its own (it ports Linux's).
+
 ## Installer components
 
 | Component | Contents | Status | Ticked by default |
@@ -271,6 +297,10 @@ list.
 | ACPI power | ACPICA | planned | to be decided |
 | NTFS / ext2 read | NetBSD ntfs, FreeBSD ext2fs | planned | to be decided |
 | libarchive, zstd | archive formats | planned | to be decided |
+| Command-line tools | BusyBox, curl, 7z, zstd, ssh, zip, Lua, editors | planned | to be decided |
+| Game extras | virtual CD, MIDI synth, SB emulation, Glide, pad-to-keys, idle, capture | planned | to be decided |
+| More hardware | chipset INFs, EHCI, SD, serial, sensors | planned | to be decided |
+| Framebuffer display driver | VBE / GOP | planned | to be decided |
 | Developer SDK | headers, import libraries, porting guide | planned | to be decided |
 
 ## Requirements
