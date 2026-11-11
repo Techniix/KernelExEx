@@ -36,6 +36,7 @@ def cflags(sdk: Path, extra=()):
             "-mno-stack-arg-probe", "-nostdinc",
             "-isystem", f"{res}/include", "-isystem", str(sdk / "include"),
             "-isystem", str(MINGW / "crt"), "-isystem", str(MINGW / "include"),
+            "-I", str(ROOT / "toolchain" / "wdm" / "include"),
             "-I", str(MINGW / "ddk" / "include" / "ddk"), "-I", str(MINGW / "ddk" / "include"),
             "-D_WIN32_WINNT=0x0500", "-DNTDDI_VERSION=0x05000000",
             "-include", "sdkddkver.h", "-DNTDDI_WINVISTA=0x06000000",
@@ -51,21 +52,30 @@ def compile(sources, out: Path, sdk: Path, extra=()):
     return objs
 
 
-def tables():
+def tables(extra=None):
+    """Export tables: Windows' modules, then our own export drivers
+    (extra maps a module name such as kexbsd.sys to its export names)."""
     t = {}
     for m in MODULES:
         f = EXPORTS / f"{m}.txt"
         if f.exists():
             t[m] = set(f.read_text().split())
+    t.update(extra or {})
     return t
 
 
-def make_import_libs(objs, out: Path, local_exports=()):
+def exports_of(sysf: Path):
+    """Names exported by a driver we built (for drivers that import from it)."""
+    txt = run(["llvm-objdump", "-p", sysf]).split("Export Table")[-1]
+    return {l.split()[-1] for l in txt.splitlines() if l.strip()[:1].isdigit() and len(l.split()) == 3}
+
+
+def make_import_libs(objs, out: Path, local_exports=(), extra_tables=None):
     """One import library per module, from the __imp_ symbols the objects use.
     Names keep their exact export spelling (see implib_exact.py)."""
     nm = run(["llvm-nm", "-u", *objs])
     wanted = sorted(set(re.findall(r"__imp_(\S+)", nm)))
-    t = tables()
+    t = tables(extra_tables)
     per = {}
     missing = []
     for sym in wanted:
@@ -127,8 +137,9 @@ def fix_header(path: Path, epoch: int):
     path.write_bytes(d)
 
 
-def link(name, objs, out: Path, entry="_DriverEntry@8", deffile=None, base="0x10000", local_exports=()):
-    libs = make_import_libs(objs, out, local_exports)
+def link(name, objs, out: Path, entry="_DriverEntry@8", deffile=None, base="0x10000", local_exports=(),
+         extra_tables=None):
+    libs = make_import_libs(objs, out, local_exports, extra_tables)
     sysf = out / f"{name}.sys"
     cmd = ["clang", "--target=i686-w64-windows-gnu", "-nostdlib", "-fuse-ld=lld", "-Wl,--subsystem,native",
            f"-Wl,--entry,{entry}", f"-Wl,--image-base,{base}", "-Wl,--dynamicbase", "-Wl,--disable-auto-import",
