@@ -270,7 +270,11 @@ BOOL resolver_process_attach()
 			char dllpath[MAX_PATH];
 			lib->get_dll_path(dllpath);
 			if (!LoadLibrary(dllpath))
+			{
+				DBGPRINTF(("resolver_process_attach: LoadLibrary(%s) failed, error %d [PID=%08x]\n",
+						dllpath, GetLastError(), GetCurrentProcessId()));
 				return FALSE;
+			}
 		}
 	}
 

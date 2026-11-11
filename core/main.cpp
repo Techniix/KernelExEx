@@ -216,6 +216,7 @@ BOOL APIENTRY PreDllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 		{
 			//referenced by other module => call resolver
 			ret = resolver_process_attach();
+			DBGPRINTF(("KernelEx process attach [PID=%08x]: %s\n", GetCurrentProcessId(), ret ? "ok" : "FAILED"));
 		}
 	}
 	else if (reason == DLL_PROCESS_DETACH)

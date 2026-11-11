@@ -185,7 +185,24 @@ class Build:
         run(cmd)
         if shared_sections:
             self.mark_shared(outfile)
+        self.set_timestamp(outfile)
         return outfile
+
+    @staticmethod
+    def set_timestamp(pe: Path):
+        """Give the image a fixed, non-zero PE timestamp (the build epoch).
+
+        Windows 9x lets a shared DLL (base above 2 GB) that another process
+        already uses into a new process only if all of its imports are bound,
+        which it judges by the import descriptor's time stamp matching the
+        target's PE time stamp. With --no-insert-timestamp that stamp is 0, so
+        kexbases.dll, which imports KernelEx.dll, could never be loaded into a
+        second process. A constant keeps the build reproducible."""
+        stamp = int((ROOT / "net/certs/EPOCH").read_text().strip())
+        data = bytearray(pe.read_bytes())
+        off = struct.unpack_from("<I", data, 0x3C)[0]
+        struct.pack_into("<I", data, off + 8, stamp)
+        pe.write_bytes(data)
 
     @staticmethod
     def mark_shared(pe: Path):

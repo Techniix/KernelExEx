@@ -3,6 +3,7 @@
  * runtime's own printf (kexcrt) is left alone. */
 #ifndef KEXDBGCON_H
 #define KEXDBGCON_H
+#ifndef __ASSEMBLER__
 #ifndef KEX_NO_PRINTF_REDIRECT
 #ifdef __cplusplus
 extern "C"
@@ -17,4 +18,5 @@ static __inline__ void kexdbg_puts(const char* s)
 		__asm__ volatile("outb %0, $0xe9" : : "a"(*s));
 }
 #define KEXDBG_PUTS(s) kexdbg_puts(s)
-#endif
+#endif /* __ASSEMBLER__ */
+#endif /* KEXDBGCON_H */
