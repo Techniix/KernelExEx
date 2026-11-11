@@ -15,7 +15,7 @@
 #ifndef KEXBSD_KERN_H
 #define KEXBSD_KERN_H
 
-#include <wdm.h>
+#include <ntddk.h>   /* wdm.h plus HalGetBusData, MmGetPhysicalAddress ... */
 
 #ifdef KEXBSD_BUILD
 #define KEXBSD_API __declspec(dllexport)
@@ -42,6 +42,7 @@
 #undef ENODEV
 #undef EINVAL
 #undef ENOSPC
+#undef EFBIG
 #undef EAGAIN
 #undef EWOULDBLOCK
 #undef EINPROGRESS
@@ -61,6 +62,7 @@
 #define EEXIST 17
 #define ENODEV 19
 #define EINVAL 22
+#define EFBIG 27
 #define ENOSPC 28
 #define EAGAIN 35
 #define EWOULDBLOCK EAGAIN

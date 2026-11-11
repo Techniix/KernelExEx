@@ -269,14 +269,21 @@ list.
     beside KernelExEx, not linked into it: SeaBIOS is LGPLv3, which GPLv2
     code cannot absorb. Fixes we need go upstream to CSMWrap. Our
     framebuffer driver (decision 41) then uses the mode it sets.
-43. **Install media builder** (at the end): UEFI support only helps if it
-    works before Windows is installed. A tool builds bootable USB or CD
-    media from the user's own Windows 98 SE / ME CD: an EFI system
-    partition with CSMWrap, the Windows setup files, and KernelExEx added
-    to setup (an `msbatch.inf` with chosen components, run at the end of
-    Windows setup), plus the KernelExEx storage drivers so setup can see
-    AHCI and NVMe disks. No Microsoft files are shipped; the tool only
-    rearranges the user's CD.
+43. **Install media patcher** (at the end): UEFI support only helps if it
+    works before Windows is installed, so KernelExEx can patch any Windows
+    98 SE / ME ISO the user owns. The patched image:
+    - adds a **KernelExEx** branch to Windows setup's "Select Components"
+      tree, with every component of the installer as a checkbox (setup's
+      own optional-component INF mechanism, so it looks native);
+    - adds the KernelExEx storage drivers (AHCI, NVMe, USB) to setup, so it
+      can see modern disks;
+    - boots both ways: the usual BIOS El Torito entry and a UEFI entry that
+      starts CSMWrap first, so the same ISO or USB stick works on old and
+      UEFI-only machines;
+    - offers a **boot loader** choice in that branch: standard BIOS boot, or
+      UEFI (an EFI system partition with CSMWrap set up on the target disk).
+    The patcher works on the user's own image and ships no Microsoft files;
+    it also writes USB sticks.
 
 ## Installer components
 
@@ -322,7 +329,7 @@ list.
 | CPU idle driver | HLT when idle | planned | to be decided |
 | Screen capture | Print Screen snipping tool | planned | to be decided |
 | UEFI boot (CSMWrap) | legacy BIOS on UEFI-only boards | research | to be decided |
-| Install media builder | bootable USB/CD with KernelExEx in setup | planned, last | n/a (separate tool) |
+| Install media patcher | patched 98 ISO/USB: KernelExEx in setup, BIOS + UEFI boot | planned, last | n/a (separate tool) |
 | More hardware | chipset INFs, EHCI, SD, serial, sensors | planned | to be decided |
 | Framebuffer display driver | VBE / GOP | planned | to be decided |
 | Developer SDK | headers, import libraries, porting guide | planned | to be decided |

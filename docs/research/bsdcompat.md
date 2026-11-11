@@ -51,6 +51,10 @@ names there are proven by drivers Microsoft shipped).
 | `DELAY()` | `KeStallExecutionProcessor` |
 | `ticks`, `getmicrouptime`, `getnanotime` | `KeQueryInterruptTime`, `KeQuerySystemTime` |
 
+`HalGetBusData` and `HalSetBusDataByOffset` are in NTKERN's name table but no
+driver Microsoft shipped imports them; the first front end confirms them at
+run time (PCI configuration reads during attach).
+
 Not available on 98 SE and avoided: `IoAllocateWorkItem`, `IoQueueWorkItem`,
 `MmMapLockedPagesSpecifyCache`. Memory above 4 GB is never used (Windows 9x
 cannot address it).
