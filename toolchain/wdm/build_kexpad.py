@@ -61,7 +61,9 @@ def main():
     out, sdk = Path(a.out), Path(a.sdk)
     out.mkdir(parents=True, exist_ok=True)
     res = subprocess.run(["clang", "-print-resource-dir"], capture_output=True, text=True).stdout.strip()
+    # -fno-zero-initialized-in-bss: Windows 98 does not clear memory past a section's file data (see wdm.py)
     cflags = ["clang", "--target=i686-w64-windows-gnu", "-march=i586", "-O2", "-ffreestanding", "-fno-builtin",
+              "-fno-zero-initialized-in-bss", "-fno-common",
               "-fno-stack-protector", "-fno-auto-import", "-mgeneral-regs-only", "-fno-jump-tables", "-nostdinc",
               "-isystem", f"{res}/include", "-isystem", str(sdk / "include"),
               "-isystem", str(MINGW / "crt"), "-isystem", str(MINGW / "include"),

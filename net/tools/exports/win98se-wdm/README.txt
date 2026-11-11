@@ -12,7 +12,9 @@ names are proven to resolve. That matters: NTKERN keeps some names in a form
 the string scan does not see. KeInitializeDpc, KeInsertQueueDpc, KeSetTimer,
 KeInitializeTimer and KeCancelTimer, for example, are only on the lists
 because 1394bus.sys, acpi.sys, aha894x.sys and others import them.
-ndis.sys, ks.sys, portcls.sys, stream.sys, wmilib.sys, usbcamd.sys and
+portcls.sys: the export table of 98 SE's PORTCLS.SYS (4.10.2222), plus the
+proven names.
+ndis.sys, ks.sys, stream.sys, wmilib.sys, usbcamd.sys and
 dxapi.sys have proven lists only.
 
 Not seen in any 98 SE driver (treat as absent): IoAllocateWorkItem,

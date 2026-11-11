@@ -315,6 +315,8 @@ list.
 | XInput | `xinput1_1`-`1_4`, `xinput9_1_0`, controller database | builds, in installer | to be decided |
 | Xbox controller driver | `kexpad.sys`, 360 protocol (173 pads); later One/Series | builds, in installer; untested on hardware | to be decided |
 | Intel PRO/1000 driver | `kexem.sys` + `kexbsd.sys`: OpenBSD em(4) through kexbsd, 192 adapters | DHCP + ping in QEMU (e1000); untested on hardware | to be decided |
+| AC'97 audio | `kexac97.sys`: own GPLv2 WDM audio driver (PortCls WaveCyclic + Topology); Intel ICH to ICH7, nForce 1-4, AMD-8111/768, any AC'97 codec (ALC655 on the 848P Neo2-V) | QEMU AC97: installs, startup and Welcome sounds play (captured and compared with the source WAV), volume icon; untested on hardware | to be decided |
+| Intel chipset INFs | `kexchip.inf`, `kexide.inf`, `kexuhci.inf` from pci.ids: ICH2 to ICH10, 845 to P45 | QEMU: ICH9 UHCI installs and runs; untested on hardware | to be decided |
 | Realtek RTL8139/810x Ethernet | `kexrl.sys`: own GPLv2 driver; RTL8139/C/C+/D, RTL8100/8100C (MSI 848P Neo2-V onboard), RTL8101L and 19 OEM cards | DHCP, ping 4/4 and 30/30 at 1450 bytes in QEMU (rtl8139); untested on hardware | to be decided |
 | USB RNDIS / phone tethering | `kexrndis.sys`: OpenBSD urndis(4) through kexbsd's USB layer | DHCP + ping in QEMU (usb-net on UHCI); untested on hardware | to be decided |
 | USB CDC Ethernet | `kexcdce.sys`: own GPLv2 CDC ECM driver (OpenBSD cdce is BSD-4) | DHCP + ping in QEMU (usb-net ECM); untested on hardware | to be decided |
@@ -448,6 +450,8 @@ python3 toolchain/nsis/build_nsis.py --nsis-src ../nsis --scons-src ../scons \
 # Xbox 360-protocol controller driver (WDM, imports checked against 98 SE)
 python3 toolchain/wdm/build_kexpad.py --out ../build/kexpad --sdk ../build/sdk
 
+# audio: kexac97.sys (AC'97, WDM PortCls)
+python3 toolchain/wdm/build_kexaudio.py --out ../build/kexaudio
 # network drivers: kexbsd.sys + kexem.sys (OpenBSD em), kexrndis.sys (OpenBSD urndis),
 # kexcdce.sys (our CDC ECM), kexurtwn.sys (OpenBSD urtwn + net80211)
 python3 toolchain/wdm/build_kexnet.py --out ../build/kexnet --sdk ../build/sdk

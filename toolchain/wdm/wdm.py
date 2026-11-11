@@ -34,6 +34,9 @@ def cflags(sdk: Path, extra=()):
     return ["clang", "--target=i686-w64-windows-gnu", "-march=i586", "-O2", "-ffreestanding", "-fno-builtin",
             "-fno-stack-protector", "-fno-auto-import", "-mgeneral-regs-only", "-fno-jump-tables",
             "-mno-stack-arg-probe", "-nostdinc",
+            # Windows 98's loader for WDM drivers does not clear the part of a section
+            # beyond its file data (.bss): zero-initialized variables need real zeros
+            "-fno-zero-initialized-in-bss", "-fno-common",
             "-isystem", f"{res}/include", "-isystem", str(sdk / "include"),
             "-isystem", str(MINGW / "crt"), "-isystem", str(MINGW / "include"),
             "-I", str(ROOT / "toolchain" / "wdm" / "include"),
@@ -137,6 +140,23 @@ def fix_header(path: Path, epoch: int):
     path.write_bytes(d)
 
 
+def check_sections(sysf: Path):
+    """Windows 98 leaves a section's memory past its file data uncleared: every
+    byte of a section must come from the file (see -fno-zero-initialized-in-bss)."""
+    d = sysf.read_bytes()
+    pe = int.from_bytes(d[0x3C:0x40], "little")
+    n = int.from_bytes(d[pe + 6:pe + 8], "little")
+    opt = int.from_bytes(d[pe + 20:pe + 22], "little")
+    for i in range(n):
+        o = pe + 24 + opt + 40 * i
+        name = d[o:o + 8].rstrip(b"\0").decode()
+        vsize = int.from_bytes(d[o + 8:o + 12], "little")
+        raw = int.from_bytes(d[o + 16:o + 20], "little")
+        if vsize > raw:
+            sys.exit(f"{sysf.name}: section {name} has {vsize - raw} bytes not in the file "
+                     "(uncleared on Windows 98)")
+
+
 def link(name, objs, out: Path, entry="_DriverEntry@8", deffile=None, base="0x10000", local_exports=(),
          extra_tables=None):
     libs = make_import_libs(objs, out, local_exports, extra_tables)
@@ -147,6 +167,7 @@ def link(name, objs, out: Path, entry="_DriverEntry@8", deffile=None, base="0x10
     if deffile:
         cmd += ["-shared", deffile, f"-Wl,--out-implib,{out / ('lib' + name + '.a')}"]
     run(cmd)
+    check_sections(sysf)
     fix_header(sysf, int((ROOT / "net/certs/EPOCH").read_text().strip()))
     dis = run(["llvm-objdump", "-d", "--no-show-raw-insn", sysf])
     fpu = [l for l in dis.splitlines() if re.search(r"^\s+[0-9a-f]+:\s+(f[a-z]+\s|.*%x?mm[0-9])", l)]

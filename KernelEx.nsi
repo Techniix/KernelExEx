@@ -518,6 +518,22 @@ Function KexChipRedetect
   Pop $R0
 FunctionEnd
 
+Section /o "AC'97 audio (Intel ICH, nVidia nForce, AMD; any AC'97 codec)" SECKEXAC97
+  ;a WDM audio driver: Windows finds it in this folder when it finds the audio device
+  SetOutPath "$INSTDIR\drivers\audio"
+  File "drivers\audio\kexac97.sys"
+  File "drivers\audio\kexac97.inf"
+  SetOutPath "$INSTDIR"
+  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+  StrCmp $0 "" 0 +2
+    StrCpy $0 "$WINDIR\INF"
+  ${WordFind} "$0" "$INSTDIR\drivers\audio" "E+1{" $1
+  IfErrors 0 kexac97_listed
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\audio"
+  kexac97_listed:
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexAc97" "1"
+SectionEnd
+
 SectionGroup "Network adapter drivers" SECNETDRV
 
 Section /o "Intel PRO/1000 (OpenBSD em driver)" SECKEXEM
@@ -642,6 +658,7 @@ SectionEnd
 SectionGroupEnd
 
 LangString DESC_KEXCHIP ${LANG_ENGLISH} "Names every part of Intel chipsets newer than Windows 98 (ICH2 to ICH10: SMBus, LPC, USB, IDE/SATA, bridges) so Device Manager shows no unknown devices, and sets them up with Windows' own drivers."
+LangString DESC_KEXAC97 ${LANG_ENGLISH} "Sound for onboard AC'97 audio (Intel ICH to ICH7, nVidia nForce 1 to 4, AMD-8111) with any AC'97 codec, such as the Realtek ALC655 on the MSI 848P Neo2-V. Windows 98 has no driver for these."
 LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
 LangString DESC_KEXRNDIS ${LANG_ENGLISH} "USB network adapters that speak RNDIS, including USB tethering from an Android phone, with OpenBSD's urndis driver."
 LangString DESC_KEXCDCE ${LANG_ENGLISH} "USB Ethernet adapters that follow the CDC Ethernet standard (many USB-C and Realtek RTL8152/8153 adapters)."
@@ -698,6 +715,7 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXPAD} $(DESC_KEXPAD)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECNETDRV} $(DESC_NETDRV)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXCHIP} $(DESC_KEXCHIP)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAC97} $(DESC_KEXAC97)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRL} $(DESC_KEXRL)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRNDIS} $(DESC_KEXRNDIS)
@@ -740,6 +758,16 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\kexpad"
     RMDir "$INSTDIR\drivers"
   un_kexpad_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexAc97"
+  StrCmp $0 "1" 0 un_kexac97_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\audio" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\audio\kexac97.sys"
+    Delete "$INSTDIR\drivers\audio\kexac97.inf"
+    RMDir "$INSTDIR\drivers\audio"
+    RMDir "$INSTDIR\drivers"
+  un_kexac97_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexChip"
   StrCmp $0 "1" 0 un_kexchip_done
     ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
