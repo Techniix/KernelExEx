@@ -606,8 +606,9 @@ int obsd_usb_attach(PDEVICE_OBJECT lower, kexbsd_worker *worker, obsd_usb_match_
 		kexbsd_printf("%s: cannot read the device descriptor\n", sc->dv_xname);
 		goto fail;
 	}
-	kexbsd_printf("%s: USB %04x:%04x, %d configuration(s)\n", sc->dv_xname, UGETW(dev->ddesc.idVendor),
-	              UGETW(dev->ddesc.idProduct), dev->ddesc.bNumConfigurations);
+	kexbsd_printf("%s: USB %04x:%04x, %d configuration(s), %s\n", sc->dv_xname, UGETW(dev->ddesc.idVendor),
+	              UGETW(dev->ddesc.idProduct), dev->ddesc.bNumConfigurations,
+	              dev->speed == USB_SPEED_HIGH ? "high speed (USB 2.0)" : "full speed (USB 1.1)");
 
 	/* the best match over every interface of every configuration */
 	for (ci = 0; ci < dev->ddesc.bNumConfigurations; ci++)
