@@ -108,6 +108,13 @@ static PNDIS_BUFFER next_buffer(PNDIS_BUFFER b)
 #define MAX_MULTI 32
 #define FRAME_MAX 1514
 
+struct wifi_settings
+{
+	char ssid[33];
+	char pass[65];
+	int tkip;
+};
+
 typedef struct kexnet_adapter
 {
 	NDIS_HANDLE handle;
@@ -138,6 +145,10 @@ typedef struct kexnet_adapter
 	struct usbd_device *udev;
 	struct kexbsd_work start_work, flags_work, watchdog_work;
 	volatile int want_flags;
+	struct kexbsd_work bringup_work;
+	int beats;
+	volatile int bringup_pending;
+	struct wifi_settings *wifi;
 } KEXNET_ADAPTER;
 
 /* NDIS wants its indications at DISPATCH_LEVEL; a USB driver makes them
@@ -148,6 +159,30 @@ typedef struct kexnet_adapter
 static const struct kexnet_driver *the_driver;
 static kexbsd_worker *shared_worker;
 void obsd_set_systq_worker(kexbsd_worker *w);
+int obsd_write_file(const char *name, const void *buf, size_t len);
+
+/* the driver log (kexbsd's ring) as WINDOWS\KEXNET.LOG, written from the
+ * driver thread: after attach, after the Wi-Fi settings, every 10 s */
+static char log_buf[8192];
+static struct kexbsd_work log_work;
+
+static void log_flush(void *arg)
+{
+	int n;
+	(void) arg;
+	n = kexbsd_log_tail(log_buf, sizeof(log_buf));
+	if (n > 0)
+		obsd_write_file("KEXNET.LOG", log_buf, (size_t) n);
+}
+
+static void log_post(kexbsd_worker *w)
+{
+	if (!w)
+		return;
+	log_work.fn = log_flush;
+	log_work.arg = NULL;
+	kexbsd_worker_post(w, &log_work);
+}
 static KEXNET_ADAPTER *adapters[MAX_ADAPTERS];
 static KEXNET_ADAPTER *attaching;   /* during match/attach: timeouts and interrupts belong here */
 static struct obsd_dma_tag
@@ -1002,6 +1037,8 @@ static const NDIS_OID supported[] = {
 };
 
 static VOID NTAPI mp_shutdown(PVOID ctx);
+static int filter_flags(ULONG f);
+#define filter_flags_up(a) filter_flags((a)->packet_filter)
 
 /* a string from the adapter's registry key; NDIS on 9x may hand back ANSI
  * or UTF-16, so both are accepted (non-ASCII characters become '?') */
@@ -1038,19 +1075,23 @@ static void read_string(NDIS_HANDLE ch, const char *name, char *out, size_t cap)
 	}
 }
 
-struct wifi_call
+/* USB drivers come up on their thread after initialize has returned. On
+ * Windows 98 SE, file access (firmware, the log) from a driver deadlocks
+ * while the device's start is still in progress, even from another thread
+ * just after initialize returns, so drivers that read files come up from
+ * the check-for-hang timer instead (see mp_check_hang) */
+static void apply_flags(KEXNET_ADAPTER *a, int flags);
+static void bringup_fn(void *arg)
 {
-	KEXNET_ADAPTER *a;
-	char ssid[33];
-	char pass[65];
-	int tkip;
-	int result;
-};
-
-static void wifi_call_fn(void *arg)
-{
-	struct wifi_call *c = (struct wifi_call *) arg;
-	c->result = c->a->drv->wifi_config(c->a->ifp, c->ssid, c->pass, c->tkip);
+	KEXNET_ADAPTER *a = (KEXNET_ADAPTER *) arg;
+	if (a->wifi)
+	{
+		a->drv->wifi_config(a->ifp, a->wifi->ssid, a->wifi->pass, a->wifi->tkip);
+		explicit_bzero(a->wifi, sizeof(*a->wifi));
+		kexbsd_free(a->wifi, M_DEVBUF);
+		a->wifi = NULL;
+	}
+	apply_flags(a, filter_flags_up(a));
 }
 
 static void apply_flags(KEXNET_ADAPTER *a, int flags)
@@ -1327,19 +1368,16 @@ attached:
 			}
 			if (drv->wifi_config)
 			{
-				struct wifi_call wc;
-				char tk[4];
-				memset(&wc, 0, sizeof(wc));
-				wc.a = a;
-				read_string(ch, "NetworkName", wc.ssid, sizeof(wc.ssid));
-				read_string(ch, "Passphrase", wc.pass, sizeof(wc.pass));
-				read_string(ch, "AllowTKIP", tk, sizeof(tk));
-				wc.tkip = tk[0] == '1';
-				if (a->worker)
-					kexbsd_worker_call(a->worker, wifi_call_fn, &wc);
-				else
-					wifi_call_fn(&wc);
-				explicit_bzero(wc.pass, sizeof(wc.pass));
+				/* applied in bring-up, on the driver thread */
+				a->wifi = (struct wifi_settings *) kexbsd_malloc(sizeof(*a->wifi), M_DEVBUF, M_NOWAIT | M_ZERO);
+				if (a->wifi)
+				{
+					char tk[4];
+					read_string(ch, "NetworkName", a->wifi->ssid, sizeof(a->wifi->ssid));
+					read_string(ch, "Passphrase", a->wifi->pass, sizeof(a->wifi->pass));
+					read_string(ch, "AllowTKIP", tk, sizeof(tk));
+					a->wifi->tkip = tk[0] == '1';
+				}
 			}
 			NdisCloseConfiguration(ch);
 		}
@@ -1347,8 +1385,21 @@ attached:
 
 	adapters[slot] = a;
 	NdisMRegisterAdapterShutdownHandler(handle, a, mp_shutdown);
+
 	/* bring it up; protocols set the real packet filter when they bind */
-	set_flags(a, IFF_UP);
+	if (a->worker)
+	{
+		a->bringup_work.fn = bringup_fn;
+		a->bringup_work.arg = a;
+		/* radios load firmware from disk when they come up, so wait for
+		 * the first check-for-hang beats: by then file access works */
+		if (drv->wifi_config)
+			a->bringup_pending = 1;
+		else
+			kexbsd_worker_post(a->worker, &a->bringup_work);
+	}
+	else
+		set_flags(a, IFF_UP);
 	attaching = NULL;
 	return NDIS_STATUS_SUCCESS;
 
@@ -1406,6 +1457,14 @@ static NDIS_STATUS NTAPI mp_reset(PBOOLEAN addressing_reset, NDIS_HANDLE ctx)
 static BOOLEAN NTAPI mp_check_hang(NDIS_HANDLE ctx)
 {
 	KEXNET_ADAPTER *a = (KEXNET_ADAPTER *) ctx;
+	static int beat;
+	if (++beat % 5 == 0)   /* NDIS calls this every 2 s */
+		log_post(a->worker);
+	if (a->bringup_pending && ++a->beats >= 5)
+	{
+		a->bringup_pending = 0;
+		kexbsd_worker_post(a->worker, &a->bringup_work);
+	}
 	/* OpenBSD's if_timer watchdog, at NDIS's two-second cadence */
 	if (a->ifp->if_timer > 0)
 	{

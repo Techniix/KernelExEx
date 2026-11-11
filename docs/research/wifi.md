@@ -100,11 +100,26 @@ RDSEED/RDRAND when present, TSC jitter across 64 timer ticks, system time
 and the performance counter, stirred on every request, state forwarded
 after every request.
 
-**Configuration (next):** network name and passphrase as the adapter's
-Advanced properties first (NDIS params read at initialize; PSK from the
-passphrase with PBKDF2-HMAC-SHA1 in the driver, as `ifconfig` does on
-OpenBSD), then a Control Panel applet with a scan list, writing the same
+**Configuration:** network name and passphrase are the adapter's Advanced
+properties (NetworkName, Passphrase, AllowTKIP; read at initialize, PSK
+from the passphrase with PBKDF2-HMAC-SHA1 in the driver, as `ifconfig`
+does on OpenBSD; WPA2/CCMP only unless AllowTKIP is set). Next is a Control Panel applet with a scan list, writing the same
 values and asking the driver to reassociate (private OID).
+
+**Firmware and file access at boot:** on 98 SE, a driver's ZwCreateFile
+deadlocks while its device start is still in progress: from
+MiniportInitialize, from another thread, and from the driver thread just
+after initialize has returned. It works from the check-for-hang timer
+onwards (tested: `\SystemRoot\KEXNET.LOG` written, `8188EU.FW` read in
+full, boot completes). So radio drivers, which load firmware when the
+interface comes up, are brought up from the fifth check-for-hang beat
+(about 10 s after initialize); until then the adapter reports
+disconnected. Firmware is looked for in `SYSTEM\KEXFW\` under the long
+OpenBSD name, then as 8.3 (`urtwn-rtl8188eu` -> `8188EU.FW`).
+
+**Driver log:** every adapter writes the driver message ring to
+`C:\WINDOWS\KEXNET.LOG` every 10 s (overwritten), so a test on real
+hardware can be read back without a debugger.
 
 **Radio drivers (ISC, all by or derived from Damien Bergamini):**
 

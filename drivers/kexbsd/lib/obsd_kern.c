@@ -227,3 +227,41 @@ int obsd_loadfirmware(const char *name, unsigned char **buf, size_t *len)
 	kexbsd_printf("kexbsd: firmware %s (%s) not found in SYSTEM\\KEXFW\n", name, shortname);
 	return ENOENT;
 }
+
+/* ---- the driver log as a file, for testing on real hardware --------------------------- */
+int obsd_write_file(const char *name, const void *buf, size_t len)
+{
+	static const char *const dirs[] = { "\\SystemRoot\\", "\\DosDevices\\C:\\WINDOWS\\",
+	                                    "\\??\\C:\\WINDOWS\\", "C:\\WINDOWS\\" };
+	unsigned int i;
+	for (i = 0; i < nitems(dirs); i++)
+	{
+		NTSTATUS st;
+		WCHAR path[96];
+		UNICODE_STRING us;
+		OBJECT_ATTRIBUTES oa;
+		IO_STATUS_BLOCK iosb;
+		HANDLE h;
+		path[0] = 0;
+		append(path, nitems(path), dirs[i]);
+		append(path, nitems(path), name);
+		RtlInitUnicodeString(&us, path);
+		InitializeObjectAttributes(&oa, &us, OBJ_CASE_INSENSITIVE, NULL, NULL);
+		st = ZwCreateFile(&h, GENERIC_WRITE | SYNCHRONIZE, &oa, &iosb, NULL, FILE_ATTRIBUTE_NORMAL, 0,
+		                  FILE_OVERWRITE_IF, FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE, NULL, 0);
+#ifdef KEX_DEBUGCON
+		{
+			static int shown;
+			if (shown++ < 8)
+				kexbsd_printf("kexbsd: create %s%s -> %08lx\n", dirs[i], name, (unsigned long) st);
+		}
+#endif
+		if (NT_SUCCESS(st))
+		{
+			ZwWriteFile(h, NULL, NULL, NULL, &iosb, (PVOID) buf, (ULONG) len, NULL, NULL);
+			ZwClose(h);
+			return 0;
+		}
+	}
+	return EIO;
+}
