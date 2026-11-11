@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build the OpenBSD network drivers in drivers/kexnet as NDIS 5 miniports:
 kexem.sys (em, Intel PRO/1000), kexrndis.sys (urndis, USB RNDIS) and
-kexcdce.sys (our own CDC ECM driver), kexurtwn.sys (urtwn + net80211).
+kexcdce.sys (our own CDC ECM driver), kexurtwn.sys (urtwn + net80211),
+kexrtwn.sys (FreeBSD rtwn on OpenBSD net80211: two personalities in one driver).
 Builds kexbsd.sys first (they import from it).
 
 usage: build_kexnet.py [--out DIR] [--sdk DIR] [--debugcon]
@@ -54,10 +55,39 @@ def main():
         # the wireless stack alone, to prove it links (never installed)
         "kexwlan_linktest": ([SRC / "wifi" / "kexwlan_linktest.c"] + WIFI, ["-I", str(SRC / "wifi"), "-I", str(SRC)]),
     }
+    # kexrtwn: FreeBSD's rtwn and its FreeBSD personality, compiled apart
+    RT = SRC / "rtwn"
+    fbsd_srcs = [p for p in sorted((RT / "dev" / "rtwn").rglob("*.c")) if p.name != "rtwn_usb_attach.c"] + [
+        RT / "kexrtwn_fbsd.c", RT / "compat" / "kexfbsd_kern.c", RT / "compat" / "kexfbsd_usb.c",
+        RT / "net80211" / "ieee80211_phy.c"]
+    fbsd_flags = ["-I", str(RT / "compat"), "-I", str(RT / "compat" / "dev" / "usb"), "-I", str(RT),
+                  "-I", str(BSD / "include"), "-include", str(RT / "compat" / "kexfbsd.h"), "-DKEXBSD",
+                  "-Wno-unused-variable", "-Wno-unused-function", "-Wno-sign-compare", "-Wno-unused-but-set-variable",
+                  "-Wno-pointer-sign", "-Wno-parentheses-equality", "-Wno-tautological-constant-out-of-range-compare",
+                  "-Wno-unused-value", "-Wno-incompatible-pointer-types-discards-qualifiers", "-Wno-missing-braces"]
+    if a.debugcon:
+        fbsd_flags.append("-DKEX_DEBUGCON")
+    drivers["kexrtwn"] = ([RT / "kexrtwn_obsd.c"] + WIFI, ["-I", str(RT), "-I", str(SRC / "wifi"), "-I", str(SRC)])
     for name, (srcs, inc) in drivers.items():
         dout = out / name
         dout.mkdir(exist_ok=True)
         objs = wdm.compile(srcs, dout, Path(a.sdk), extra + inc)
+        if name == "kexrtwn":
+            fout = dout / "fbsd"
+            fout.mkdir(exist_ok=True)
+            fobjs = wdm.compile(fbsd_srcs, fout, Path(a.sdk), fbsd_flags)
+            # the FreeBSD side's net80211 names collide with OpenBSD's: rename them there
+            def defined(o):
+                return {l.split()[-1] for l in wdm.run(["llvm-nm", "--defined-only", "--extern-only", o]).splitlines()
+                        if len(l.split()) == 3}
+            odef = set().union(*(defined(o) for o in objs))
+            fdef = set().union(*(defined(o) for o in fobjs))
+            clash = sorted(odef & fdef)
+            if clash:
+                (fout / "rename.txt").write_text("".join(f"{c} {c[0]}kexfbsd_{c[1:]}\n" for c in clash))
+                for o in fobjs:
+                    wdm.run(["llvm-objcopy", f"--redefine-syms={fout / 'rename.txt'}", o])
+            objs = objs + fobjs
         sysf = wdm.link(name, objs, dout, extra_tables=tables)
         (out / f"{name}.sys").write_bytes(sysf.read_bytes())
         imports = [l.split(":")[1].strip() for l in wdm.run(["llvm-objdump", "-p", sysf]).splitlines() if "DLL Name" in l]
