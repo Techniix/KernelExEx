@@ -37,9 +37,12 @@ static int kexem_isr(struct device *self)
 	if (!sc->hw.back)
 		return 0;   /* registers not mapped yet */
 	icr = E1000_READ_REG(&sc->hw, ICR);
-	if (sc->hw.mac_type >= em_82571 ? !(icr & E1000_ICR_INT_ASSERTED) : !icr)
-		return 0;   /* someone else on a shared line */
+	if (!icr)
+		return 0;
+	/* reading ICR cleared the causes: keep them for the DPC either way */
 	__sync_fetch_and_or(&k->icr, icr);
+	if (sc->hw.mac_type >= em_82571 ? !(icr & E1000_ICR_INT_ASSERTED) : !(icr & E1000_READ_REG(&sc->hw, IMS)))
+		return 0;   /* only masked causes: someone else on a shared line */
 	E1000_WRITE_REG(&sc->hw, IMC, 0xffffffff);
 	return 1;
 }

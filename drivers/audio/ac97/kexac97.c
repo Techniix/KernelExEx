@@ -21,12 +21,11 @@ typedef char TCHAR;
 #include <portcls.h>
 #include <ksmedia.h>
 
-#ifdef KEX_DEBUGCON
+/* messages: QEMU's debug console in test builds, and always a copy that
+ * start_device saves to the registry (HKLM\Software\KernelEx\Diag,
+ * "kexac97") for testing on real machines */
 static void dbg(const char *fmt, ...);
 #define DPRINT(...) dbg(__VA_ARGS__)
-#else
-#define DPRINT(...) do { } while (0)
-#endif
 
 /* ---- GUIDs, defined here (the headers' DEFINE_GUIDSTRUCT machinery is C++) ------------- */
 #define KGUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
@@ -984,7 +983,18 @@ static NTSTATUS new_port_miniport(PDEVICE_OBJECT dev, PIRP irp, const GUID *clsi
 	return STATUS_SUCCESS;
 }
 
+static NTSTATUS start_body(PDEVICE_OBJECT dev, PIRP irp, PRESOURCELIST res);
+static void diag_save(void);
+
 static NTSTATUS NTAPI start_device(PDEVICE_OBJECT dev, PIRP irp, PRESOURCELIST res)
+{
+	NTSTATUS st = start_body(dev, irp, res);
+	DPRINT("kexac97: start result %08lx\n", st);
+	diag_save();
+	return st;
+}
+
+static NTSTATUS start_body(PDEVICE_OBJECT dev, PIRP irp, PRESOURCELIST res)
 {
 	ADAPTER *ad = &g_ad;
 	PCM_PARTIAL_RESOURCE_DESCRIPTOR io0, io1;
@@ -1078,12 +1088,49 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT drv, PUNICODE_STRING reg)
 	return PcInitializeAdapterDriver(drv, reg, (PDRIVER_ADD_DEVICE) add_device);
 }
 
-#ifdef KEX_DEBUGCON
 #include <stdarg.h>
-/* port 0xE9 (QEMU -debugcon): %s %c %x %lx %u %lu %d %ld, nothing more */
+static char diag[2048];
+static ULONG diag_len;
+
+/* %s %c %x %lx %u %lu %d %ld, nothing more */
 static void out_c(char c)
 {
+#ifdef KEX_DEBUGCON
 	WRITE_PORT_UCHAR((PUCHAR) 0xe9, (UCHAR) c);
+#endif
+	if (c == '\n' && diag_len + 2 < sizeof(diag))
+		diag[diag_len++] = '\r';
+	if (diag_len + 1 < sizeof(diag))
+		diag[diag_len++] = c;
+}
+
+static void diag_save(void)
+{
+	UNICODE_STRING us, name;
+	OBJECT_ATTRIBUTES oa;
+	HANDLE h;
+	ULONG disp;
+	static const WCHAR *const keys[] = { L"\\Registry\\Machine\\Software\\KernelEx",
+	                                     L"\\Registry\\Machine\\Software\\KernelEx\\Diag" };
+	int i;
+	for (i = 0; i < 2; i++)
+	{
+		RtlInitUnicodeString(&us, keys[i]);
+		InitializeObjectAttributes(&oa, &us, OBJ_CASE_INSENSITIVE, NULL, NULL);
+		if (!NT_SUCCESS(ZwCreateKey(&h, KEY_ALL_ACCESS, &oa, 0, NULL, REG_OPTION_NON_VOLATILE, &disp)))
+			return;
+		if (i == 1)
+		{
+			static WCHAR w[sizeof(diag)];
+			ULONG k;
+			for (k = 0; k < diag_len; k++)
+				w[k] = (WCHAR) (UCHAR) diag[k];
+			w[k] = 0;
+			RtlInitUnicodeString(&name, L"kexac97");
+			ZwSetValueKey(h, &name, 0, REG_SZ, w, (k + 1) * sizeof(WCHAR));
+		}
+		ZwClose(h);
+	}
 }
 
 static void out_n(unsigned long v, unsigned base, int neg)
@@ -1145,4 +1192,3 @@ static void dbg(const char *fmt, ...)
 	}
 	va_end(ap);
 }
-#endif

@@ -480,6 +480,12 @@ static int rl_isr(struct device *self)
 	isr = CSR_READ_2(sc, RL_ISR);
 	if (isr == 0 || isr == 0xffff)
 		return 0;   /* not ours (shared line), or the card is gone */
+	/* only causes we enabled assert the line: status bits that are set but
+	 * masked (link, timer, ...) mean another device on a shared line is
+	 * interrupting. Claiming it starves that device's handler and the line
+	 * stays asserted: an interrupt storm, a hang at boot. */
+	if (!(isr & CSR_READ_2(sc, RL_IMR)))
+		return 0;
 	CSR_WRITE_2(sc, RL_IMR, 0);
 	__sync_fetch_and_or(&sc->isr, isr);
 	return 1;
