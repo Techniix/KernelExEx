@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build the KernelExEx USB host controller drivers in drivers/usb as WDM
-drivers for Windows 98 SE / ME: kexehci.sys (USB 2.0, EHCI). With --tests
+drivers for Windows 98 SE / ME: kexehci.sys (USB 2.0, EHCI) and
+kexumass.sys (USB mass storage). With --tests
 also tests/usb/kexusbt.sys (a mass storage test driver, not shipped).
 
 usage: build_kexusb.py [--out DIR] [--sdk DIR] [--debugcon] [--tests]
@@ -26,7 +27,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     extra = ["-DKEX_DEBUGCON"] if a.debugcon else []
     rt = wdm.ROOT / "net/rt/w9xrt_div.c"   # 64-bit division helpers
-    drivers = {"kexehci": [SRC / "ehci" / "kexehci.c", rt]}
+    drivers = {"kexehci": [SRC / "ehci" / "kexehci.c", rt], "kexumass": [SRC / "storage" / "kexumass.c", rt]}
     if a.tests:
         drivers["kexusbt"] = [wdm.ROOT / "tests" / "usb" / "kexusbt.c", rt]
     for name, srcs in drivers.items():

@@ -1,0 +1,59 @@
+; kexumass.inf - KernelExEx USB mass storage (flash drives, disks, card readers) for Windows 98 SE / ME
+; The disks themselves then use Windows' own NTMAP ("1394/USB Disk", ntmap.inf).
+[Version]
+Signature="$CHICAGO$"
+LayoutFile=layout.inf, layout1.inf, layout2.inf
+LayoutFile=layout.inf, layout1.inf, layout2.inf
+Class=USB
+ClassGUID={36FC9E60-C465-11CF-8056-444553540000}
+Provider=%KEX%
+DriverVer=11/11/2026, 1.0.0.0
+
+[Manufacturer]
+%KEX%=Models
+
+[Models]
+%scsi%=KexUmass,USB\CLASS_08&SUBCLASS_06&PROT_50
+%atapi%=KexUmass,USB\CLASS_08&SUBCLASS_02&PROT_50
+%atapi%=KexUmass,USB\CLASS_08&SUBCLASS_05&PROT_50
+%ufi%=KexUmass,USB\CLASS_08&SUBCLASS_04&PROT_50
+%rbc%=KexUmass,USB\CLASS_08&SUBCLASS_01&PROT_50
+
+[KexUmass]
+AddReg=KexUmass.AddReg
+CopyFiles=KexUmass.CopyFiles, KexUmass.Ntmap
+
+; Windows' NTMAP (from the Windows 98 SE CD) as the upper filter, as sbp2.inf
+; does for 1394 disks: it connects our disks to Windows' disk layer
+[KexUmass.HW]
+AddReg=KexUmass.Filter
+
+[KexUmass.Filter]
+HKR,,UpperFilters,0,"ntmap.sys"
+
+[KexUmass.Ntmap]
+ntmap.sys
+
+[KexUmass.AddReg]
+HKR,,DevLoader,,*ntkern
+HKR,,NTMPDriver,,kexumass.sys
+
+[KexUmass.CopyFiles]
+kexumass.sys
+
+[DestinationDirs]
+KexUmass.CopyFiles=10,system32\drivers
+KexUmass.Ntmap=10,system32\drivers
+
+[SourceDisksNames]
+1="KernelExEx USB storage driver",,0
+
+[SourceDisksFiles]
+kexumass.sys=1
+
+[Strings]
+KEX="KernelExEx"
+scsi="USB Mass Storage Device (KernelExEx)"
+atapi="USB Mass Storage Device, ATAPI (KernelExEx)"
+ufi="USB Floppy Drive (KernelExEx)"
+rbc="USB Mass Storage Device, RBC (KernelExEx)"

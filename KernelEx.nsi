@@ -640,6 +640,23 @@ FunctionEnd
 !insertmacro KEXATA_SWITCH ""
 !insertmacro KEXATA_SWITCH "un."
 
+Section /o "USB flash drives, disks and card readers" SECKEXUMASS
+  ;function driver for USB mass storage; Windows' own NTMAP (from the
+  ;Windows 98 SE CD) connects the disks to Windows
+  SetOutPath "$INSTDIR\drivers\usbstor"
+  File "drivers\usbstor\kexumass.sys"
+  File "drivers\usbstor\kexumass.inf"
+  SetOutPath "$INSTDIR"
+  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+  StrCmp $0 "" 0 +2
+    StrCpy $0 "$WINDIR\INF"
+  ${WordFind} "$0" "$INSTDIR\drivers\usbstor" "E+1{" $1
+  IfErrors 0 kexumass_listed
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\usbstor"
+  kexumass_listed:
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexUmass" "1"
+SectionEnd
+
 Section /o "USB 2.0 (EHCI: Intel, VIA, NEC, nVidia, AMD, SiS, ALi and others)" SECKEXEHCI
   ;a WDM bus driver: Windows finds it in this folder when it finds the USB 2.0 controller
   SetOutPath "$INSTDIR\drivers\usb2"
@@ -822,6 +839,7 @@ SectionGroupEnd
 
 LangString DESC_KEXCHIP ${LANG_ENGLISH} "Names every part of Intel chipsets newer than Windows 98 (ICH2 to ICH10: SMBus, LPC, USB, IDE/SATA, bridges) so Device Manager shows no unknown devices, and sets them up with Windows' own drivers."
 LangString DESC_KEXATA ${LANG_ENGLISH} "Hard disks over 128 GB on IDE and SATA (in IDE mode) ports. Windows 98's own IDE driver goes wrong past 128 GB and can overwrite the start of the disk. This replaces it on every IDE channel, the Windows disk included, and also runs CD and DVD drives. Uninstalling puts Windows' driver back."
+LangString DESC_KEXUMASS ${LANG_ENGLISH} "USB flash drives, USB hard disks, card readers and USB CD/DVD drives, with no driver disk: Windows 98 has none for them. Works on USB 1.1 ports and, with the USB 2.0 driver, at USB 2.0 speed. Windows may ask for the Windows 98 CD the first time."
 LangString DESC_KEXEHCI ${LANG_ENGLISH} "USB 2.0 speed for the USB 2.0 ports of any EHCI controller (the Intel ICH4 to ICH10 and later chipsets, VIA, NEC and other add-in cards). Windows 98 runs them at USB 1.1 speed only. USB 1.1 mice, keyboards and printers stay on Windows' own drivers."
 LangString DESC_KEXAC97 ${LANG_ENGLISH} "Sound for onboard AC'97 audio (Intel ICH to ICH7, nVidia nForce 1 to 4, AMD-8111) with any AC'97 codec, such as the Realtek ALC655 on the MSI 848P Neo2-V. Windows 98 has no driver for these."
 LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
@@ -882,6 +900,7 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXCHIP} $(DESC_KEXCHIP)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAC97} $(DESC_KEXAC97)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEHCI} $(DESC_KEXEHCI)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXUMASS} $(DESC_KEXUMASS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRL} $(DESC_KEXRL)
@@ -945,6 +964,16 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\usb2"
     RMDir "$INSTDIR\drivers"
   un_kexehci_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexUmass"
+  StrCmp $0 "1" 0 un_kexumass_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\usbstor" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\usbstor\kexumass.sys"
+    Delete "$INSTDIR\drivers\usbstor\kexumass.inf"
+    RMDir "$INSTDIR\drivers\usbstor"
+    RMDir "$INSTDIR\drivers"
+  un_kexumass_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexAta"
   StrCmp $0 "1" 0 un_kexata_done
     StrCpy $R9 "off"

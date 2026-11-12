@@ -53,6 +53,8 @@ LAYOUT = {
     "drivers/audio/kexac97.sys": "kexaudio:kexac97.sys",
     "drivers/audio/kexac97.inf": "drivers/audio/ac97/kexac97.inf",
     "drivers/usb2/kexehci.sys": "kexusb:kexehci.sys",
+    "drivers/usbstor/kexumass.sys": "kexusb:kexumass.sys",
+    "drivers/usbstor/kexumass.inf": "drivers/usb/storage/kexumass.inf",
     "drivers/storage/kexata.mpd": "kexstor:kexata.mpd",
     "drivers/storage/kexata.inf": "drivers/storage/ata/kexata.inf",
     "drivers/usb2/kexehci.inf": "drivers/usb/ehci/kexehci.inf",
