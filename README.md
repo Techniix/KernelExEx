@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 10 | [KernelExEx-1.0.0-testbuild10.zip](KernelExEx-1.0.0-testbuild10.zip) | [9a62e54](https://github.com/Techniix/KernelExEx/commit/9a62e541ac61976922ae5f6212964bd31e2b76e4) | Fixes from the first test on the MSI 848P Neo2-V: RTL8139 driver no longer claims shared interrupts (boot hang, Code 11); AC'97 start diagnostics in the registry (Code 10). |
 | 9 | [KernelExEx-1.0.0-testbuild9.zip](KernelExEx-1.0.0-testbuild9.zip) | [e16e7be](https://github.com/Techniix/KernelExEx/commit/e16e7befa5021a7529562683ed575809735021ba) | Disks over 128 GB (own IDE/ATA driver with 48-bit LBA), see step 14; chipset INFs now set up the IDE channels (step 11, please redo); first build under the 1.0.0 version scheme. |
 | 8 | [KernelExEx-4.7.0-hwtest8.zip](KernelExEx-4.7.0-hwtest8.zip) | [d82a483](https://github.com/Techniix/KernelExEx/commit/d82a483ec55343aeee9dff4e329e3c49ab604a60) | USB 2.0 (EHCI, the ICH5 on the MSI 848P Neo2-V and any other), see step 13; the USB network and Wi-Fi drivers use their USB 2.0 settings on it. |
 | 7 | [KernelExEx-4.7.0-hwtest7.zip](KernelExEx-4.7.0-hwtest7.zip) | [48dbba7](https://github.com/Techniix/KernelExEx/commit/48dbba74b5b3ef94a23ec6b968b732c96cd88442) | AC'97 sound (ICH5 + ALC655 on the MSI 848P Neo2-V; Intel, nVidia, AMD), see step 12; every driver rebuilt with the fix for memory Windows 98 leaves uncleared. |
