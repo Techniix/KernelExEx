@@ -1,7 +1,12 @@
   ;ANSI installer: Unicode NSIS installers do not run on Windows 9x
   Unicode false
 
-  !define _VERSION '4.7.0'
+  ;KernelExEx 1.0.0 (README decision 44). _VERSION_CODE is the KernelEx
+  ;compatibility level (common/version.h VERSION_CODE), for the downgrade check
+  !define _VERSION '1.0.0'
+  !ifdef TESTBUILD
+    !define /redef _VERSION '1.0.0 test build ${TESTBUILD}'
+  !endif
   !define _VERSION_CODE 0x04070000
   
   !ifndef _DEBUG
@@ -534,6 +539,107 @@ Section /o "AC'97 audio (Intel ICH, nVidia nForce, AMD; any AC'97 codec)" SECKEX
   WriteRegStr HKLM "Software\KernelEx\Components" "KexAc97" "1"
 SectionEnd
 
+Section /o "Disks over 128 GB (IDE/ATA driver with 48-bit LBA)" SECKEXATA
+  ;an NT SCSI miniport for Windows 98's SCSIPORT, in place of ESDI_506.PDR on
+  ;every IDE channel: Windows' own driver wraps around past 128 GB and
+  ;overwrites the start of the disk
+  SetOutPath "$SYSDIR\IOSUBSYS"
+  File "drivers\storage\kexata.mpd"
+  SetOutPath "$INSTDIR\drivers\storage"
+  File "drivers\storage\kexata.mpd"
+  File "drivers\storage\kexata.inf"
+  SetOutPath "$WINDIR\INF"
+  File "drivers\storage\kexata.inf"
+  SetOutPath "$INSTDIR"
+  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+  StrCmp $0 "" 0 +2
+    StrCpy $0 "$WINDIR\INF"
+  ${WordFind} "$0" "$INSTDIR\drivers\storage" "E+1{" $1
+  IfErrors 0 kexata_listed
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\storage"
+  kexata_listed:
+  StrCpy $R9 "on"
+  Call KexAtaSwitch
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexAta" "1"
+SectionEnd
+
+;Every IDE channel device node (MF\GOODPRIMARY / MF\GOODSECONDARY) that runs
+;ESDI_506.PDR gets kexata.mpd instead ($R9 "on"), or back ($R9 "off"); the
+;old values are kept beside the new ones. Takes effect at the next start.
+!macro KEXATA_SWITCH un
+Function ${un}KexAtaSwitch
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R4
+  Push $R5
+  StrCpy $R0 0
+  kas_child:
+    EnumRegKey $R1 HKLM "Enum\MF" $R0
+    StrCmp $R1 "" kas_done
+    IntOp $R0 $R0 + 1
+    StrCpy $R2 0
+    kas_inst:
+      EnumRegKey $R3 HKLM "Enum\MF\$R1" $R2
+      StrCmp $R3 "" kas_child
+      IntOp $R2 $R2 + 1
+      ReadRegStr $R4 HKLM "Enum\MF\$R1\$R3" "HardwareID"
+      ClearErrors
+      ${${un}WordFind} "$R4" "GOODPRIMARY" "E+1{" $R5
+      IfErrors 0 kas_ide
+      ClearErrors
+      ${${un}WordFind} "$R4" "GOODSECONDARY" "E+1{" $R5
+      IfErrors kas_inst
+    kas_ide:
+      ReadRegStr $R4 HKLM "Enum\MF\$R1\$R3" "Driver"
+      StrCmp $R4 "" kas_inst
+      StrCpy $R4 "System\CurrentControlSet\Services\Class\$R4"
+      StrCmp $R9 "on" 0 kas_off
+        ReadRegStr $R5 HKLM $R4 "PortDriver"
+        StrCmp $R5 "ESDI_506.pdr" +2
+        StrCmp $R5 "esdi_506.pdr" 0 kas_inst
+        DetailPrint "IDE channel $R1: kexata.mpd"
+        WriteRegStr HKLM $R4 "KexOldPortDriver" $R5
+        ReadRegStr $R5 HKLM $R4 "DriverDesc"
+        WriteRegStr HKLM $R4 "KexOldDriverDesc" $R5
+        ReadRegStr $R5 HKLM $R4 "InfPath"
+        WriteRegStr HKLM $R4 "KexOldInfPath" $R5
+        ReadRegStr $R5 HKLM $R4 "InfSection"
+        WriteRegStr HKLM $R4 "KexOldInfSection" $R5
+        WriteRegStr HKLM $R4 "PortDriver" "kexata.mpd"
+        WriteRegStr HKLM $R4 "DriverDesc" "IDE channel (KernelExEx, 48-bit LBA)"
+        WriteRegStr HKLM $R4 "InfPath" "KEXATA.INF"
+        WriteRegStr HKLM $R4 "InfSection" "KexAta"
+        Goto kas_inst
+      kas_off:
+        ReadRegStr $R5 HKLM $R4 "KexOldPortDriver"
+        StrCmp $R5 "" kas_inst
+        DetailPrint "IDE channel $R1: $R5"
+        WriteRegStr HKLM $R4 "PortDriver" $R5
+        ReadRegStr $R5 HKLM $R4 "KexOldDriverDesc"
+        WriteRegStr HKLM $R4 "DriverDesc" $R5
+        ReadRegStr $R5 HKLM $R4 "KexOldInfPath"
+        WriteRegStr HKLM $R4 "InfPath" $R5
+        ReadRegStr $R5 HKLM $R4 "KexOldInfSection"
+        WriteRegStr HKLM $R4 "InfSection" $R5
+        DeleteRegValue HKLM $R4 "KexOldPortDriver"
+        DeleteRegValue HKLM $R4 "KexOldDriverDesc"
+        DeleteRegValue HKLM $R4 "KexOldInfPath"
+        DeleteRegValue HKLM $R4 "KexOldInfSection"
+        Goto kas_inst
+  kas_done:
+  Pop $R5
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
+!macroend
+!insertmacro KEXATA_SWITCH ""
+!insertmacro KEXATA_SWITCH "un."
+
 Section /o "USB 2.0 (EHCI: Intel, VIA, NEC, nVidia, AMD, SiS, ALi and others)" SECKEXEHCI
   ;a WDM bus driver: Windows finds it in this folder when it finds the USB 2.0 controller
   SetOutPath "$INSTDIR\drivers\usb2"
@@ -715,6 +821,7 @@ SectionEnd
 SectionGroupEnd
 
 LangString DESC_KEXCHIP ${LANG_ENGLISH} "Names every part of Intel chipsets newer than Windows 98 (ICH2 to ICH10: SMBus, LPC, USB, IDE/SATA, bridges) so Device Manager shows no unknown devices, and sets them up with Windows' own drivers."
+LangString DESC_KEXATA ${LANG_ENGLISH} "Hard disks over 128 GB on IDE and SATA (in IDE mode) ports. Windows 98's own IDE driver goes wrong past 128 GB and can overwrite the start of the disk. This replaces it on every IDE channel, the Windows disk included, and also runs CD and DVD drives. Uninstalling puts Windows' driver back."
 LangString DESC_KEXEHCI ${LANG_ENGLISH} "USB 2.0 speed for the USB 2.0 ports of any EHCI controller (the Intel ICH4 to ICH10 and later chipsets, VIA, NEC and other add-in cards). Windows 98 runs them at USB 1.1 speed only. USB 1.1 mice, keyboards and printers stay on Windows' own drivers."
 LangString DESC_KEXAC97 ${LANG_ENGLISH} "Sound for onboard AC'97 audio (Intel ICH to ICH7, nVidia nForce 1 to 4, AMD-8111) with any AC'97 codec, such as the Realtek ALC655 on the MSI 848P Neo2-V. Windows 98 has no driver for these."
 LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
@@ -775,6 +882,7 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXCHIP} $(DESC_KEXCHIP)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAC97} $(DESC_KEXAC97)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEHCI} $(DESC_KEXEHCI)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRL} $(DESC_KEXRL)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRNDIS} $(DESC_KEXRNDIS)
@@ -837,6 +945,21 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\usb2"
     RMDir "$INSTDIR\drivers"
   un_kexehci_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexAta"
+  StrCmp $0 "1" 0 un_kexata_done
+    StrCpy $R9 "off"
+    Call un.KexAtaSwitch
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\storage" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    ;kexata.mpd stays in IOSUBSYS until the restart: Windows has it loaded
+    Delete /REBOOTOK "$SYSDIR\IOSUBSYS\kexata.mpd"
+    Delete "$WINDIR\INF\kexata.inf"
+    Delete "$INSTDIR\drivers\storage\kexata.mpd"
+    Delete "$INSTDIR\drivers\storage\kexata.inf"
+    RMDir "$INSTDIR\drivers\storage"
+    RMDir "$INSTDIR\drivers"
+  un_kexata_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexChip"
   StrCmp $0 "1" 0 un_kexchip_done
     ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"

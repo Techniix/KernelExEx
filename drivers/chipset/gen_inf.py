@@ -119,6 +119,23 @@ def main():
         L += ["", "[ControlFlags]"] + [f"ExcludeFromSelect=PCI\\VEN_8086&DEV_{d[0]:04X}" for d in devs[kind]] + [""]
         for sect in used:
             L += [f"[KEX_{sect}]"] + sections[sect] + [""]
+            if sect == "DUAL_GOOD_IDE":
+                # the two channel device nodes (MF\GOODPRIMARY, MF\GOODSECONDARY) that
+                # ESDI_506.PDR or kexata.mpd then drive, as mshdc.inf makes them:
+                # legacy ports and IRQ of each channel, and its half of the bus master
+                # registers (resource 6, 8 bytes at offset 0 or 8)
+                L += ["[KEX_DUAL_GOOD_IDE.HW]", "AddReg=KEX_DUAL_GOOD_IDE.RegHW", "",
+                      "[KEX_DUAL_GOOD_IDE.RegHW]",
+                      "HKR,Child0000,HardwareID,,MF\\GOODPRIMARY",
+                      "HKR,Child0000,ResourceMap,1,00,01,02",
+                      "HKR,Child0000,VaryingResourceMap,1,06,00,00,00,00,08,00,00,00,01,00,00,00",
+                      "HKR,Child0000,MFFlags,1,0C,00,00,00",
+                      "HKR,Child0001,HardwareID,,MF\\GOODSECONDARY",
+                      "HKR,Child0001,ResourceMap,1,03,04,05",
+                      "HKR,Child0001,VaryingResourceMap,1,06,08,00,00,00,08,00,00,00,01,00,00,00",
+                      "HKR,Child0001,MFFlags,1,0C,00,00,00",
+                      "HKR,,PCIDualIDE,1,01", "",
+                      "[KEX_DUAL_GOOD_IDE.PosDup]", "*PNP0600", ""]
         L += regs[kind]
         L += common_tail + [f'i{dev:04X}="{name}"' for dev, _, name in devs[kind]]
         (outdir / fname).write_bytes(("\r\n".join(L) + "\r\n").encode("cp1252", errors="replace"))

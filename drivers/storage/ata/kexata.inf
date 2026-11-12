@@ -1,0 +1,41 @@
+; kexata.inf - KernelExEx IDE/ATA driver with 48-bit LBA (disks over 128 GB), for Windows 98 SE / ME
+; For the IDE channels Windows makes for a PCI IDE controller. Windows' own ESDI_506.PDR stops at 128 GB.
+[Version]
+Signature="$CHICAGO$"
+Class=hdc
+ClassGUID={4D36E96A-E325-11CE-BFC1-08002BE10318}
+Provider=%KEX%
+DriverVer=11/11/2026, 1.0.0.0
+
+[Manufacturer]
+%KEX%=Models
+
+[Models]
+%primary%=KexAta,MF\GOODPRIMARY
+%secondary%=KexAta,MF\GOODSECONDARY
+
+[KexAta]
+CopyFiles=KexAta.CopyFiles
+AddReg=KexAta.AddReg
+
+[KexAta.AddReg]
+HKR,,DevLoader,,*IOS
+HKR,,DontLoadIfConflict,,"Y"
+HKR,,PortDriver,,kexata.mpd
+
+[KexAta.CopyFiles]
+kexata.mpd
+
+[DestinationDirs]
+KexAta.CopyFiles=12
+
+[SourceDisksNames]
+1="KernelExEx IDE/ATA driver",,0
+
+[SourceDisksFiles]
+kexata.mpd=1
+
+[Strings]
+KEX="KernelExEx"
+primary="Primary IDE channel (KernelExEx, 48-bit LBA)"
+secondary="Secondary IDE channel (KernelExEx, 48-bit LBA)"

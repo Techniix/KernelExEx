@@ -19,7 +19,7 @@ MINGW = ROOT.parent / "thirdparty" / "mingw-w64" / "mingw-w64-headers"
 # looked up in these tables, in this order (HAL first: Microsoft's 98 SE
 # drivers import KfAcquireSpinLock and friends from HAL.DLL)
 MODULES = ["hal.dll", "ntoskrnl.exe", "usbd.sys", "hidclass.sys", "hidparse.sys", "ndis.sys", "ks.sys",
-           "portcls.sys", "stream.sys", "wmilib.sys"]
+           "portcls.sys", "stream.sys", "wmilib.sys", "SCSIPORT.SYS"]
 
 
 def run(cmd):

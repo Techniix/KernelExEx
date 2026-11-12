@@ -7,7 +7,7 @@ Class=MEDIA
 ClassGUID={4d36e96c-e325-11ce-bfc1-08002be10318}
 Provider=%KEX%
 LayoutFile=layout.inf, layout1.inf, layout2.inf
-DriverVer=11/11/2026, 4.7.0.0
+DriverVer=11/11/2026, 1.0.0.0
 
 [Manufacturer]
 %KEX%=Models

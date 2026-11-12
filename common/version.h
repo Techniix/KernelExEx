@@ -22,7 +22,15 @@
 #ifndef __VERSION_H
 #define __VERSION_H
 
-/* KernelExEx reports 4.7.x: above KernelEx 4.5.2 and clear of the 4.6 betas of other forks */
+/* KernelExEx's own release number (README decision 44): what the installer,
+ * file versions and drivers show */
+#define KEXEX_VERSION_STR "1.0.0"
+#define KEXEX_VERSION_CODE 0x01000000
+
+/* The KernelEx compatibility level, for kexGetKEXVersion() and the
+ * installer's downgrade check: programs and tools that look for KernelEx
+ * 4.5 or later compare against this, so it stays above KernelEx 4.5.2 (and
+ * clear of the 4.6 betas of other forks) */
 #define VERSION_STR      "4.7.0"
 #define VERSION_CODE     0x04070000
 #define RCVERSION        4, 7, 0, 0

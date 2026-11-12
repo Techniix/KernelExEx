@@ -19,3 +19,7 @@ dxapi.sys have proven lists only.
 
 Not seen in any 98 SE driver (treat as absent): IoAllocateWorkItem,
 IoQueueWorkItem (use ExQueueWorkItem), MmMapLockedPagesSpecifyCache.
+
+SCSIPORT.SYS (upper case, as miniports import it): the ScsiPort functions Windows 98 SE's SCSIPORT.PDR implements
+for NT SCSI miniports (.mpd), from its name table, plus every name a
+miniport on the 98 SE CD imports.

@@ -55,7 +55,7 @@ def main():
     w("ClassGUID={745a17a0-74d3-11d0-b6fe-00a0c90f57da}")
     w("Provider=%KernelExEx%")
     w("LayoutFile=layout.inf")
-    w("DriverVer=11/10/2026,4.7.0.0")
+    w("DriverVer=11/10/2026,1.0.0.0")
     w("")
     w("[SourceDisksNames]")
     w('99="KernelExEx",,0')

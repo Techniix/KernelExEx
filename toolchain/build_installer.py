@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 #  "kexpad:" = toolchain/wdm/build_kexpad.py output, "kexnet:" = build_kexnet.py,
 #  "kexaudio:" = build_kexaudio.py
 #  "kexusb:" = build_kexusb.py
+#  "kexstor:" = build_kexstor.py
 #  output, else repository)
 LAYOUT = {
     "Core/Release/KernelEx.dll": "core:KernelEx.dll",
@@ -52,6 +53,8 @@ LAYOUT = {
     "drivers/audio/kexac97.sys": "kexaudio:kexac97.sys",
     "drivers/audio/kexac97.inf": "drivers/audio/ac97/kexac97.inf",
     "drivers/usb2/kexehci.sys": "kexusb:kexehci.sys",
+    "drivers/storage/kexata.mpd": "kexstor:kexata.mpd",
+    "drivers/storage/kexata.inf": "drivers/storage/ata/kexata.inf",
     "drivers/usb2/kexehci.inf": "drivers/usb/ehci/kexehci.inf",
     "input/kexpad/kexpad.inf": "input/kexpad/kexpad.inf",
     "drivers/chipset/kexchip.inf": "drivers/chipset/kexchip.inf",
@@ -110,8 +113,10 @@ def main():
     ap.add_argument("--kexnet", type=Path, default=ROOT.parent / "build" / "kexnet")
     ap.add_argument("--kexaudio", type=Path, default=ROOT.parent / "build" / "kexaudio")
     ap.add_argument("--kexusb", type=Path, default=ROOT.parent / "build" / "kexusb")
+    ap.add_argument("--kexstor", type=Path, default=ROOT.parent / "build" / "kexstor")
     ap.add_argument("--nsis", required=True, type=Path, help="NSIS install prefix (bin/makensis)")
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--testbuild", type=int, help="name it \"1.0.0 test build N\"")
     a = ap.parse_args()
 
     stage = a.out / "stage"
@@ -130,6 +135,8 @@ def main():
             path = a.kexaudio / src[9:]
         elif src.startswith("kexusb:"):
             path = a.kexusb / src[7:]
+        elif src.startswith("kexstor:"):
+            path = a.kexstor / src[8:]
         else:
             path = ROOT / src
         if not path.is_file():
@@ -142,7 +149,8 @@ def main():
 
     makensis = a.nsis / "bin" / "makensis"
     # -WX: any warning fails the build (one once hid the kextls install line)
-    p = subprocess.run([str(makensis), "-V2", "-WX", "-INPUTCHARSET", "CP1252", "KernelEx.nsi"], cwd=stage,
+    defs = [f"-DTESTBUILD={a.testbuild}"] if a.testbuild else []
+    p = subprocess.run([str(makensis), "-V2", "-WX", "-INPUTCHARSET", "CP1252", *defs, "KernelEx.nsi"], cwd=stage,
                        capture_output=True, text=True)
     sys.stdout.write(p.stdout[-4000:])
     if p.returncode:

@@ -33,7 +33,7 @@ def main():
         git("fetch", "-q", "origin", "test-builds", cwd=a.repo)
         git("worktree", "add", "-q", "--detach", str(wt), "FETCH_HEAD", cwd=a.repo)
         try:
-            name = f"KernelExEx-4.7.0-hwtest{a.n}.zip"
+            name = Path(a.zip).name   # KernelExEx-1.0.0-testbuildN.zip from build 9 on
             shutil.copy(a.zip, wt / name)
             idx = wt / "README.md"
             lines = idx.read_text().splitlines()

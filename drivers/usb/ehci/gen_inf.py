@@ -57,7 +57,7 @@ def main():
          "Class=USB",
          "ClassGUID={36FC9E60-C465-11CF-8056-444553540000}",
          "Provider=%KEX%",
-         "DriverVer=11/11/2026, 4.7.0.0",
+         "DriverVer=11/11/2026, 1.0.0.0",
          "",
          "[Manufacturer]",
          "%KEX%=Models",
