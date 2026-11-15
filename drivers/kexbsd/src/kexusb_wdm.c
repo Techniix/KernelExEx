@@ -11,6 +11,7 @@
 #include <usbdlib.h>   /* macros only: no usbd.sys imports, see build_config_request */
 #include <usbioctl.h>
 #include "kex_usbbusif.h"
+#include "irqlock.h"
 
 #define TAG 'busK'
 
@@ -436,6 +437,7 @@ struct kexbsd_worker
 	KSPIN_LOCK lock;
 	KEVENT wake;
 	struct kexbsd_work *head, *tail;
+	struct kexbsd_wtimer *timers;   /* armed timers, unordered */
 	PETHREAD thread;   /* PsGetCurrentThread() of the worker */
 	volatile int stop;
 	KEVENT stopped;
@@ -449,10 +451,44 @@ static VOID NTAPI worker_main(PVOID arg)
 	{
 		struct kexbsd_work *wk;
 		KIRQL irql;
-		KeWaitForSingleObject(&w->wake, Executive, KernelMode, FALSE, NULL);
+		LARGE_INTEGER wait, *pwait = NULL;
+		LONGLONG now, next = 0;
+		struct kexbsd_wtimer *t;
+		/* sleep until woken or until the nearest timer is due */
+		irql = irq_lock();
+		for (t = w->timers; t; t = t->next)
+			if (!next || t->due < next)
+				next = t->due;
+		irq_unlock(irql);
+		if (next)
+		{
+			now = (LONGLONG) KeQueryInterruptTime();
+			wait.QuadPart = next > now ? -(next - now) : -1;
+			pwait = &wait;
+		}
+		KeWaitForSingleObject(&w->wake, Executive, KernelMode, FALSE, pwait);
+		/* due timers, one at a time (a function may arm or cancel others) */
 		for (;;)
 		{
-			KeAcquireSpinLock(&w->lock, &irql);
+			struct kexbsd_wtimer **pp;
+			now = (LONGLONG) KeQueryInterruptTime();
+			irql = irq_lock();
+			for (pp = &w->timers; *pp && (*pp)->due > now; pp = &(*pp)->next)
+				;
+			t = *pp;
+			if (t)
+			{
+				*pp = t->next;
+				t->armed = 0;
+			}
+			irq_unlock(irql);
+			if (!t)
+				break;
+			t->fn(t->arg);
+		}
+		for (;;)
+		{
+			irql = irq_lock();
 			wk = w->head;
 			if (wk)
 			{
@@ -461,7 +497,7 @@ static VOID NTAPI worker_main(PVOID arg)
 					w->tail = NULL;
 				wk->queued = 0;
 			}
-			KeReleaseSpinLock(&w->lock, irql);
+			irq_unlock(irql);
 			if (!wk)
 				break;
 			wk->fn(wk->arg);
@@ -506,7 +542,7 @@ void kexbsd_worker_destroy(kexbsd_worker *w)
 void kexbsd_worker_post(kexbsd_worker *w, struct kexbsd_work *wk)
 {
 	KIRQL irql;
-	KeAcquireSpinLock(&w->lock, &irql);
+	irql = irq_lock();
 	if (!wk->queued)
 	{
 		wk->queued = 1;
@@ -517,7 +553,7 @@ void kexbsd_worker_post(kexbsd_worker *w, struct kexbsd_work *wk)
 			w->head = wk;
 		w->tail = wk;
 	}
-	KeReleaseSpinLock(&w->lock, irql);
+	irq_unlock(irql);
 	KeSetEvent(&w->wake, IO_NO_INCREMENT, FALSE);
 }
 
@@ -539,6 +575,47 @@ static void sync_thunk(void *p)
 	struct sync_call *c = (struct sync_call *) p;
 	c->fn(c->arg);
 	KeSetEvent(&c->done, IO_NO_INCREMENT, FALSE);
+}
+
+static void timer_unlink(kexbsd_worker *w, struct kexbsd_wtimer *t)
+{
+	struct kexbsd_wtimer **pp;
+	for (pp = &w->timers; *pp; pp = &(*pp)->next)
+		if (*pp == t)
+		{
+			*pp = t->next;
+			break;
+		}
+	t->armed = 0;
+}
+
+void kexbsd_worker_timer_set(kexbsd_worker *w, struct kexbsd_wtimer *t, int msec)
+{
+	KIRQL irql;
+	if (msec < 1)
+		msec = 1;
+	irql = irq_lock();
+	if (t->armed)
+		timer_unlink(w, t);
+	t->due = (LONGLONG) KeQueryInterruptTime() + (LONGLONG) msec * 10000;
+	t->armed = 1;
+	t->next = w->timers;
+	w->timers = t;
+	irq_unlock(irql);
+	/* the worker recomputes its sleep */
+	KeSetEvent(&w->wake, IO_NO_INCREMENT, FALSE);
+}
+
+int kexbsd_worker_timer_cancel(kexbsd_worker *w, struct kexbsd_wtimer *t)
+{
+	KIRQL irql;
+	int was;
+	irql = irq_lock();
+	was = t->armed;
+	if (was)
+		timer_unlink(w, t);
+	irq_unlock(irql);
+	return was;
 }
 
 void kexbsd_worker_call(kexbsd_worker *w, void (*fn)(void *), void *arg)

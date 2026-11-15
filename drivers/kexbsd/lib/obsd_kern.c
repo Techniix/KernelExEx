@@ -139,6 +139,8 @@ uint32_t ether_crc32_be(const uint8_t *buf, size_t len)
 	return crc;
 }
 
+#include "../../../common/w98state.h"
+
 /* ---- loadfirmware(9) ---------------------------------------------------------------- */
 static int read_file(const WCHAR *path, unsigned char **buf, size_t *len)
 {
@@ -149,6 +151,8 @@ static int read_file(const WCHAR *path, unsigned char **buf, size_t *len)
 	HANDLE h;
 	NTSTATUS st;
 	unsigned char *b;
+	if (!kex_files_ready())
+		return EAGAIN;   /* Windows is still starting: see w98state.h */
 	RtlInitUnicodeString(&us, path);
 	InitializeObjectAttributes(&oa, &us, OBJ_CASE_INSENSITIVE, NULL, NULL);
 	st = ZwCreateFile(&h, GENERIC_READ | SYNCHRONIZE, &oa, &iosb, NULL, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ,
@@ -234,6 +238,8 @@ int obsd_write_file(const char *name, const void *buf, size_t len)
 	static const char *const dirs[] = { "\\SystemRoot\\", "\\DosDevices\\C:\\WINDOWS\\",
 	                                    "\\??\\C:\\WINDOWS\\", "C:\\WINDOWS\\" };
 	unsigned int i;
+	if (!kex_files_ready())
+		return EAGAIN;   /* Windows is still starting: see w98state.h */
 	for (i = 0; i < nitems(dirs); i++)
 	{
 		NTSTATUS st;

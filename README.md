@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo/kexex-banner.png" alt="KernelExEx" width="600"></p>
+
 # KernelExEx
 
 KernelExEx is a continuation of [KernelEx](https://sourceforge.net/projects/kernelex/),
@@ -307,16 +309,41 @@ list.
     Until 1.0.0 ships, test builds are "1.0.0 test build N". Used the same
     way by the installer, the Properties tab, every driver's
     `DriverVer`/file version and the test builds.
-45. **Logo** (planned): an original KernelExEx logo, shown in the
+45. **Logo** (done in test build 12): an original KernelExEx logo (a chip
+    with a "K" and a plus, `docs/logo/`, GPLv2 like the rest), shown in the
     installer (welcome and finish pages, header, icon) and at the top of
-    this README.
+    this README. `toolchain/art/make_ico.py` writes icons Windows 98 can
+    read (8- and 4-bit, no PNG).
 46. **Boot logo badge** (planned, optional, off by default): a small
     KernelExEx badge on the Windows 98 startup screen. The installer draws
     it onto the user's own boot logo at install time (`LOGO.SYS`, 320x400,
     256 colours; the built-in logo if there is none), keeps the original
     and puts it back on uninstall. No Microsoft artwork is shipped.
+47. **What Windows 98 needs from drivers** (found in test build 12's
+    testing; all our drivers follow it):
+    - Windows 98's New Hardware wizard does not search DevicePath: setup
+      puts each driver's INF into `INF\OTHER` (without the copy steps; the
+      files go straight to their places), so Windows finds the driver by
+      itself (`toolchain/infother.py`).
+    - No file access by name until Windows is up (VMM_GetSystemInitState
+      reports Kernel32 started): during device init IFSMgr walks a DOS
+      device chain that is not set up yet, forever. A driver that opens a
+      file while TCP/IP waits for DHCP at boot hangs the machine
+      (`common/w98state.h`).
+    - NDIS timers are not used by USB drivers: their callbacks run at
+      interrupt time on Windows 98; with frequent timers every timer in
+      the system stopped. USB drivers' timers run on their worker thread.
+    - NTKERN spinlocks do not keep out Windows 98's interrupt-time
+      callbacks: short queue locks turn interrupts off instead.
 
 ## Installer components
+
+Setup groups the components (Hardware drivers: Disks and USB, Chipset and
+sound, Network adapters, Wi-Fi; Virtual machines; Game controllers;
+Internet) and offers three install types: Recommended, Full (everything but
+the Protoweb proxy) and KernelEx only. Components for hardware it finds in
+the PC are marked "found on this PC". What Recommended ticks is decided
+before 1.0.0.
 
 | Component | Contents | Status | Ticked by default |
 |---|---|---|---|
@@ -338,6 +365,8 @@ list.
 | Realtek RTL8139/810x Ethernet | `kexrl.sys`: own GPLv2 driver; RTL8139/C/C+/D, RTL8100/8100C (MSI 848P Neo2-V onboard), RTL8101L and 19 OEM cards | DHCP, ping 4/4 and 30/30 at 1450 bytes in QEMU (rtl8139); untested on hardware | to be decided |
 | USB RNDIS / phone tethering | `kexrndis.sys`: OpenBSD urndis(4) through kexbsd's USB layer | DHCP + ping in QEMU (usb-net on UHCI); untested on hardware | to be decided |
 | USB CDC Ethernet | `kexcdce.sys`: own GPLv2 CDC ECM driver (OpenBSD cdce is BSD-4) | DHCP + ping in QEMU (usb-net ECM); untested on hardware | to be decided |
+| Wi-Fi program | `kexwifi.exe` (taskbar icon, window) and `kexwifi.cpl` (Control Panel): networks in range with signal and security, connect with a password (WPA2; the key is derived on the PC and only the key is stored), saved networks rejoined by themselves (best in range first), other/hidden networks, disconnect, forget; renews the DHCP address when a connection comes up or moves. Refuses WEP; WPA3-only and Enterprise shown as not supported yet | QEMU, with a simulated radio (`tests/wifi/kexwsim.c`: five access points, a real WPA2 4-way handshake and CCMP both ways, a DHCP router): scan, WPA2 and open connect, address and pings over CCMP, switch network, disconnect/on, forget, rejoin after restart | to be decided |
+| Virtual machines | `kexvio.sys`: virtio network adapter (own driver, legacy virtio-net, as in QEMU/KVM, Proxmox, VirtualBox). `kexvmm.exe` + `KEXVMM.VXD`: mouse integration (vmmouse, QEMU and VMware): the pointer follows the host's | QEMU: virtio found and installed by itself, 60/60 full-size pings, 20 MB in 4.9 s; pointer positioned exactly, clicks and double-clicks | to be decided |
 | Realtek USB Wi-Fi (new chips) | `kexrtwn.sys`: FreeBSD rtwn (RTL8188CU/EU/FU, 8192CU/EU, 8723BU, 8812AU, 8821AU) on OpenBSD net80211; 115 adapters incl. TP-Link Archer T2U/T2U Plus/T2U Nano | loads on 98, declines non-Realtek devices; needs hardware (no USB Wi-Fi in QEMU) | to be decided |
 | Realtek USB Wi-Fi (older) | `kexurtwn.sys`: OpenBSD urtwn + net80211, WPA2-PSK (CCMP) by default; the 20 adapters FreeBSD's table lacks | builds, crypto self-test passes; needs hardware | to be decided |
 | Gamepad Configurator | mapping, test, profiles | planned | to be decided |

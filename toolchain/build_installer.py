@@ -105,6 +105,7 @@ LAYOUT = {
     "kexwifi/kexwifi.exe": "core:kexwifi.exe",
     "kexwifi/kexwifi.cpl": "core:kexwifi.cpl",
     "kexvmm/kexvmm.exe": "core:kexvmm.exe",
+    "kexvmm/KEXVMM.VXD": "core:KEXVMM.VXD",
     "drivers/kexnet/kexvio.sys": "kexnet:kexvio.sys",
     "drivers/kexnet/kexvio.inf": "drivers/kexnet/vio/kexvio.inf",
     "docs/logo/kexex.ico": "docs/logo/kexex.ico",
@@ -113,6 +114,9 @@ LAYOUT = {
     "KernelEx.nsi": "KernelEx.nsi",
     "UpdateDLL.nsh": "UpdateDLL.nsh",
 }
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def main():
@@ -157,6 +161,9 @@ def main():
     if missing:
         sys.exit("missing inputs:\n  " + "\n  ".join(missing))
 
+    # driver INFs for INF\OTHER (Windows 98 finds drivers only there)
+    import infother
+    infother.generate(stage, [d for d in LAYOUT if d.lower().endswith(".inf")])
     makensis = a.nsis / "bin" / "makensis"
     # -WX: any warning fails the build (one once hid the kextls install line)
     defs = [f"-DTESTBUILD={a.testbuild}"] if a.testbuild else []

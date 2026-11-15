@@ -14,6 +14,7 @@
  *                          off); missing or 1 = join by itself when in range
  *    Adapters\<interface>          one per Wi-Fi adapter (urtwn0, rtwn0...)
  *      Name     REG_SZ     adapter description          (driver writes)
+ *      MAC      REG_BINARY the adapter's own address (6 bytes) (driver)
  *      Present  REG_DWORD  1 while the driver runs       (driver)
  *      State    REG_DWORD  KEXWIFI_* below               (driver)
  *      SSID     REG_BINARY network joined or being joined (driver)

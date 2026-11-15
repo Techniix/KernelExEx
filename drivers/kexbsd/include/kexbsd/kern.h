@@ -170,6 +170,17 @@ struct kexbsd_work
 	volatile int queued;
 };
 
+/* a timer run by a worker thread (kexbsd_worker_timer_set): its function
+ * runs on the worker, like work items */
+struct kexbsd_wtimer
+{
+	struct kexbsd_wtimer *next;
+	LONGLONG due;          /* KeQueryInterruptTime units (100 ns) */
+	volatile int armed;
+	void (*fn)(void *);
+	void *arg;
+};
+
 /* ---- taskqueue(9) ------------------------------------------------------ */
 #ifndef KEXBSD_OPENBSD   /* OpenBSD's task(9) has its own struct task (obsd/kexobsd.h) */
 typedef void task_fn_t(void *context, int pending);

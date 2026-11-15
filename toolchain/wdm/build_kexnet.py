@@ -7,6 +7,7 @@ Builds kexbsd.sys first (they import from it).
 
 usage: build_kexnet.py [--out DIR] [--sdk DIR] [--debugcon]
 """
+import os
 import argparse
 import subprocess
 import sys
@@ -61,7 +62,7 @@ def main():
         "kexwlan_linktest": ([SRC / "wifi" / "kexwlan_linktest.c"] + WIFI, ["-I", str(SRC / "wifi"), "-I", str(SRC)]),
     }
     if a.tests:
-        drivers["kexwsim"] = ([wdm.ROOT / "tests" / "wifi" / "kexwsim.c"] + WIFI, ["-I", str(SRC / "wifi"), "-I", str(SRC)])
+        drivers["kexwsim"] = ([wdm.ROOT / "tests" / "wifi" / "kexwsim.c"] + WIFI, ["-I", str(SRC / "wifi"), "-I", str(SRC)] + (["-DWSIM_NO_CTL"] if os.environ.get("WSIM_NO_CTL") else []))
     # kexrtwn: FreeBSD's rtwn and its FreeBSD personality, compiled apart
     RT = SRC / "rtwn"
     fbsd_srcs = [p for p in sorted((RT / "dev" / "rtwn").rglob("*.c")) if p.name != "rtwn_usb_attach.c"] + [

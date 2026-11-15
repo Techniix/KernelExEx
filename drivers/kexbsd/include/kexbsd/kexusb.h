@@ -82,5 +82,11 @@ KEXBSD_API void kexbsd_worker_post(kexbsd_worker *w, struct kexbsd_work *wk);
 /* run fn(arg) on the worker and wait (PASSIVE_LEVEL; runs inline when called on the worker) */
 KEXBSD_API void kexbsd_worker_call(kexbsd_worker *w, void (*fn)(void *), void *arg);
 KEXBSD_API int kexbsd_worker_is_current(kexbsd_worker *w);
+/* timers run by the worker thread: (re)arm for msec from now, or cancel
+ * (returns 1 if it was armed). Any IRQL <= DISPATCH. On Windows 98 these
+ * replace NDIS timers, whose interrupt-time callbacks stopped every timer
+ * in the system in the simulated-radio test. */
+KEXBSD_API void kexbsd_worker_timer_set(kexbsd_worker *w, struct kexbsd_wtimer *t, int msec);
+KEXBSD_API int kexbsd_worker_timer_cancel(kexbsd_worker *w, struct kexbsd_wtimer *t);
 
 #endif

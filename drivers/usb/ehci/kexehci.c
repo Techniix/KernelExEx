@@ -75,6 +75,8 @@ static ULONG now_ms(void)
 	return (ULONG) (KeQueryInterruptTime() / 10000);
 }
 
+#include "../../../common/w98state.h"
+
 /* ---- log: memory ring, written to C:\WINDOWS\KEXUSB2.LOG for testing on real hardware ---- */
 #define LOG_SIZE 16384
 static char log_buf[LOG_SIZE];
@@ -170,6 +172,10 @@ static void logf(const char *fmt, ...)
 
 static void log_flush(void)
 {
+	/* not while Windows is still initializing devices: opening a file
+	 * then can hang Windows 98 (common/w98state.h); the next flush writes */
+	if (!kex_files_ready())
+		return;
 	static const WCHAR *const paths[] = { L"\\SystemRoot\\KEXUSB2.LOG", L"\\DosDevices\\C:\\WINDOWS\\KEXUSB2.LOG" };
 	static char out[LOG_SIZE];
 	ULONG n, start, i, end;

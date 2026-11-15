@@ -457,6 +457,8 @@ int kex80211_ctl_start(struct ifnet *ifp, const char *desc, int fixed)
 		return 0;
 	}
 	reg_sz(h, "Name", desc);
+	/* the Wi-Fi program finds this adapter's TCP/IP side by its address */
+	reg_set(h, "MAC", REG_BINARY, ((struct ieee80211com *) ifp)->ic_myaddr, 6);
 	reg_dword(h, "Present", 1);
 	reg_dword(h, "Fixed", (ULONG) fixed);
 	reg_dword(h, "Request", 0);
@@ -477,9 +479,15 @@ int kex80211_ctl_tick(struct ifnet *ifp)
 	int action = KEXNET_WIFI_NONE;
 	if (!c)
 		return action;
+#ifdef KEX_DEBUGCON
+	printf("%s: ctl tick: open\n", ifp->if_xname);
+#endif
 	h = adapter_key(ifp);
 	if (!h)
 		return action;
+#ifdef KEX_DEBUGCON
+	printf("%s: ctl tick: opened\n", ifp->if_xname);
+#endif
 	req = reg_get_dword(h, "Request", 0);
 	if (req != KEXWIFI_REQ_NONE)
 	{
@@ -536,6 +544,9 @@ int kex80211_ctl_tick(struct ifnet *ifp)
 	if (action == KEXNET_WIFI_NONE)
 		write_status(c, h, 0);
 	ZwClose(h);
+#ifdef KEX_DEBUGCON
+	printf("%s: ctl tick: done (request %lu)\n", ifp->if_xname, (unsigned long) req);
+#endif
 	return action;
 }
 

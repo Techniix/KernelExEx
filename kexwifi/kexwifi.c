@@ -20,6 +20,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <iphlpapi.h>
 #include <stdio.h>
 #include <string.h>
 #include "resource.h"
@@ -65,8 +66,17 @@ struct adapter
 	DWORD present, state, channel, signal, fixed, scan_seq;
 	unsigned char ssid[32];
 	int ssid_len;
+	unsigned char mac[6];
+	int has_mac;
 };
 static struct adapter adapters[MAX_ADAPTERS];
+/* per adapter (by key): the state last seen, to notice "now connected" */
+static struct
+{
+	char key[64];
+	DWORD state;
+	int renew_in;   /* ticks until the DHCP renew, 0 = none */
+} seen[MAX_ADAPTERS];
 static int nadapters, cur_adapter;
 
 struct row
@@ -210,6 +220,7 @@ static void read_adapters(void)
 			a->ssid_len = get_bin(h, "SSID", a->ssid, sizeof(a->ssid));
 			if (a->ssid_len < 0)
 				a->ssid_len = 0;
+			a->has_mac = get_bin(h, "MAC", a->mac, sizeof(a->mac)) == 6;
 			nadapters++;
 		}
 		RegCloseKey(h);
@@ -875,7 +886,7 @@ static void forget_row(HWND owner, const struct row *r)
 	char name[64], s[200], sub[80], hx[65];
 	HKEY nets;
 	ssid_text(r->ssid, r->ssid_len, name, sizeof(name));
-	snprintf(s, sizeof(s), "Forget \"%s\"? Its password is removed and this computer no longer joins it by itself.",
+	snprintf(s, sizeof(s), "Forget \"%s\"? Its saved settings (and its password, if it has one) are removed, and this computer no longer joins it by itself.",
 	         name);
 	if (MessageBox(owner, s, "Wi-Fi", MB_YESNO | MB_ICONQUESTION) != IDYES)
 		return;
@@ -926,7 +937,7 @@ static BOOL CALLBACK main_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
 		LVCOLUMN col;
 		int i;
 		static const char *const names[] = { "Network", "Signal", "Security", "Saved" };
-		static const int widths[] = { 150, 70, 130, 45 };
+		static const int widths[] = { 140, 55, 150, 40 };
 		main_dlg = dlg;
 		SendMessage(dlg, WM_SETICON, ICON_BIG, (LPARAM) LoadIcon(inst, MAKEINTRESOURCE(IDI_WIFI)));
 		SendMessage(dlg, WM_SETICON, ICON_SMALL, (LPARAM) LoadImage(inst, MAKEINTRESOURCE(IDI_WIFI), IMAGE_ICON, 16, 16, 0));
@@ -1101,10 +1112,130 @@ static void tray_menu(void)
 	}
 }
 
+/* ---- an address when the connection comes up --------------------------------------- *
+ * Windows 98 asks for a DHCP address when it starts, usually before the
+ * Wi-Fi has connected, and then not again for minutes. So when an adapter
+ * connects (or moves to another network), its DHCP lease is released and
+ * renewed through IP Helper, the adapter found by its MAC address. */
+typedef DWORD(WINAPI *get_adapters_fn)(PIP_ADAPTER_INFO, PULONG);
+typedef DWORD(WINAPI *get_ifinfo_fn)(PIP_INTERFACE_INFO, PULONG);
+typedef DWORD(WINAPI *renew_fn)(PIP_ADAPTER_INDEX_MAP);
+typedef DWORD(WINAPI *release_fn)(PIP_ADAPTER_INDEX_MAP);
+
+/* the last renewal's outcome, as HKLM\Software\KernelEx\WiFi "LastRenew" */
+static void renew_note(const char *what)
+{
+	HKEY h = open_key(NULL, 1);
+	char line[200];
+	if (!h)
+		return;
+	snprintf(line, sizeof(line), "%s (tick %lu)", what, GetTickCount() / 1000);
+	RegSetValueEx(h, "LastRenew", 0, REG_SZ, (const BYTE *) line, (DWORD) strlen(line) + 1);
+	RegCloseKey(h);
+}
+
+static void renew_dhcp(const unsigned char mac[6])
+{
+	static HMODULE iph;
+	static get_adapters_fn get_adapters;
+	static get_ifinfo_fn get_ifinfo;
+	static renew_fn renew;
+	static release_fn release;
+	static unsigned char abuf[8192], ibuf[2048];
+	ULONG alen = sizeof(abuf), ilen = sizeof(ibuf);
+	PIP_ADAPTER_INFO ai;
+	PIP_INTERFACE_INFO ii = (PIP_INTERFACE_INFO) ibuf;
+	LONG i;
+	if (!iph)
+	{
+		iph = LoadLibraryA("iphlpapi.dll");
+		if (!iph)
+			return;
+		get_adapters = (get_adapters_fn) GetProcAddress(iph, "GetAdaptersInfo");
+		get_ifinfo = (get_ifinfo_fn) GetProcAddress(iph, "GetInterfaceInfo");
+		renew = (renew_fn) GetProcAddress(iph, "IpRenewAddress");
+		release = (release_fn) GetProcAddress(iph, "IpReleaseAddress");
+	}
+	char note[160];
+	DWORD e1, e2;
+	note[0] = 0;
+	if (!get_adapters || !get_ifinfo || !renew)
+	{
+		renew_note("IP Helper functions missing");
+		return;
+	}
+	e1 = get_adapters((PIP_ADAPTER_INFO) abuf, &alen);
+	if (e1 != NO_ERROR)
+	{
+		snprintf(note, sizeof(note), "GetAdaptersInfo %lu", e1);
+		renew_note(note);
+		return;
+	}
+	/* Windows 98 wants the size asked for first (122 otherwise) */
+	ilen = 0;
+	get_ifinfo(NULL, &ilen);
+	e2 = ilen && ilen <= sizeof(ibuf) ? get_ifinfo(ii, &ilen) : ERROR_INSUFFICIENT_BUFFER;
+	for (ai = (PIP_ADAPTER_INFO) abuf; ai; ai = ai->Next)
+	{
+		IP_ADAPTER_INDEX_MAP own, *map = NULL;
+		DWORD r1, r2;
+		if (ai->AddressLength != 6 || memcmp(ai->Address, mac, 6) || !ai->DhcpEnabled)
+			continue;
+		if (e2 == NO_ERROR)
+			for (i = 0; i < ii->NumAdapters; i++)
+				if (ii->Adapter[i].Index == ai->Index)
+					map = &ii->Adapter[i];
+		if (!map)
+		{
+			/* no interface table: the index and name from GetAdaptersInfo */
+			memset(&own, 0, sizeof(own));
+			own.Index = ai->Index;
+			MultiByteToWideChar(CP_ACP, 0, ai->AdapterName, -1, own.Name, MAX_ADAPTER_NAME);
+			map = &own;
+		}
+		/* release first: a renewal alone asks the previous network's DHCP
+		 * server, which is not reachable after moving to another network;
+		 * after a release the request is a broadcast any server answers */
+		r1 = release ? release(map) : 0;
+		r2 = renew(map);
+		snprintf(note, sizeof(note), "adapter index %lu: release %lu, renew %lu (interface table %lu)", ai->Index, r1,
+		         r2, e2);
+	}
+	renew_note(note[0] ? note : "no DHCP adapter with this MAC address");
+}
+
+static void watch_connections(void)
+{
+	int i, k;
+	for (i = 0; i < nadapters; i++)
+	{
+		const struct adapter *a = &adapters[i];
+		for (k = 0; k < MAX_ADAPTERS && seen[k].key[0] && lstrcmp(seen[k].key, a->key); k++)
+			;
+		if (k == MAX_ADAPTERS)
+			continue;
+		if (!seen[k].key[0])
+		{
+			lstrcpyn(seen[k].key, a->key, sizeof(seen[k].key));
+			seen[k].state = KEXWIFI_OFF;
+		}
+		/* two seconds after connecting: the link is settled by then */
+		if (a->state == KEXWIFI_CONNECTED && seen[k].state != KEXWIFI_CONNECTED && a->has_mac)
+		{
+			seen[k].renew_in = 2;
+			renew_note("connected: renewing in 2 s");
+		}
+		seen[k].state = a->state;
+		if (seen[k].renew_in && --seen[k].renew_in == 0 && a->state == KEXWIFI_CONNECTED)
+			renew_dhcp(a->mac);
+	}
+}
+
 static void tick(void)
 {
 	read_adapters();
 	ticks++;
+	watch_connections();
 	if (pending_len)
 	{
 		const struct adapter *a = nadapters ? &adapters[cur_adapter] : NULL;
@@ -1179,7 +1310,23 @@ void entrypoint(void)
 	if (other)
 	{
 		if (!tray_only)
+		{
+			HWND dlg;
+			int i;
 			PostMessage(other, WM_SHOWMAIN, 0, 0);
+			/* Windows 98 lets only the foreground program hand over the
+			 * keyboard focus: this one is (it was just started) */
+			for (i = 0; i < 20; i++)
+			{
+				dlg = FindWindow("#32770", "Wi-Fi");
+				if (dlg && IsWindowVisible(dlg))
+				{
+					SetForegroundWindow(dlg);
+					break;
+				}
+				Sleep(50);
+			}
+		}
 		ExitProcess(0);
 	}
 	h = open_key(NULL, 1);

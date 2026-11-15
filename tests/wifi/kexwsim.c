@@ -45,6 +45,12 @@ void kex80211_pbkdf2_sha1(const char *pass, size_t plen, const uint8_t *salt, si
 #define IPPROTO_UDP 17
 #endif
 
+#ifdef KEX_DEBUGCON
+#define TR(...) printf(__VA_ARGS__)
+#else
+#define TR(...) do { } while (0)
+#endif
+
 #define SEC_OPEN 0
 #define SEC_WEP 1
 #define SEC_WPA2 2
@@ -143,9 +149,10 @@ static void hdr(struct wsim_softc *sc, uint8_t *f, uint8_t fc0, uint8_t fc1, con
 /* queued, and handed to net80211 from rx_to, never from inside its calls */
 static void queue_rx(struct wsim_softc *sc, struct mbuf *m)
 {
+	TR("wsim: queue_rx %p pending %d\n", m, timeout_pending(&sc->rx_to));
 	if (!m)
 		return;
-	if (mq_enqueue(&sc->rxq, m) == 0)
+	if (mq_enqueue(&sc->rxq, m) == 0 && !timeout_pending(&sc->rx_to))
 		timeout_add_msec(&sc->rx_to, 1);
 }
 
@@ -155,6 +162,7 @@ static void rx_run(void *arg)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct mbuf *m;
+	TR("wsim: rx_run\n");
 	while ((m = mq_dequeue(&sc->rxq)) != NULL)
 	{
 		struct ieee80211_frame *wh = mtod(m, struct ieee80211_frame *);
@@ -169,10 +177,13 @@ static void rx_run(void *arg)
 		memset(&rxi, 0, sizeof(rxi));
 		rxi.rxi_rssi = 100 + (i >= 0 ? aps[i].dbm : -90);
 		rxi.rxi_chan = (uint8_t) (i >= 0 ? aps[i].chan : 0);
+		TR("wsim: rx find node\n");
 		ni = ieee80211_find_rxnode(ic, wh);
 		sc->rx_frames++;
+		TR("wsim: rx %02x from %d (state %d)\n", wh->i_fc[0], i, ic->ic_state);
 		ieee80211_input(ifp, m, ni, &rxi);
 		ieee80211_release_node(ic, ni);
+		TR("wsim: rx done\n");
 	}
 }
 
@@ -393,7 +404,7 @@ static void router_in(struct wsim_softc *sc, uint16_t type, uint8_t *p, int len)
 	const struct sim_ap *ap = &aps[sc->cur];
 	uint8_t net = (uint8_t) (sc->cur + 1);   /* 10.98.<n>.x */
 	uint8_t gw[4] = { 10, 98, net, 1 }, cli[4] = { 10, 98, net, 50 };
-	uint8_t out[600];
+	uint8_t out[1600];
 	if (type == ETHERTYPE_ARP && len >= 28 && p[7] == 1 && !memcmp(p + 24, gw, 4))
 	{
 		memcpy(out, p, 28);
@@ -636,6 +647,7 @@ static void data_out(struct wsim_softc *sc, struct mbuf *m)
 		uint16_t type = (uint16_t) (f[hl + 6] << 8 | f[hl + 7]);
 		uint8_t *p = f + hl + 8;
 		int n = len - hl - 8;
+		TR("wsim: data out type %04x, %d bytes (hs %d)\n", type, n, sc->hs);
 		if (type == ETHERTYPE_EAPOL)
 			eapol_in(sc, p, n);
 		else if (aps[sc->cur].sec == SEC_OPEN || sc->hs == 3)
@@ -662,6 +674,7 @@ static void wsim_start(struct ifnet *ifp)
 			m_copydata(m, 0, len, f);
 			m_freem(m);
 			sc->tx_frames++;
+			TR("wsim: tx mgmt %02x\n", f[0]);
 			mgmt_out(sc, f, len);
 			if (ni)
 				ieee80211_release_node(ic, ni);
@@ -672,6 +685,7 @@ static void wsim_start(struct ifnet *ifp)
 		m = ifq_dequeue(&ifp->if_snd);
 		if (!m)
 			break;
+		TR("wsim: tx data %d bytes\n", m->m_pkthdr.len);
 		if ((m = ieee80211_encap(ifp, m, &ni)) == NULL)
 			continue;
 		{
@@ -698,8 +712,10 @@ static void scan_run(void *arg)
 {
 	struct wsim_softc *sc = arg;
 	struct ieee80211com *ic = &sc->sc_ic;
+	TR("wsim: next_scan\n");
 	if (ic->ic_state == IEEE80211_S_SCAN)
 		ieee80211_next_scan(&ic->ic_if);
+	TR("wsim: next_scan done\n");
 }
 
 static void beacon_run(void *arg)
@@ -716,6 +732,8 @@ static void beacon_run(void *arg)
 static int wsim_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 {
 	struct wsim_softc *sc = ic->ic_softc;
+	TR("wsim: newstate %d -> %d (chan %d)\n", ic->ic_state, nstate,
+	   ic->ic_bss && ic->ic_bss->ni_chan ? (int) ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan) : -1);
 	timeout_del(&sc->scan_to);
 	timeout_del(&sc->beacon_to);
 	if (nstate == IEEE80211_S_SCAN)
@@ -875,7 +893,11 @@ static const struct kexnet_driver wsim_driver = {
 	NULL,
 	1,
 	kex80211_configure,
+#ifdef WSIM_NO_CTL
+	NULL,
+#else
 	&kex80211_ctl_ops,
+#endif
 };
 
 NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT drv, PUNICODE_STRING reg)

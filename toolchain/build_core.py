@@ -498,6 +498,18 @@ def build_kexvmm(b: Build):
     objs = b.compile("kexvmm", [d / "kexvmm.c"], [f"-I{d}", f"-I{ROOT / 'common'}", *COMPAT])
     res = b.resource("kexvmm", d / "kexvmm.rc")
     b.link("kexvmm", [*objs, res], ["kexcrt", "kernel32", "user32"], base="0x400000", entry="entrypoint", kind="exe")
+    # KEXVMM.VXD: its ring-0 half (the backdoor port is trapped for Win32 programs)
+    tv = ROOT / "toolchain/vxd"
+    vobjs = b.compile("kexvmmd", [d / "vxd" / "kexvmmd.c"],
+                      [f"-I{tv / 'include'}", "-mgeneral-regs-only", "-fno-jump-tables", "-mno-stack-arg-probe", *COMPAT])
+    defs = b.obj / "defs" / "kexvmmd.def"
+    defs.parent.mkdir(parents=True, exist_ok=True)
+    defs.write_text("LIBRARY KEXVMM.dll\nEXPORTS\n    KEXVMM_DDB @1 DATA\n")
+    pe = b.link("kexvmmd", vobjs, ["kexcrt"], base="0x10000000", entry="KEXVMM_CTRL", defs=defs, ext=".pe")
+    out = run([sys.executable, tv / "le_link.py", pe, b.out / "KEXVMM.VXD", "--name", "KEXVMM",
+               "--description", "KernelExEx mouse integration"])
+    print("  " + out.strip())
+    run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXVMM.VXD", "--allow", "0x00010000"])
 
 
 def build_vxd(b: Build):

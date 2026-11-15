@@ -11,8 +11,8 @@
  *  grabbing the mouse and hands out positions 0-65535 across the screen,
  *  button states and wheel steps. This program reads them a hundred times
  *  a second and gives them to Windows with mouse_event (absolute moves),
- *  from user mode: Windows 9x lets a Win32 program use I/O ports no driver
- *  claims.
+ *  through its small VxD (KEXVMM.VXD): Windows 98 traps that port for Win32
+ *  programs.
  *
  *  The host also sends the PS/2 mouse a 1-pixel event for each change, so
  *  the interrupt fires; the next absolute position puts the pointer right.
@@ -49,14 +49,36 @@ struct regs
 	unsigned long a, b, c, d;
 };
 
+/* the backdoor through KEXVMM.VXD: Windows 98 traps the port for Win32
+ * programs and performs the IN without EBX/ECX (kexvmm/vxd/kexvmmd.c) */
+static HANDLE vxd = INVALID_HANDLE_VALUE;
+
+static int open_vxd(void)
+{
+	char path[MAX_PATH + 8], *slash;
+	lstrcpyA(path, "\\\\.\\");
+	GetModuleFileNameA(NULL, path + 4, MAX_PATH);
+	slash = path + lstrlenA(path);
+	while (slash > path + 4 && slash[-1] != '\\')
+		slash--;
+	lstrcpyA(slash, "KEXVMM.VXD");
+	vxd = CreateFileA(path, 0, 0, NULL, 0, FILE_FLAG_DELETE_ON_CLOSE, NULL);
+	return vxd != INVALID_HANDLE_VALUE;
+}
+
 static void backdoor(unsigned long cmd, unsigned long arg, struct regs *r)
 {
-	unsigned long a = BDOOR_MAGIC, b = arg, c = cmd, d = BDOOR_PORT;
-	__asm__ __volatile__("inl %%dx, %%eax" : "+a"(a), "+b"(b), "+c"(c), "+d"(d) : : "memory");
-	r->a = a;
-	r->b = b;
-	r->c = c;
-	r->d = d;
+	struct regs in;
+	DWORD got = 0;
+	in.a = BDOOR_MAGIC;
+	in.b = arg;
+	in.c = cmd;
+	in.d = BDOOR_PORT;
+	if (!DeviceIoControl(vxd, 1, &in, sizeof(in), r, sizeof(*r), &got, NULL) || got != sizeof(*r))
+	{
+		r->a = 0xffffffffUL;   /* an error status for vmmouse, nothing for GETVERSION */
+		r->b = r->c = r->d = 0;
+	}
 }
 
 static int hypervisor_bit(void)
@@ -112,6 +134,25 @@ static void vmmouse_disable(void)
 	backdoor(VMMOUSE_COMMAND, VMMOUSE_CMD_DISABLE, &r);
 }
 
+int wsprintfA(char *, const char *, ...);
+
+/* KEXVMM.LOG in the Windows folder: why it stopped, or that it runs */
+static void note(const char *fmt, unsigned long a, unsigned long b)
+{
+	char path[MAX_PATH], line[160];
+	HANDLE h;
+	DWORD n;
+	UINT l = GetWindowsDirectoryA(path, MAX_PATH - 16);
+	lstrcpyA(path + l, path[l - 1] == '\\' ? "KEXVMM.LOG" : "\\KEXVMM.LOG");
+	n = (DWORD) wsprintfA(line, fmt, a, b);
+	h = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE)
+		return;
+	SetFilePointer(h, 0, NULL, FILE_END);
+	WriteFile(h, line, n, &n, NULL);
+	CloseHandle(h);
+}
+
 static volatile int quit;
 
 static BOOL WINAPI on_ctrl(DWORD t)
@@ -126,16 +167,37 @@ void entrypoint(void)
 	struct regs r;
 	HANDLE mutex;
 	unsigned long buttons = 0, errors = 0;
-	long last_x = -1, last_y = -1;
 
 	mutex = CreateMutex(NULL, TRUE, "KernelExEx.VmMouse");
 	if (GetLastError() == ERROR_ALREADY_EXISTS)
 		ExitProcess(0);
-	if (!hypervisor_bit() && !vm_bios())
-		ExitProcess(0);   /* a real PC: the backdoor port is not ours to touch */
-	backdoor(BDOOR_GETVERSION, ~BDOOR_MAGIC, &r);
-	if (r.b != BDOOR_MAGIC || !vmmouse_enable())
+	{
+		int hv = hypervisor_bit(), bios = vm_bios();
+		if (!hv && !bios)
+		{
+			note("not a virtual machine: exiting\r\n", 0, 0);
+			ExitProcess(0);   /* a real PC: the backdoor port is not ours to touch */
+		}
+		note("virtual machine (hypervisor bit %lu, BIOS name %lu)\r\n", (unsigned long) hv, (unsigned long) bios);
+	}
+	if (!open_vxd())
+	{
+		note("cannot load KEXVMM.VXD (error %lu): exiting\r\n", GetLastError(), 0);
 		ExitProcess(0);
+	}
+	backdoor(BDOOR_GETVERSION, ~BDOOR_MAGIC, &r);
+	if (r.b != BDOOR_MAGIC)
+	{
+		note("no VMware backdoor (ebx %08lx): exiting\r\n", r.b, 0);
+		ExitProcess(0);
+	}
+	if (!vmmouse_enable())
+	{
+		backdoor(VMMOUSE_STATUS, 0, &r);
+		note("backdoor version %lu, but no vmmouse (status %08lx): exiting\r\n", r.a, r.a);
+		ExitProcess(0);
+	}
+	note("vmmouse on: absolute pointer\r\n", 0, 0);
 	SetConsoleCtrlHandler(on_ctrl, TRUE);
 	/* above normal, so the pointer keeps up while programs are busy */
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
@@ -175,20 +237,18 @@ void entrypoint(void)
 			b = st & (VMMOUSE_LEFT | VMMOUSE_RIGHT | VMMOUSE_MIDDLE);
 			if (st & 0x00010000UL)
 				continue;   /* a relative packet: not asked for */
-			if (x != last_x || y != last_y)
-			{
-				mouse_event(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE, (DWORD) x, (DWORD) y, 0, 0);
-				last_x = x;
-				last_y = y;
-			}
+			/* every packet repositions the pointer, even when the host's
+			 * position did not change: QEMU nudges the PS/2 mouse by one
+			 * pixel per event to raise its interrupt, and without this the
+			 * pointer drifts (four clicks were too far apart for Windows to
+			 * see a double-click) */
 			if ((b ^ buttons) & VMMOUSE_LEFT)
 				flags |= (b & VMMOUSE_LEFT) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
 			if ((b ^ buttons) & VMMOUSE_RIGHT)
 				flags |= (b & VMMOUSE_RIGHT) ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
 			if ((b ^ buttons) & VMMOUSE_MIDDLE)
 				flags |= (b & VMMOUSE_MIDDLE) ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
-			if (flags)
-				mouse_event(MOUSEEVENTF_ABSOLUTE | flags, (DWORD) x, (DWORD) y, 0, 0);
+			mouse_event(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | flags, (DWORD) x, (DWORD) y, 0, 0);
 			buttons = b;
 			if (z)   /* the host counts down for "away from the user" */
 				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (DWORD) (-z * WHEEL_DELTA), 0);

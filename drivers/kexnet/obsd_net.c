@@ -24,6 +24,7 @@
 #include "dev/pci/pcireg.h"
 #include "dev/usb/usbdi.h"
 #include "kexnet.h"
+#include "../../common/w98state.h"
 
 /* ---- freestanding string functions ----------------------------------------------- */
 void *memcpy(void *d, const void *s, size_t n)
@@ -169,6 +170,7 @@ int obsd_write_file(const char *name, const void *buf, size_t len);
 /* the driver log (kexbsd's ring) as WINDOWS\KEXNET.LOG, written from the
  * driver thread: after attach, after the Wi-Fi settings, every 10 s */
 static char log_buf[8192];
+
 static struct kexbsd_work log_work;
 
 static void log_flush(void *arg)
@@ -190,6 +192,11 @@ static void log_post(kexbsd_worker *w)
 }
 static KEXNET_ADAPTER *adapters[MAX_ADAPTERS];
 static KEXNET_ADAPTER *attaching;   /* during match/attach: timeouts and interrupts belong here */
+/* after attach: net80211 makes timeouts for each node it meets (WPA
+ * handshake retries, inactivity); they go to the adapter attached last
+ * (a driver with several adapters shares the timer DPC fine: it only
+ * needs a miniport handle and the worker) */
+static KEXNET_ADAPTER *attached_last;
 static struct obsd_dma_tag
 {
 	int unused;
@@ -344,22 +351,27 @@ void obsd_pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 	}
 }
 
-/* ---- timeout(9) on NDIS miniport timers -------------------------------------------- *
- * The timer DPC runs the function serialized with the miniport (PCI
- * drivers) or hands it to the driver's worker thread (USB drivers). */
+/* ---- timeout(9) --------------------------------------------------------------------- *
+ * PCI drivers: NDIS miniport timers, whose DPC runs the function serialized
+ * with the miniport. USB drivers: timers of their worker thread
+ * (kexbsd_worker_timer_*), so the function runs on the worker. NDIS timers
+ * are not used for those: on Windows 98 their callbacks run at interrupt
+ * time, and with a USB driver's frequent timers every timer in the system
+ * stopped (simulated-radio test). */
 struct tmo_impl
 {
 	NDIS_MINIPORT_TIMER timer;
 	volatile ULONG pending;
 	kexbsd_worker *worker;
-	struct kexbsd_work work;
+	struct kexbsd_wtimer wt;
 };
 CTASSERT(sizeof(struct tmo_impl) <= sizeof(((struct timeout *) 0)->to_impl));
 #define IMPL(t) ((struct tmo_impl *) (t)->to_impl)
 
-static void timeout_run(void *arg)
+static void timeout_wrun(void *arg)
 {
 	struct timeout *t = (struct timeout *) arg;
+	IMPL(t)->pending = 0;
 	t->to_func(t->to_arg);
 }
 
@@ -370,28 +382,28 @@ static VOID NTAPI timeout_thunk(PVOID s1, PVOID ctx, PVOID s2, PVOID s3)
 	(void) s2;
 	(void) s3;
 	IMPL(t)->pending = 0;
-	if (IMPL(t)->worker)
-	{
-		IMPL(t)->work.fn = timeout_run;
-		IMPL(t)->work.arg = t;
-		kexbsd_worker_post(IMPL(t)->worker, &IMPL(t)->work);
-	}
-	else
-		t->to_func(t->to_arg);
+	t->to_func(t->to_arg);
 }
 
 void obsd_timeout_set(struct timeout *t, void (*fn)(void *), void *arg)
 {
+	KEXNET_ADAPTER *a = attaching ? attaching : attached_last;
 	memset(t, 0, sizeof(*t));
 	t->to_func = fn;
 	t->to_arg = arg;
-	if (!attaching)
+	if (!a)
 	{
-		kexbsd_printf("kexnet: timeout_set outside attach is not supported\n");
+		kexbsd_printf("kexnet: timeout_set with no adapter\n");
 		return;
 	}
-	NdisMInitializeTimer(&IMPL(t)->timer, attaching->handle, timeout_thunk, t);
-	IMPL(t)->worker = attaching->worker;
+	if (a->worker)
+	{
+		IMPL(t)->worker = a->worker;
+		IMPL(t)->wt.fn = timeout_wrun;
+		IMPL(t)->wt.arg = t;
+	}
+	else
+		NdisMInitializeTimer(&IMPL(t)->timer, a->handle, timeout_thunk, t);
 	t->to_set = 1;
 }
 
@@ -404,6 +416,17 @@ int obsd_timeout_add_msec(struct timeout *t, int msec)
 	if (msec < 1)
 		msec = 1;
 	IMPL(t)->pending = 1;
+	if (IMPL(t)->worker)
+	{
+		kexbsd_worker_timer_set(IMPL(t)->worker, &IMPL(t)->wt, msec);
+		return !was;
+	}
+	/* an armed NDIS timer is cancelled before it is set again */
+	if (was)
+	{
+		BOOLEAN cancelled = FALSE;
+		NdisMCancelTimer(&IMPL(t)->timer, &cancelled);
+	}
 	/* 98 SE exports NdisSetTimer, which an NDIS_MINIPORT_TIMER (KTIMER, KDPC
 	 * first) satisfies; its DPC runs the miniport's function serialized */
 	NdisSetTimer((PNDIS_TIMER) &IMPL(t)->timer, (UINT) msec);
@@ -413,10 +436,12 @@ int obsd_timeout_add_msec(struct timeout *t, int msec)
 int obsd_timeout_del(struct timeout *t)
 {
 	BOOLEAN cancelled = FALSE;
-	if (!t->to_set)
+	if (!t->to_set || !IMPL(t)->pending)
 		return 0;
-	NdisMCancelTimer(&IMPL(t)->timer, &cancelled);
 	IMPL(t)->pending = 0;
+	if (IMPL(t)->worker)
+		return kexbsd_worker_timer_cancel(IMPL(t)->worker, &IMPL(t)->wt);
+	NdisMCancelTimer(&IMPL(t)->timer, &cancelled);
 	return cancelled;
 }
 
@@ -1173,7 +1198,13 @@ static void set_flags(KEXNET_ADAPTER *a, int flags)
 		struct flags_call c;
 		c.a = a;
 		c.flags = flags;
+#ifdef KEX_DEBUGCON
+		kexbsd_printf("kexnet: set_flags %x: waiting for the worker\n", flags);
+#endif
 		kexbsd_worker_call(a->worker, flags_call_fn, &c);
+#ifdef KEX_DEBUGCON
+		kexbsd_printf("kexnet: set_flags %x: done\n", flags);
+#endif
 	}
 	else
 	{
@@ -1441,6 +1472,7 @@ attached:
 	}
 	else
 		set_flags(a, IFF_UP);
+	attached_last = a;
 	attaching = NULL;
 	return NDIS_STATUS_SUCCESS;
 
@@ -1472,6 +1504,8 @@ static VOID NTAPI mp_halt(NDIS_HANDLE ctx)
 		a->drv->wifi_ops->stop(a->ifp);
 	}
 	set_flags(a, 0);   /* the driver's stop: interrupts off, rings freed */
+	if (attached_last == a)
+		attached_last = NULL;
 	if (a->udev)
 		obsd_usb_detach(a->udev);
 	if (a->intr_registered)
@@ -1504,9 +1538,12 @@ static BOOLEAN NTAPI mp_check_hang(NDIS_HANDLE ctx)
 {
 	KEXNET_ADAPTER *a = (KEXNET_ADAPTER *) ctx;
 	static int beat;
-	if (++beat % 5 == 0)   /* NDIS calls this every 2 s */
+	/* files (the log, radio firmware) only once Windows is up: opening one
+	 * during device init can hang Windows 98 (common/w98state.h) */
+	int up = kex_files_ready();
+	if (++beat % 5 == 0 && up)   /* NDIS calls this every 2 s */
 		log_post(a->worker);
-	if (a->bringup_pending && ++a->beats >= 5)
+	if (a->bringup_pending && ++a->beats >= 5 && up)
 	{
 		a->bringup_pending = 0;
 		kexbsd_worker_post(a->worker, &a->bringup_work);

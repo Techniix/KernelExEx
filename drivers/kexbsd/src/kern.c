@@ -7,6 +7,7 @@
  */
 #define KEXBSD_BUILD
 #include "kexbsd/kern.h"
+#include "irqlock.h"
 
 #define KEXBSD_TAG 'dsbK'
 
@@ -192,10 +193,10 @@ int msleep(void *chan, struct mtx *m, int pri, const char *wmesg, int timo)
 	(void) wmesg;
 	KeInitializeEvent(&s.ev, NotificationEvent, FALSE);
 	s.chan = chan;
-	KeAcquireSpinLock(&sleep_lock, &irql);
+	irql = irq_lock();
 	s.next = sleepers;
 	sleepers = &s;
-	KeReleaseSpinLock(&sleep_lock, irql);
+	irq_unlock(irql);
 	if (m)
 		kexbsd_mtx_unlock(m);
 	if (timo > 0)
@@ -204,9 +205,9 @@ int msleep(void *chan, struct mtx *m, int pri, const char *wmesg, int timo)
 		pdue = &due;
 	}
 	st = KeWaitForSingleObject(&s.ev, Executive, KernelMode, FALSE, pdue);
-	KeAcquireSpinLock(&sleep_lock, &irql);
+	irql = irq_lock();
 	sleep_remove(&s);
-	KeReleaseSpinLock(&sleep_lock, irql);
+	irq_unlock(irql);
 	if (m)
 		kexbsd_mtx_lock(m);
 	return st == STATUS_TIMEOUT ? EWOULDBLOCK : 0;
@@ -225,7 +226,7 @@ static void wake(void *chan, int all)
 {
 	SLEEPER *s;
 	KIRQL irql;
-	KeAcquireSpinLock(&sleep_lock, &irql);
+	irql = irq_lock();
 	for (s = sleepers; s; s = s->next)
 		if (s->chan == chan)
 		{
@@ -233,7 +234,7 @@ static void wake(void *chan, int all)
 			if (!all)
 				break;
 		}
-	KeReleaseSpinLock(&sleep_lock, irql);
+	irq_unlock(irql);
 }
 
 void wakeup(void *chan)
@@ -366,13 +367,13 @@ static VOID NTAPI tq_thread(PVOID ctx)
 		KeWaitForSingleObject(&tq->wake, Executive, KernelMode, FALSE, NULL);
 		for (;;)
 		{
-			KeAcquireSpinLock(&tq->lock, &irql);
+			irql = irq_lock();
 			t = tq->head;
 			if (!t)
 			{
 				tq->running = NULL;
 				KeSetEvent(&tq->idle, IO_NO_INCREMENT, FALSE);
-				KeReleaseSpinLock(&tq->lock, irql);
+				irq_unlock(irql);
 				break;
 			}
 			tq->head = t->ta_next;
@@ -383,7 +384,7 @@ static VOID NTAPI tq_thread(PVOID ctx)
 			t->ta_next = NULL;
 			tq->running = t;
 			KeResetEvent(&tq->idle);
-			KeReleaseSpinLock(&tq->lock, irql);
+			irq_unlock(irql);
 			t->ta_func(t->ta_context, pending);
 		}
 		if (tq->exit)
@@ -414,12 +415,12 @@ int taskqueue_start_threads(struct taskqueue **tqp, int count, int pri, const ch
 int taskqueue_enqueue(struct taskqueue *tq, struct task *t)
 {
 	KIRQL irql;
-	KeAcquireSpinLock(&tq->lock, &irql);
+	irql = irq_lock();
 	if (t->ta_pending)
 	{
 		if (t->ta_pending < 0xFFFF)
 			t->ta_pending++;
-		KeReleaseSpinLock(&tq->lock, irql);
+		irq_unlock(irql);
 		return 0;
 	}
 	t->ta_pending = 1;
@@ -429,7 +430,7 @@ int taskqueue_enqueue(struct taskqueue *tq, struct task *t)
 	else
 		tq->head = t;
 	tq->tail = t;
-	KeReleaseSpinLock(&tq->lock, irql);
+	irq_unlock(irql);
 	KeSetEvent(&tq->wake, IO_NO_INCREMENT, FALSE);
 	return 0;
 }
@@ -439,7 +440,7 @@ int taskqueue_cancel(struct taskqueue *tq, struct task *t, unsigned int *pendp)
 	KIRQL irql;
 	struct task **pp;
 	int busy;
-	KeAcquireSpinLock(&tq->lock, &irql);
+	irql = irq_lock();
 	if (pendp)
 		*pendp = (unsigned int) t->ta_pending;
 	for (pp = &tq->head; *pp; pp = &(*pp)->ta_next)
@@ -460,7 +461,7 @@ int taskqueue_cancel(struct taskqueue *tq, struct task *t, unsigned int *pendp)
 		}
 	t->ta_pending = 0;
 	busy = tq->running == t;
-	KeReleaseSpinLock(&tq->lock, irql);
+	irq_unlock(irql);
 	return busy ? EBUSY : 0;
 }
 
@@ -470,9 +471,9 @@ void taskqueue_drain(struct taskqueue *tq, struct task *t)
 	{
 		KIRQL irql;
 		int busy;
-		KeAcquireSpinLock(&tq->lock, &irql);
+		irql = irq_lock();
 		busy = t->ta_pending || tq->running == t;
-		KeReleaseSpinLock(&tq->lock, irql);
+		irq_unlock(irql);
 		if (!busy)
 			return;
 		pause("tqdrain", 1);
@@ -721,10 +722,10 @@ int kexbsd_printf(const char *fmt, ...)
 	va_end(ap);
 	if (n > (int) sizeof(line) - 1)
 		n = sizeof(line) - 1;
-	KeAcquireSpinLock(&ring_lock, &irql);
+	irql = irq_lock();
 	for (i = 0; i < n; i++)
 		ring[ring_pos++ % RING] = line[i];
-	KeReleaseSpinLock(&ring_lock, irql);
+	irq_unlock(irql);
 #ifdef KEX_DEBUGCON
 	for (i = 0; i < n; i++)
 		__asm__ volatile("outb %0, $0xe9" : : "a"(line[i]));
@@ -738,14 +739,14 @@ int kexbsd_log_tail(char *buf, size_t size)
 	ULONG start, n, i;
 	if (!size)
 		return 0;
-	KeAcquireSpinLock(&ring_lock, &irql);
+	irql = irq_lock();
 	n = ring_pos < RING ? ring_pos : RING;
 	if (n > size - 1)
 		n = (ULONG) size - 1;
 	start = ring_pos - n;
 	for (i = 0; i < n; i++)
 		buf[i] = ring[(start + i) % RING];
-	KeReleaseSpinLock(&ring_lock, irql);
+	irq_unlock(irql);
 	buf[n] = 0;
 	return (int) n;
 }
