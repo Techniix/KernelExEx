@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <!-- KernelExEx Wi-Fi icon: original artwork, GPLv2 -->
+  <rect x="3" y="5" width="42" height="38" rx="6" fill="#0a3d8f"/>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-width="4.2">
+    <path d="M9 21 A21 21 0 0 1 39 21"/>
+    <path d="M14.5 27 A13 13 0 0 1 33.5 27"/>
+  </g>
+  <circle cx="24" cy="34" r="4" fill="#ffd23f"/>
+</svg>

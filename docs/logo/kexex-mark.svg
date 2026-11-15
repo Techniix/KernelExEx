@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- KernelExEx logo mark: a chip (the kernel) with a "K" and a yellow
+       "plus" (the extensions). Original artwork, GPLv2, like the project. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1aa6b7"/>
+      <stop offset="1" stop-color="#0a3d8f"/>
+    </linearGradient>
+  </defs>
+  <g fill="#6b7a90">
+    <rect x="16" y="2" width="5" height="8" rx="1"/><rect x="29.5" y="2" width="5" height="8" rx="1"/><rect x="43" y="2" width="5" height="8" rx="1"/>
+    <rect x="16" y="54" width="5" height="8" rx="1"/><rect x="29.5" y="54" width="5" height="8" rx="1"/><rect x="43" y="54" width="5" height="8" rx="1"/>
+    <rect x="2" y="16" width="8" height="5" rx="1"/><rect x="2" y="29.5" width="8" height="5" rx="1"/><rect x="2" y="43" width="8" height="5" rx="1"/>
+    <rect x="54" y="16" width="8" height="5" rx="1"/><rect x="54" y="29.5" width="8" height="5" rx="1"/><rect x="54" y="43" width="8" height="5" rx="1"/>
+  </g>
+  <rect x="8" y="8" width="48" height="48" rx="7" fill="url(#g)"/>
+  <!-- K -->
+  <path fill="#ffffff" d="M17 17h7v12.5L34.5 17h8.5L31.2 30.6 43.5 47h-8.7l-8.6-11.8L24 37.7V47h-7z"/>
+  <!-- plus -->
+  <path fill="#ffd23f" d="M44 13h4v5h5v4h-5v5h-4v-5h-5v-4h5z"/>
+</svg>

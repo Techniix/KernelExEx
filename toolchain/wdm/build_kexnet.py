@@ -24,6 +24,7 @@ def main():
     ap.add_argument("--out", default=str(wdm.ROOT.parent / "build" / "kexnet"))
     ap.add_argument("--sdk", default=str(wdm.ROOT.parent / "build" / "sdk"))
     ap.add_argument("--debugcon", action="store_true")
+    ap.add_argument("--tests", action="store_true", help="also build tests/wifi/kexwsim.sys (simulated Wi-Fi)")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -43,13 +44,15 @@ def main():
     tables = {"kexbsd.sys": wdm.exports_of(bsdout / "kexbsd.sys")}
     USBLIB = [SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", BSD / "lib" / "obsd_kern.c", rt]
     WIFI = USBLIB + sorted((SRC / "wifi" / "net80211").glob("*.c")) + sorted((SRC / "wifi" / "crypto").glob("*.c")) \
-        + [SRC / "wifi" / "kex80211_rand.c", SRC / "wifi" / "kex80211_cfg.c", SRC / "wifi" / "kex80211_pbkdf2.c", BSD / "lib" / "subr_tree.c"]
+        + [SRC / "wifi" / "kex80211_rand.c", SRC / "wifi" / "kex80211_cfg.c", SRC / "wifi" / "kex80211_ctl.c", SRC / "wifi" / "kex80211_pbkdf2.c", BSD / "lib" / "subr_tree.c"]
     drivers = {
         # obsd_usb.c in every driver: the glue (obsd_net.c) serves PCI and USB drivers
         "kexem": ([SRC / "kexem.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", BSD / "lib" / "obsd_kern.c", em / "if_em.c", em / "if_em_hw.c", rt],
                   ["-I", str(SRC / "em")]),
         "kexrl": ([SRC / "rl" / "kexrl.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", BSD / "lib" / "obsd_kern.c", rt],
                   ["-I", str(SRC)]),
+        "kexvio": ([SRC / "vio" / "kexvio.c", SRC / "obsd_net.c", BSD / "lib" / "obsd_usb.c", BSD / "lib" / "obsd_kern.c", rt],
+                   ["-I", str(SRC)]),
         "kexrndis": ([SRC / "kexrndis.c", SRC / "urndis" / "dev" / "usb" / "if_urndis.c"] + USBLIB, ["-I", str(SRC / "urndis")]),
         "kexcdce": ([SRC / "cdce" / "kexcdce.c"] + USBLIB, ["-I", str(SRC)]),
         "kexurtwn": ([SRC / "urtwn" / "kexurtwn.c", SRC / "urtwn" / "dev" / "ic" / "rtwn.c"] + WIFI,
@@ -57,6 +60,8 @@ def main():
         # the wireless stack alone, to prove it links (never installed)
         "kexwlan_linktest": ([SRC / "wifi" / "kexwlan_linktest.c"] + WIFI, ["-I", str(SRC / "wifi"), "-I", str(SRC)]),
     }
+    if a.tests:
+        drivers["kexwsim"] = ([wdm.ROOT / "tests" / "wifi" / "kexwsim.c"] + WIFI, ["-I", str(SRC / "wifi"), "-I", str(SRC)])
     # kexrtwn: FreeBSD's rtwn and its FreeBSD personality, compiled apart
     RT = SRC / "rtwn"
     fbsd_srcs = [p for p in sorted((RT / "dev" / "rtwn").rglob("*.c")) if p.name != "rtwn_usb_attach.c"] + [

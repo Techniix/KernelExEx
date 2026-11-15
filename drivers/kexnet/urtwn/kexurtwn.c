@@ -23,6 +23,7 @@ static const struct kexnet_driver urtwn_driver = {
 	NULL,
 	1,
 	kex80211_configure,
+	&kex80211_ctl_ops,
 };
 
 NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT drv, PUNICODE_STRING reg)

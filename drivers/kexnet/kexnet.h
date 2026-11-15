@@ -29,9 +29,29 @@ struct kexnet_driver
 	/* Wi-Fi drivers: apply network name and passphrase (adapter
 	 * properties) before the interface comes up; kex80211_configure */
 	int (*wifi_config)(struct ifnet *ifp, const char *ssid, const char *pass, int allow_tkip);
+	/* Wi-Fi drivers: the Wi-Fi program's channel (kex80211_ctl_ops) */
+	const struct kexnet_wifi_ops *wifi_ops;
 };
 
+/* what kexnet_wifi_ops.tick asks the glue to do with the interface */
+#define KEXNET_WIFI_NONE 0
+#define KEXNET_WIFI_RESTART 1   /* down and up: new network settings */
+#define KEXNET_WIFI_DOWN 2      /* turned off */
+#define KEXNET_WIFI_UP 3        /* turned on */
+
+struct kexnet_wifi_ops
+{
+	/* on the driver thread after bring-up; fixed: Advanced properties name
+	 * a network. Returns 1 if the channel is open */
+	int (*start)(struct ifnet *ifp, const char *description, int fixed);
+	int (*tick)(struct ifnet *ifp);    /* every 2 s on the driver thread */
+	void (*after)(struct ifnet *ifp);  /* after the glue did what tick asked */
+	void (*stop)(struct ifnet *ifp);
+};
+extern const struct kexnet_wifi_ops kex80211_ctl_ops;
+
 int kex80211_configure(struct ifnet *ifp, const char *ssid, const char *pass, int allow_tkip);
+int kex80211_configure_bin(struct ifnet *ifp, const unsigned char *ssid, size_t slen, const char *pass, int allow_tkip);
 
 NTSTATUS kexnet_register(PDRIVER_OBJECT drv, PUNICODE_STRING reg, const struct kexnet_driver *d);
 

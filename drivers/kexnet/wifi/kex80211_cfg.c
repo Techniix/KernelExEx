@@ -30,13 +30,53 @@ static int hexval(char c)
 	return -1;
 }
 
+/* the WPA parameters KernelExEx allows (see the top of this file) */
+void kex80211_wpaparams(struct ieee80211_wpaparams *wpa, const char *xname, int allow_tkip)
+{
+	memset(wpa, 0, sizeof(*wpa));
+	strlcpy(wpa->i_name, xname, sizeof(wpa->i_name));
+	wpa->i_enabled = 1;
+	wpa->i_protos = IEEE80211_WPA_PROTO_WPA2 | (allow_tkip ? IEEE80211_WPA_PROTO_WPA1 : 0);
+	wpa->i_akms = IEEE80211_WPA_AKM_PSK | IEEE80211_WPA_AKM_SHA256_PSK;
+	wpa->i_ciphers = IEEE80211_WPA_CIPHER_CCMP | (allow_tkip ? IEEE80211_WPA_CIPHER_TKIP : 0);
+	wpa->i_groupcipher = allow_tkip ? IEEE80211_WPA_CIPHER_TKIP : IEEE80211_WPA_CIPHER_CCMP;
+}
+
+/* passphrase (8-63 characters) or 64 hex digits -> PSK; 0, or EINVAL */
+int kex80211_psk(const uint8_t *ssid, size_t slen, const char *pass, uint8_t out[32])
+{
+	size_t plen = strlen(pass), i;
+	if (plen == 64)
+	{
+		for (i = 0; i < 32; i++)
+		{
+			int hi = hexval(pass[2 * i]), lo = hexval(pass[2 * i + 1]);
+			if (hi < 0 || lo < 0)
+				return EINVAL;
+			out[i] = (uint8_t) (hi << 4 | lo);
+		}
+		return 0;
+	}
+	if (plen >= 8 && plen <= 63)
+	{
+		pbkdf2_sha1(pass, plen, ssid, slen, out, 32);
+		return 0;
+	}
+	return EINVAL;
+}
+
 int kex80211_configure(struct ifnet *ifp, const char *ssid, const char *pass, int allow_tkip)
+{
+	return kex80211_configure_bin(ifp, (const uint8_t *) ssid, strlen(ssid), pass, allow_tkip);
+}
+
+int kex80211_configure_bin(struct ifnet *ifp, const uint8_t *ssid, size_t slen, const char *pass, int allow_tkip)
 {
 	struct ieee80211_nwid nwid;
 	struct ieee80211_wpapsk psk;
 	struct ieee80211_wpaparams wpa;
 	struct ifreq ifr;
-	size_t slen = strlen(ssid), plen = strlen(pass), i;
+	size_t plen = strlen(pass);
 	int e;
 
 	if (slen == 0)
@@ -56,22 +96,8 @@ int kex80211_configure(struct ifnet *ifp, const char *ssid, const char *pass, in
 		return e;
 
 	memset(&psk, 0, sizeof(psk));
-	memset(&wpa, 0, sizeof(wpa));
 	strlcpy(psk.i_name, ifp->if_xname, sizeof(psk.i_name));
-	strlcpy(wpa.i_name, ifp->if_xname, sizeof(wpa.i_name));
-	if (plen == 64)
-	{
-		for (i = 0; i < 32; i++)
-		{
-			int hi = hexval(pass[2 * i]), lo = hexval(pass[2 * i + 1]);
-			if (hi < 0 || lo < 0)
-				return EINVAL;
-			psk.i_psk[i] = (uint8_t) (hi << 4 | lo);
-		}
-	}
-	else if (plen >= 8 && plen <= 63)
-		pbkdf2_sha1(pass, plen, (const uint8_t *) ssid, slen, psk.i_psk, sizeof(psk.i_psk));
-	else if (plen)
+	if (plen && kex80211_psk(ssid, slen, pass, psk.i_psk))
 	{
 		printf("%s: a WPA passphrase has 8 to 63 characters\n", ifp->if_xname);
 		return EINVAL;
@@ -84,17 +110,13 @@ int kex80211_configure(struct ifnet *ifp, const char *ssid, const char *pass, in
 		explicit_bzero(&psk, sizeof(psk));
 		if (e && e != ENETRESET)
 			return e;
-		wpa.i_enabled = 1;
-		wpa.i_protos = IEEE80211_WPA_PROTO_WPA2 | (allow_tkip ? IEEE80211_WPA_PROTO_WPA1 : 0);
-		wpa.i_akms = IEEE80211_WPA_AKM_PSK | IEEE80211_WPA_AKM_SHA256_PSK;
-		wpa.i_ciphers = IEEE80211_WPA_CIPHER_CCMP | (allow_tkip ? IEEE80211_WPA_CIPHER_TKIP : 0);
-		wpa.i_groupcipher = allow_tkip ? IEEE80211_WPA_CIPHER_TKIP : IEEE80211_WPA_CIPHER_CCMP;
+		kex80211_wpaparams(&wpa, ifp->if_xname, allow_tkip);
 		e = ifp->if_ioctl(ifp, SIOCS80211WPAPARMS, (caddr_t) &wpa);
 		if (e && e != ENETRESET)
 			return e;
-		printf("%s: network \"%s\", WPA2%s\n", ifp->if_xname, ssid, allow_tkip ? " (WPA/TKIP allowed)" : "");
+		printf("%s: network \"%.*s\", WPA2%s\n", ifp->if_xname, (int) slen, ssid, allow_tkip ? " (WPA/TKIP allowed)" : "");
 	}
 	else
-		printf("%s: network \"%s\", open (no encryption)\n", ifp->if_xname, ssid);
+		printf("%s: network \"%.*s\", open (no encryption)\n", ifp->if_xname, (int) slen, ssid);
 	return 0;
 }

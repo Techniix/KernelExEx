@@ -63,8 +63,26 @@
   Var StartMenuFolder
 
 ;--------------------------------
+;Install types: what "Recommended" ticks is decided before the first
+;release (README decision 19); "Full" is every component but Protoweb
+
+  InstType "Recommended"
+  InstType "Full (everything except the Protoweb proxy)"
+  InstType "KernelEx only"
+
+;--------------------------------
 ;Interface Settings
 
+  !define MUI_ICON "docs\logo\kexex.ico"
+  !define MUI_UNICON "docs\logo\kexex.ico"
+  !define MUI_WELCOMEFINISHPAGE_BITMAP "docs\logo\installer-welcome.bmp"
+  !define MUI_UNWELCOMEFINISHPAGE_BITMAP "docs\logo\installer-welcome.bmp"
+  !define MUI_HEADERIMAGE
+  !define MUI_HEADERIMAGE_RIGHT
+  !define MUI_HEADERIMAGE_BITMAP "docs\logo\installer-header.bmp"
+  !define MUI_HEADERIMAGE_UNBITMAP "docs\logo\installer-header.bmp"
+  !define MUI_COMPONENTSPAGE_SMALLDESC
+  BrandingText "KernelExEx ${VERSION}"
   !define MUI_ABORTWARNING
 ;  !define MUI_FINISHPAGE_NOAUTOCLOSE
 ;  !define MUI_UNFINISHPAGE_NOAUTOCLOSE
@@ -72,6 +90,8 @@
 ;--------------------------------
 ;Pages
 
+  !define MUI_WELCOMEPAGE_TITLE "Welcome to KernelExEx ${VERSION}"
+  !define MUI_WELCOMEPAGE_TEXT "KernelExEx lets Windows 98 SE and ME run newer programs, and adds drivers for hardware Windows 98 never knew: big disks, USB 2.0 and USB storage, network cards, Wi-Fi with WPA2, and more.$\r$\n$\r$\nYou choose which parts to install on the Components page; each driver is only used when Windows finds its device.$\r$\n$\r$\nClose other programs before you continue."
   !insertmacro MUI_PAGE_WELCOME
   !insertmacro MUI_PAGE_LICENSE "License.txt"
 
@@ -81,6 +101,7 @@
   !define MUI_STARTMENUPAGE_REGISTRY_VALUENAME "SMDir"
   !insertmacro MUI_PAGE_STARTMENU Application $StartMenuFolder
 
+  !define MUI_COMPONENTSPAGE_TEXT_TOP "Tick what to install. Items marked $\"found on this PC$\" are for hardware setup found in this computer. Point at an item to read what it does."
   !insertmacro MUI_PAGE_COMPONENTS
   !insertmacro MUI_PAGE_INSTFILES
   Page custom PageDefConfig PageLeaveDefConfig
@@ -167,6 +188,7 @@ FunctionEnd
 ;Installer Section
 
 Section "-MSLU" SECPRODUCT
+  SectionIn RO
 
   IfFileExists $SYSDIR\unicows.dll 0 lbl_download
   
@@ -226,6 +248,7 @@ Section "-MSLU" SECPRODUCT
 SectionEnd
 
 Section "-Install"
+  SectionIn RO
 
   SetDetailsView show
   
@@ -386,7 +409,8 @@ Section "-Install"
   WriteRegDWORD HKLM "System\CurrentControlSet\Control\MPRServices\KernelEx" "StackSize" 0x1000
   
   ;Store uninstaller key
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KernelEx" "DisplayName" "KernelEx ${VERSION}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KernelEx" "DisplayName" "KernelExEx ${VERSION}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KernelEx" "DisplayIcon" "$INSTDIR\uninstall.exe,0"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KernelEx" "UninstallString" '"$INSTDIR\uninstall.exe"'
   
   ;Write verifier
@@ -404,8 +428,7 @@ Section "-Install"
     CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
     CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Release Notes.lnk" "$INSTDIR\Release Notes.txt"
     CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Verify Installation.lnk" "$INSTDIR\verify.exe"
-    CreateShortCut "$SMPROGRAMS\$StartMenuFolder\KernelEx Home Page.lnk" "http://kernelex.sourceforge.net/"
-    CreateShortCut "$SMPROGRAMS\$StartMenuFolder\KernelEx Wiki.lnk" "http://kernelex.sourceforge.net/wiki/"
+    CreateShortCut "$SMPROGRAMS\$StartMenuFolder\KernelExEx Home Page.lnk" "https://github.com/Techniix/KernelExEx"
     CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
   !insertmacro MUI_STARTMENU_WRITE_END
 
@@ -418,59 +441,18 @@ SectionEnd
 
 !define DEVPATH_KEY "Software\Microsoft\Windows\CurrentVersion\Setup"
 
-SectionGroup "Game controllers" SECGAMEPAD
-
-Section "XInput for modern games" SECXINPUT
-  ;xinput1_3.dll on top of the joystick API, with SDL-style mappings
-  SetOutPath "$SYSDIR"
-  File "net-out\xinput1_3.dll"
-  ;one DLL answers to every XInput name games link against
-  File "/oname=xinput1_1.dll" "net-out\xinput1_3.dll"
-  File "/oname=xinput1_2.dll" "net-out\xinput1_3.dll"
-  File "/oname=xinput1_4.dll" "net-out\xinput1_3.dll"
-  File "/oname=xinput9_1_0.dll" "net-out\xinput1_3.dll"
-  WriteRegStr HKLM "Software\KernelEx\Components" "XInput" "1"
-  SetOutPath "$INSTDIR\gamepad"
-  File "input\gamepad\gamecontrollerdb.txt"
-  SetOutPath "$INSTDIR"
-SectionEnd
-
-Section "Xbox 360-protocol USB controller driver" SECKEXPAD
-  ;kexpad.sys and its INF stay together in one folder that is added to
-  ;DevicePath, so Windows finds them when a controller is plugged in.
-  SetOutPath "$INSTDIR\drivers\kexpad"
-  File "input\kexpad\kexpad.sys"
-  File "input\kexpad\kexpad.inf"
-  SetOutPath "$INSTDIR"
+;a driver folder in DevicePath, so Windows finds its INF when it finds the device
+!macro KexDevicePath dir
   ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
   StrCmp $0 "" 0 +2
     StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\kexpad" "E+1{" $1
-  IfErrors 0 kexpad_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexpad"
-  kexpad_listed:
-  WriteRegStr HKLM "Software\KernelEx\Components" "KexPad" "1"
-SectionEnd
+  ClearErrors
+  ${WordFind} "$0" "${dir}" "E+1{" $1
+  IfErrors 0 +2
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;${dir}"
+!macroend
 
-SectionGroupEnd
 
-Section /o "Intel chipset support (ICH2 to ICH10, 845 to P45)" SECKEXCHIP
-  ;INFs only: they name the chipset's devices and load Windows' own drivers
-  SetOutPath "$INSTDIR\drivers\chipset"
-  File "drivers\chipset\kexchip.inf"
-  File "drivers\chipset\kexide.inf"
-  File "drivers\chipset\kexuhci.inf"
-  SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\chipset" "E+1{" $1
-  IfErrors 0 kexchip_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\chipset"
-  kexchip_listed:
-  Call KexChipRedetect
-  WriteRegStr HKLM "Software\KernelEx\Components" "KexChip" "1"
-SectionEnd
 
 ;Devices of ours that Windows found no driver for (Other devices) are
 ;forgotten, so Windows finds them again at the next start, with our INFs.
@@ -522,46 +504,6 @@ Function KexChipRedetect
   Pop $R1
   Pop $R0
 FunctionEnd
-
-Section /o "AC'97 audio (Intel ICH, nVidia nForce, AMD; any AC'97 codec)" SECKEXAC97
-  ;a WDM audio driver: Windows finds it in this folder when it finds the audio device
-  SetOutPath "$INSTDIR\drivers\audio"
-  File "drivers\audio\kexac97.sys"
-  File "drivers\audio\kexac97.inf"
-  SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\audio" "E+1{" $1
-  IfErrors 0 kexac97_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\audio"
-  kexac97_listed:
-  WriteRegStr HKLM "Software\KernelEx\Components" "KexAc97" "1"
-SectionEnd
-
-Section /o "Disks over 128 GB (IDE/ATA driver with 48-bit LBA)" SECKEXATA
-  ;an NT SCSI miniport for Windows 98's SCSIPORT, in place of ESDI_506.PDR on
-  ;every IDE channel: Windows' own driver wraps around past 128 GB and
-  ;overwrites the start of the disk
-  SetOutPath "$SYSDIR\IOSUBSYS"
-  File "drivers\storage\kexata.mpd"
-  SetOutPath "$INSTDIR\drivers\storage"
-  File "drivers\storage\kexata.mpd"
-  File "drivers\storage\kexata.inf"
-  SetOutPath "$WINDIR\INF"
-  File "drivers\storage\kexata.inf"
-  SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\storage" "E+1{" $1
-  IfErrors 0 kexata_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\storage"
-  kexata_listed:
-  StrCpy $R9 "on"
-  Call KexAtaSwitch
-  WriteRegStr HKLM "Software\KernelEx\Components" "KexAta" "1"
-SectionEnd
 
 ;Every IDE channel device node (MF\GOODPRIMARY / MF\GOODSECONDARY) that runs
 ;ESDI_506.PDR gets kexata.mpd instead ($R9 "on"), or back ($R9 "off"); the
@@ -640,40 +582,6 @@ FunctionEnd
 !insertmacro KEXATA_SWITCH ""
 !insertmacro KEXATA_SWITCH "un."
 
-Section /o "USB flash drives, disks and card readers" SECKEXUMASS
-  ;function driver for USB mass storage; Windows' own NTMAP (from the
-  ;Windows 98 SE CD) connects the disks to Windows
-  SetOutPath "$INSTDIR\drivers\usbstor"
-  File "drivers\usbstor\kexumass.sys"
-  File "drivers\usbstor\kexumass.inf"
-  SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\usbstor" "E+1{" $1
-  IfErrors 0 kexumass_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\usbstor"
-  kexumass_listed:
-  WriteRegStr HKLM "Software\KernelEx\Components" "KexUmass" "1"
-SectionEnd
-
-Section /o "USB 2.0 (EHCI: Intel, VIA, NEC, nVidia, AMD, SiS, ALi and others)" SECKEXEHCI
-  ;a WDM bus driver: Windows finds it in this folder when it finds the USB 2.0 controller
-  SetOutPath "$INSTDIR\drivers\usb2"
-  File "drivers\usb2\kexehci.sys"
-  File "drivers\usb2\kexehci.inf"
-  SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\usb2" "E+1{" $1
-  IfErrors 0 kexehci_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\usb2"
-  kexehci_listed:
-  Call KexEhciRedetect
-  WriteRegStr HKLM "Software\KernelEx\Components" "KexEhci" "1"
-SectionEnd
-
 ;USB 2.0 controllers Windows found no driver for are forgotten, so Windows
 ;finds them again at the next start, with our INF (as KexChipRedetect does).
 Function KexEhciRedetect
@@ -714,27 +622,149 @@ Function KexEhciRedetect
   Pop $R0
 FunctionEnd
 
-SectionGroup "Network adapter drivers" SECNETDRV
 
-Section /o "Intel PRO/1000 (OpenBSD em driver)" SECKEXEM
-  ;kexem.sys, kexbsd.sys and the INF stay together in one folder added to
-  ;DevicePath, so Windows offers the driver when it finds an Intel adapter.
-  SetOutPath "$INSTDIR\drivers\kexem"
-  File "drivers\kexnet\kexem.sys"
-  File "drivers\kexnet\kexbsd.sys"
-  File "drivers\kexnet\kexem.inf"
+
+LangString DESC_GRPHW ${LANG_ENGLISH} "Drivers for hardware Windows 98 has none for, or drives badly. Each one is only used when Windows finds the device it is for."
+LangString DESC_GRPSTOR ${LANG_ENGLISH} "Big hard disks, USB 2.0 and USB storage."
+LangString DESC_GRPCHIP ${LANG_ENGLISH} "Chipset device names and onboard sound."
+LangString DESC_GRPWIFI ${LANG_ENGLISH} "Wi-Fi with WPA2 for USB adapters, with a taskbar icon and a Control Panel icon to choose a network and type its password."
+LangString DESC_GRPVM ${LANG_ENGLISH} "For running Windows 98 in a virtual machine."
+LangString DESC_KEXVIO ${LANG_ENGLISH} "The virtio network adapter of QEMU/KVM, Proxmox and VirtualBox (virtio-net): faster than an emulated network card. OpenBSD's vio driver."
+LangString DESC_KEXVMM ${LANG_ENGLISH} "The mouse pointer moves in and out of the virtual machine's window freely, with no need to click into it or press keys to release it. For QEMU (the default PC machine) and VMware. Does nothing on a real PC."
+LangString DESC_GRPINET ${LANG_ENGLISH} "Internet helpers."
+LangString DESC_KEXCHIP ${LANG_ENGLISH} "Names every part of Intel chipsets newer than Windows 98 (ICH2 to ICH10: SMBus, LPC, USB, IDE/SATA, bridges) so Device Manager shows no unknown devices, and sets them up with Windows' own drivers."
+LangString DESC_KEXATA ${LANG_ENGLISH} "Hard disks over 128 GB on IDE and SATA (in IDE mode) ports. Windows 98's own IDE driver goes wrong past 128 GB and can overwrite the start of the disk. This replaces it on every IDE channel, the Windows disk included, and also runs CD and DVD drives. Uninstalling puts Windows' driver back."
+LangString DESC_KEXUMASS ${LANG_ENGLISH} "USB flash drives, USB hard disks, card readers and USB CD/DVD drives, with no driver disk: Windows 98 has none for them. Works on USB 1.1 ports and, with the USB 2.0 driver, at USB 2.0 speed. Windows may ask for the Windows 98 CD the first time."
+LangString DESC_KEXEHCI ${LANG_ENGLISH} "USB 2.0 speed for the USB 2.0 ports of any EHCI controller (the Intel ICH4 to ICH10 and later chipsets, VIA, NEC and other add-in cards). Windows 98 runs them at USB 1.1 speed only. USB 1.1 mice, keyboards and printers stay on Windows' own drivers."
+LangString DESC_KEXAC97 ${LANG_ENGLISH} "Sound for onboard AC'97 audio (Intel ICH to ICH7, nVidia nForce 1 to 4, AMD-8111) with any AC'97 codec, such as the Realtek ALC655 on the MSI 848P Neo2-V. Windows 98 has no driver for these."
+LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
+LangString DESC_KEXRNDIS ${LANG_ENGLISH} "USB network adapters that speak RNDIS, including USB tethering from an Android phone, with OpenBSD's urndis driver."
+LangString DESC_KEXCDCE ${LANG_ENGLISH} "USB Ethernet adapters that follow the CDC Ethernet standard (many USB-C and Realtek RTL8152/8153 adapters)."
+LangString DESC_KEXRTWN ${LANG_ENGLISH} "Wi-Fi with WPA2 for Realtek USB adapters: RTL8188CU/EU/FU, RTL8192CU/EU, RTL8723BU, RTL8812AU and RTL8821AU, including TP-Link Archer T2U, T2U Plus and T2U Nano, TL-WN722N v2/v3 and TL-WN725N. FreeBSD's rtwn driver with OpenBSD's wireless stack. Choose the network from the Wi-Fi icon on the taskbar or in Control Panel."
+LangString DESC_KEXURTWN ${LANG_ENGLISH} "Wi-Fi with WPA2 for the Realtek USB adapters FreeBSD's rtwn does not list, with OpenBSD's urtwn driver and wireless stack."
+LangString DESC_KEXRL ${LANG_ENGLISH} "Realtek RTL8139, RTL8139C/C+/D, RTL8100/8100C and RTL8101L 10/100 adapters, onboard or on a card (D-Link DFE-530TX+/538TX, SMC 1211TX and many others). Our own driver: Windows 98 has none for these."
+LangString DESC_KEXEM ${LANG_ENGLISH} "Intel PRO/1000 gigabit adapters (82540 to I350, ICH/PCH onboard), with OpenBSD's em driver. Windows uses it when it finds one."
+
+LangString DESC_GAMEPAD ${LANG_ENGLISH} "Support for modern game controllers."
+LangString DESC_XINPUT ${LANG_ENGLISH} "XInput (xinput1_3.dll) for games that need it. Works with any controller Windows sees; layouts follow the SDL controller database."
+LangString DESC_KEXPAD ${LANG_ENGLISH} "Driver for Xbox 360 and compatible USB pads (8BitDo, PowerA, PDP, Hori and others). Windows uses it when you plug one in."
+
+LangString DESC_TIMESYNC ${LANG_ENGLISH} "Sets the clock from internet time servers every 6 hours. Secure websites need a correct clock. Settings: HKLM\Software\KernelEx\TimeSync."
+
+;--------------------------------
+;Optional: Protoweb proxy (off unless the user ticks it)
+;Sends plain HTTP and FTP through Protoweb's archive proxy. HTTPS is left
+;direct, so the TLS stack still reaches the real web. The previous settings
+;are saved and put back on uninstall.
+
+!define PW_PROXY "http=wayback.protoweb.org:7851;ftp=wayback.protoweb.org:7851"
+
+LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain HTTP and FTP go through wayback.protoweb.org:7851; HTTPS stays direct. Your old proxy settings are restored on uninstall."
+;--------------------------------
+;The Wi-Fi program: taskbar icon and window (kexwifi.exe) and its Control
+;Panel icon (kexwifi.cpl), installed with either Wi-Fi driver.
+
+Function KexWifiProgram
   SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\kexem" "E+1{" $1
-  IfErrors 0 kexem_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexem"
-  kexem_listed:
-  WriteRegStr HKLM "Software\KernelEx\Components" "KexEm" "1"
+  File "kexwifi\kexwifi.exe"
+  SetOutPath "$SYSDIR"
+  File "kexwifi\kexwifi.cpl"
+  SetOutPath "$INSTDIR"
+  ;the .cpl finds kexwifi.exe beside itself: a copy in SYSTEM too
+  SetOutPath "$SYSDIR"
+  File "kexwifi\kexwifi.exe"
+  SetOutPath "$INSTDIR"
+  ReadRegDWORD $0 HKLM "Software\KernelEx\WiFi" "TrayIcon"
+  StrCmp $0 "0" +2
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexWifi" '"$SYSDIR\kexwifi.exe" /tray'
+  !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
+    CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
+    CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Wi-Fi.lnk" "$SYSDIR\kexwifi.exe"
+  !insertmacro MUI_STARTMENU_WRITE_END
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexWifi" "1"
+FunctionEnd
+
+;--------------------------------
+;Optional components, grouped as the components page shows them
+
+SectionGroup "Hardware drivers" SECGRPHW
+
+SectionGroup "Disks and USB" SECGRPSTOR
+Section /o "Disks over 128 GB (IDE and SATA in IDE mode)" SECKEXATA
+  SectionIn 2
+  ;an NT SCSI miniport for Windows 98's SCSIPORT, in place of ESDI_506.PDR on
+  ;every IDE channel: Windows' own driver wraps around past 128 GB and
+  ;overwrites the start of the disk
+  SetOutPath "$SYSDIR\IOSUBSYS"
+  File "drivers\storage\kexata.mpd"
+  SetOutPath "$INSTDIR\drivers\storage"
+  File "drivers\storage\kexata.mpd"
+  File "drivers\storage\kexata.inf"
+  SetOutPath "$WINDIR\INF"
+  File "drivers\storage\kexata.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\storage"
+  StrCpy $R9 "on"
+  Call KexAtaSwitch
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexAta" "1"
 SectionEnd
 
-Section /o "Realtek RTL8139/810x Fast Ethernet (onboard RTL8100C and others)" SECKEXRL
+Section /o "USB 2.0 speed" SECKEXEHCI
+  SectionIn 2
+  ;a WDM bus driver: Windows finds it in this folder when it finds the USB 2.0 controller
+  SetOutPath "$INSTDIR\drivers\usb2"
+  File "drivers\usb2\kexehci.sys"
+  File "drivers\usb2\kexehci.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\usb2"
+  Call KexEhciRedetect
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexEhci" "1"
+SectionEnd
+
+Section /o "USB flash drives, disks and card readers" SECKEXUMASS
+  SectionIn 2
+  ;function driver for USB mass storage; Windows' own NTMAP (from the
+  ;Windows 98 SE CD) connects the disks to Windows
+  SetOutPath "$INSTDIR\drivers\usbstor"
+  File "drivers\usbstor\kexumass.sys"
+  File "drivers\usbstor\kexumass.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\usbstor"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexUmass" "1"
+SectionEnd
+
+SectionGroupEnd
+
+SectionGroup "Chipset and sound" SECGRPCHIP
+Section /o "Intel chipsets (names every device)" SECKEXCHIP
+  SectionIn 2
+  ;INFs only: they name the chipset's devices and load Windows' own drivers
+  SetOutPath "$INSTDIR\drivers\chipset"
+  File "drivers\chipset\kexchip.inf"
+  File "drivers\chipset\kexide.inf"
+  File "drivers\chipset\kexuhci.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\chipset"
+  Call KexChipRedetect
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexChip" "1"
+SectionEnd
+
+Section /o "AC'97 onboard sound" SECKEXAC97
+  SectionIn 2
+  ;a WDM audio driver: Windows finds it in this folder when it finds the audio device
+  SetOutPath "$INSTDIR\drivers\audio"
+  File "drivers\audio\kexac97.sys"
+  File "drivers\audio\kexac97.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\audio"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexAc97" "1"
+SectionEnd
+
+SectionGroupEnd
+
+SectionGroup "Network adapters" SECNETDRV
+Section /o "Realtek RTL8139 / RTL8100 (10/100)" SECKEXRL
+  SectionIn 2
   ;kexrl.sys, kexbsd.sys and the INF stay together in one folder added to
   ;DevicePath, so Windows offers the driver when it finds a Realtek RTL8139 family adapter.
   SetOutPath "$INSTDIR\drivers\kexrl"
@@ -742,49 +772,50 @@ Section /o "Realtek RTL8139/810x Fast Ethernet (onboard RTL8100C and others)" SE
   File "drivers\kexnet\kexbsd.sys"
   File "drivers\kexnet\kexrl.inf"
   SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\kexrl" "E+1{" $1
-  IfErrors 0 kexrl_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexrl"
-  kexrl_listed:
+  !insertmacro KexDevicePath "$INSTDIR\drivers\kexrl"
   WriteRegStr HKLM "Software\KernelEx\Components" "KexRl" "1"
 SectionEnd
 
-Section /o "USB RNDIS adapters and phone tethering (OpenBSD urndis)" SECKEXRNDIS
-  SetOutPath "$INSTDIR\drivers\kexrndis"
-  File "drivers\kexnet\kexrndis.sys"
+Section /o "Intel PRO/1000 (gigabit)" SECKEXEM
+  SectionIn 2
+  ;kexem.sys, kexbsd.sys and the INF stay together in one folder added to
+  ;DevicePath, so Windows offers the driver when it finds an Intel adapter.
+  SetOutPath "$INSTDIR\drivers\kexem"
+  File "drivers\kexnet\kexem.sys"
   File "drivers\kexnet\kexbsd.sys"
-  File "drivers\kexnet\kexrndis.inf"
+  File "drivers\kexnet\kexem.inf"
   SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\kexrndis" "E+1{" $1
-  IfErrors 0 kexrndis_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexrndis"
-  kexrndis_listed:
-  WriteRegStr HKLM "Software\KernelEx\Components" "KexRndis" "1"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\kexem"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexEm" "1"
 SectionEnd
 
-Section /o "USB CDC Ethernet adapters (KernelExEx driver)" SECKEXCDCE
+Section /o "USB Ethernet adapters (CDC Ethernet)" SECKEXCDCE
+  SectionIn 2
   SetOutPath "$INSTDIR\drivers\kexcdce"
   File "drivers\kexnet\kexcdce.sys"
   File "drivers\kexnet\kexbsd.sys"
   File "drivers\kexnet\kexcdce.inf"
   SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\kexcdce" "E+1{" $1
-  IfErrors 0 kexcdce_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexcdce"
-  kexcdce_listed:
+  !insertmacro KexDevicePath "$INSTDIR\drivers\kexcdce"
   WriteRegStr HKLM "Software\KernelEx\Components" "KexCdce" "1"
 SectionEnd
 
-Section /o "Realtek USB Wi-Fi: TP-Link Archer T2U/T2U Plus, TL-WN722N v2/v3 and others (FreeBSD rtwn)" SECKEXRTWN
+Section /o "USB tethering (Android) and RNDIS adapters" SECKEXRNDIS
+  SectionIn 2
+  SetOutPath "$INSTDIR\drivers\kexrndis"
+  File "drivers\kexnet\kexrndis.sys"
+  File "drivers\kexnet\kexbsd.sys"
+  File "drivers\kexnet\kexrndis.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\kexrndis"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexRndis" "1"
+SectionEnd
+
+SectionGroupEnd
+
+SectionGroup "Wi-Fi" SECGRPWIFI
+Section /o "Realtek USB Wi-Fi (TP-Link Archer T2U family and others)" SECKEXRTWN
+  SectionIn 2
   SetOutPath "$INSTDIR\drivers\kexrtwn"
   File "drivers\kexnet\kexrtwn.sys"
   File "drivers\kexnet\kexbsd.sys"
@@ -803,17 +834,14 @@ Section /o "Realtek USB Wi-Fi: TP-Link Archer T2U/T2U Plus, TL-WN722N v2/v3 and 
   File "drivers\kexnet\rtwn-fw\RW21AU.FW"
   File "drivers\kexnet\rtwn-fw\LICENSE.TXT"
   SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\kexrtwn" "E+1{" $1
-  IfErrors 0 kexrtwn_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexrtwn"
-  kexrtwn_listed:
+  !insertmacro KexDevicePath "$INSTDIR\drivers\kexrtwn"
   WriteRegStr HKLM "Software\KernelEx\Components" "KexRtwn" "1"
+  ;the Wi-Fi program (taskbar icon, window, Control Panel), shared by the Wi-Fi drivers
+  Call KexWifiProgram
 SectionEnd
 
-Section /o "Realtek USB Wi-Fi, older adapters FreeBSD rtwn does not list (OpenBSD urtwn)" SECKEXURTWN
+Section /o "Realtek USB Wi-Fi, older adapters" SECKEXURTWN
+  SectionIn 2
   SetOutPath "$INSTDIR\drivers\kexurtwn"
   File "drivers\kexnet\kexurtwn.sys"
   File "drivers\kexnet\kexbsd.sys"
@@ -825,36 +853,74 @@ Section /o "Realtek USB Wi-Fi, older adapters FreeBSD rtwn does not list (OpenBS
   File "drivers\kexnet\urtwn-fw\8192EU.FW"
   File "/oname=FWLICENSE.TXT" "drivers\kexnet\urtwn-fw\LICENSE.TXT"
   SetOutPath "$INSTDIR"
-  ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
-  StrCmp $0 "" 0 +2
-    StrCpy $0 "$WINDIR\INF"
-  ${WordFind} "$0" "$INSTDIR\drivers\kexurtwn" "E+1{" $1
-  IfErrors 0 kexurtwn_listed
-    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" "$0;$INSTDIR\drivers\kexurtwn"
-  kexurtwn_listed:
+  !insertmacro KexDevicePath "$INSTDIR\drivers\kexurtwn"
   WriteRegStr HKLM "Software\KernelEx\Components" "KexUrtwn" "1"
+  ;the Wi-Fi program (taskbar icon, window, Control Panel), shared by the Wi-Fi drivers
+  Call KexWifiProgram
 SectionEnd
 
 SectionGroupEnd
 
-LangString DESC_KEXCHIP ${LANG_ENGLISH} "Names every part of Intel chipsets newer than Windows 98 (ICH2 to ICH10: SMBus, LPC, USB, IDE/SATA, bridges) so Device Manager shows no unknown devices, and sets them up with Windows' own drivers."
-LangString DESC_KEXATA ${LANG_ENGLISH} "Hard disks over 128 GB on IDE and SATA (in IDE mode) ports. Windows 98's own IDE driver goes wrong past 128 GB and can overwrite the start of the disk. This replaces it on every IDE channel, the Windows disk included, and also runs CD and DVD drives. Uninstalling puts Windows' driver back."
-LangString DESC_KEXUMASS ${LANG_ENGLISH} "USB flash drives, USB hard disks, card readers and USB CD/DVD drives, with no driver disk: Windows 98 has none for them. Works on USB 1.1 ports and, with the USB 2.0 driver, at USB 2.0 speed. Windows may ask for the Windows 98 CD the first time."
-LangString DESC_KEXEHCI ${LANG_ENGLISH} "USB 2.0 speed for the USB 2.0 ports of any EHCI controller (the Intel ICH4 to ICH10 and later chipsets, VIA, NEC and other add-in cards). Windows 98 runs them at USB 1.1 speed only. USB 1.1 mice, keyboards and printers stay on Windows' own drivers."
-LangString DESC_KEXAC97 ${LANG_ENGLISH} "Sound for onboard AC'97 audio (Intel ICH to ICH7, nVidia nForce 1 to 4, AMD-8111) with any AC'97 codec, such as the Realtek ALC655 on the MSI 848P Neo2-V. Windows 98 has no driver for these."
-LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
-LangString DESC_KEXRNDIS ${LANG_ENGLISH} "USB network adapters that speak RNDIS, including USB tethering from an Android phone, with OpenBSD's urndis driver."
-LangString DESC_KEXCDCE ${LANG_ENGLISH} "USB Ethernet adapters that follow the CDC Ethernet standard (many USB-C and Realtek RTL8152/8153 adapters)."
-LangString DESC_KEXRTWN ${LANG_ENGLISH} "Wi-Fi with WPA2 for Realtek USB adapters: RTL8188CU/EU/FU, RTL8192CU/EU, RTL8723BU, RTL8812AU and RTL8821AU, including TP-Link Archer T2U, T2U Plus and T2U Nano, TL-WN722N v2/v3 and TL-WN725N. FreeBSD's rtwn driver with OpenBSD's wireless stack. Set the network name and passphrase in the adapter's Advanced properties."
-LangString DESC_KEXURTWN ${LANG_ENGLISH} "Wi-Fi with WPA2 for the Realtek USB adapters FreeBSD's rtwn does not list, with OpenBSD's urtwn driver and wireless stack."
-LangString DESC_KEXRL ${LANG_ENGLISH} "Realtek RTL8139, RTL8139C/C+/D, RTL8100/8100C and RTL8101L 10/100 adapters, onboard or on a card (D-Link DFE-530TX+/538TX, SMC 1211TX and many others). Our own driver: Windows 98 has none for these."
-LangString DESC_KEXEM ${LANG_ENGLISH} "Intel PRO/1000 gigabit adapters (82540 to I350, ICH/PCH onboard), with OpenBSD's em driver. Windows uses it when it finds one."
+SectionGroupEnd
 
-LangString DESC_GAMEPAD ${LANG_ENGLISH} "Support for modern game controllers."
-LangString DESC_XINPUT ${LANG_ENGLISH} "XInput (xinput1_3.dll) for games that need it. Works with any controller Windows sees; layouts follow the SDL controller database."
-LangString DESC_KEXPAD ${LANG_ENGLISH} "Driver for Xbox 360 and compatible USB pads (8BitDo, PowerA, PDP, Hori and others). Windows uses it when you plug one in."
+SectionGroup "Virtual machines (QEMU, VMware, VirtualBox)" SECGRPVM
+Section /o "virtio network adapter (QEMU/KVM, Proxmox, VirtualBox)" SECKEXVIO
+  SectionIn 2
+  ;OpenBSD's vio driver as an NDIS miniport, like the other network drivers
+  SetOutPath "$INSTDIR\drivers\kexvio"
+  File "drivers\kexnet\kexvio.sys"
+  File "drivers\kexnet\kexbsd.sys"
+  File "drivers\kexnet\kexvio.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\kexvio"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexVio" "1"
+SectionEnd
 
+Section /o "Mouse integration (QEMU and VMware)" SECKEXVMM
+  SectionIn 2
+  ;kexvmm.exe: the pointer follows the host's mouse, no capture needed;
+  ;it does nothing (and exits) outside QEMU and VMware
+  SetOutPath "$INSTDIR"
+  File "kexvmm\kexvmm.exe"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexVmMouse" '"$INSTDIR\kexvmm.exe"'
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexVmm" "1"
+SectionEnd
+SectionGroupEnd
+
+SectionGroup "Game controllers" SECGAMEPAD
+Section "XInput for modern games" SECXINPUT
+  SectionIn 1 2
+  ;xinput1_3.dll on top of the joystick API, with SDL-style mappings
+  SetOutPath "$SYSDIR"
+  File "net-out\xinput1_3.dll"
+  ;one DLL answers to every XInput name games link against
+  File "/oname=xinput1_1.dll" "net-out\xinput1_3.dll"
+  File "/oname=xinput1_2.dll" "net-out\xinput1_3.dll"
+  File "/oname=xinput1_4.dll" "net-out\xinput1_3.dll"
+  File "/oname=xinput9_1_0.dll" "net-out\xinput1_3.dll"
+  WriteRegStr HKLM "Software\KernelEx\Components" "XInput" "1"
+  SetOutPath "$INSTDIR\gamepad"
+  File "input\gamepad\gamecontrollerdb.txt"
+  SetOutPath "$INSTDIR"
+SectionEnd
+
+Section "Xbox 360-style USB controllers" SECKEXPAD
+  SectionIn 1 2
+  ;kexpad.sys and its INF stay together in one folder that is added to
+  ;DevicePath, so Windows finds them when a controller is plugged in.
+  SetOutPath "$INSTDIR\drivers\kexpad"
+  File "input\kexpad\kexpad.sys"
+  File "input\kexpad\kexpad.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\kexpad"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexPad" "1"
+SectionEnd
+
+SectionGroupEnd
+
+SectionGroup "Internet" SECGRPINET
 Section /o "Keep the clock right (internet time)" SECTIMESYNC
+  SectionIn 2
   ;kexntp.exe: SNTP from several servers, median, sanity checks
   SetOutPath "$INSTDIR"
   File "net-out\kexntp.exe"
@@ -863,17 +929,7 @@ Section /o "Keep the clock right (internet time)" SECTIMESYNC
   WriteRegStr HKLM "Software\KernelEx\Components" "TimeSync" "1"
 SectionEnd
 
-LangString DESC_TIMESYNC ${LANG_ENGLISH} "Sets the clock from internet time servers every 6 hours. Secure websites need a correct clock. Settings: HKLM\Software\KernelEx\TimeSync."
-
-;--------------------------------
-;Optional: Protoweb proxy (off unless the user ticks it)
-;Sends plain HTTP and FTP through Protoweb's archive proxy. HTTPS is left
-;direct, so the TLS stack still reaches the real web. The previous settings
-;are saved and put back on uninstall.
-
-!define PW_PROXY "http=wayback.protoweb.org:7851;ftp=wayback.protoweb.org:7851"
-
-Section /o "Use the Protoweb proxy for HTTP and FTP" SECPROTOWEB
+Section /o "Browse old websites through Protoweb" SECPROTOWEB
   ReadRegStr $0 HKLM "Software\KernelEx\ProtowebBackup" "Saved"
   StrCmp $0 "1" pw_saved
     ReadRegDWORD $1 HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyEnable"
@@ -889,9 +945,18 @@ Section /o "Use the Protoweb proxy for HTTP and FTP" SECPROTOWEB
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyOverride" "<local>"
 SectionEnd
 
-LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain HTTP and FTP go through wayback.protoweb.org:7851; HTTPS stays direct. Your old proxy settings are restored on uninstall."
+SectionGroupEnd
+
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SECPROTOWEB} $(DESC_PROTOWEB)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECGRPHW} $(DESC_GRPHW)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECGRPSTOR} $(DESC_GRPSTOR)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECGRPCHIP} $(DESC_GRPCHIP)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECGRPWIFI} $(DESC_GRPWIFI)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECGRPVM} $(DESC_GRPVM)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXVIO} $(DESC_KEXVIO)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXVMM} $(DESC_KEXVMM)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECGRPINET} $(DESC_GRPINET)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECTIMESYNC} $(DESC_TIMESYNC)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECGAMEPAD} $(DESC_GAMEPAD)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECXINPUT} $(DESC_XINPUT)
@@ -1070,6 +1135,32 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\kexurtwn"
     RMDir "$INSTDIR\drivers"
   un_kexurtwn_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexWifi"
+  StrCmp $0 "1" 0 un_kexwifi_done
+    ;a running kexwifi.exe goes at the restart
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexWifi"
+    Delete /REBOOTOK "$INSTDIR\kexwifi.exe"
+    Delete /REBOOTOK "$SYSDIR\kexwifi.exe"
+    Delete /REBOOTOK "$SYSDIR\kexwifi.cpl"
+    ;saved networks hold WPA2 keys: they go too
+    DeleteRegKey HKLM "Software\KernelEx\WiFi"
+  un_kexwifi_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexVio"
+  StrCmp $0 "1" 0 un_kexvio_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\kexvio" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\kexvio\kexvio.sys"
+    Delete /REBOOTOK "$INSTDIR\drivers\kexvio\kexbsd.sys"
+    Delete "$INSTDIR\drivers\kexvio\kexvio.inf"
+    RMDir "$INSTDIR\drivers\kexvio"
+    RMDir "$INSTDIR\drivers"
+  un_kexvio_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexVmm"
+  StrCmp $0 "1" 0 un_kexvmm_done
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexVmMouse"
+    Delete /REBOOTOK "$INSTDIR\kexvmm.exe"
+  un_kexvmm_done:
   DeleteRegKey HKLM "Software\KernelEx\Components"
 
   ;Put back the proxy settings saved before Protoweb was turned on
@@ -1193,6 +1284,108 @@ Function DetectDowngrade
 FunctionEnd
 
 ;--------------------------------
+;Hardware found on this PC: its components say so on the Components page
+;(they are not ticked by themselves; README decision 19)
+
+;$R8: subkey of HKLM\Enum\PCI starting with this text? 1/0 in $R9
+!macro KexPciHas prefix
+  Push "${prefix}"
+  Call KexPciHas
+!macroend
+
+Function KexPciHas
+  Exch $R8
+  Push $R0
+  Push $R1
+  Push $R2
+  StrLen $R2 $R8
+  StrCpy $R9 0
+  StrCpy $R0 0
+  kph_loop:
+    EnumRegKey $R1 HKLM "Enum\PCI" $R0
+    StrCmp $R1 "" kph_done
+    IntOp $R0 $R0 + 1
+    StrCpy $R1 $R1 $R2
+    StrCmp $R1 $R8 0 kph_loop
+    StrCpy $R9 1
+  kph_done:
+  Pop $R2
+  Pop $R1
+  Pop $R0
+  Pop $R8
+FunctionEnd
+
+;any PCI device whose compatible IDs contain this text (a class code): $R9
+Function KexPciClass
+  Exch $R8
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  StrCpy $R9 0
+  StrCpy $R0 0
+  kpc_loop:
+    EnumRegKey $R1 HKLM "Enum\PCI" $R0
+    StrCmp $R1 "" kpc_done
+    IntOp $R0 $R0 + 1
+    EnumRegKey $R2 HKLM "Enum\PCI\$R1" 0
+    StrCmp $R2 "" kpc_loop
+    ReadRegStr $R3 HKLM "Enum\PCI\$R1\$R2" "CompatibleIDs"
+    ClearErrors
+    ${WordFind} "$R3" "$R8" "E+1{" $R2
+    IfErrors kpc_loop
+    StrCpy $R9 1
+  kpc_done:
+  ClearErrors
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+  Pop $R8
+FunctionEnd
+
+!macro KexMarkFound sec
+  SectionGetText ${sec} $R7
+  SectionSetText ${sec} "$R7 - found on this PC"
+!macroend
+
+Function KexFindHardware
+  !insertmacro KexPciHas "VEN_10EC&DEV_8139"
+  StrCmp $R9 1 0 kfh_1
+    !insertmacro KexMarkFound ${SECKEXRL}
+  kfh_1:
+  Push "CC_0C0320"
+  Call KexPciClass
+  StrCmp $R9 1 0 kfh_2
+    !insertmacro KexMarkFound ${SECKEXEHCI}
+  kfh_2:
+  Push "CC_0401"
+  Call KexPciClass
+  StrCmp $R9 1 0 kfh_3
+    !insertmacro KexMarkFound ${SECKEXAC97}
+  kfh_3:
+  !insertmacro KexPciHas "VEN_1AF4&DEV_1000"
+  StrCmp $R9 1 kfh_vio
+  !insertmacro KexPciHas "VEN_1AF4&DEV_1041"
+  StrCmp $R9 1 0 kfh_novio
+  kfh_vio:
+    !insertmacro KexMarkFound ${SECKEXVIO}
+  kfh_novio:
+  ;QEMU (its VGA, its PCI devices) or VMware
+  !insertmacro KexPciHas "VEN_1234&DEV_1111"
+  StrCmp $R9 1 kfh_vm
+  !insertmacro KexPciHas "VEN_1AF4"
+  StrCmp $R9 1 kfh_vm
+  !insertmacro KexPciHas "VEN_1B36"
+  StrCmp $R9 1 kfh_vm
+  !insertmacro KexPciHas "VEN_15AD"
+  StrCmp $R9 1 0 kfh_novm
+  kfh_vm:
+    !insertmacro KexMarkFound ${SECKEXVMM}
+  kfh_novm:
+FunctionEnd
+
+;--------------------------------
 ;.onInit
 
 Function .onInit
@@ -1215,6 +1408,7 @@ Function .onInit
 
   Call DetectOldKex
   Call DetectDowngrade
+  Call KexFindHardware
 
 FunctionEnd
 

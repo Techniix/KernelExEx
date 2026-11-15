@@ -1,0 +1,69 @@
+; kexvio.inf - KernelExEx virtio network adapter (QEMU/KVM, Proxmox, VirtualBox)
+; for Windows 98 SE / ME
+
+[Version]
+Signature="$CHICAGO$"
+Class=Net
+ClassGUID={4d36e972-e325-11ce-bfc1-08002be10318}
+Provider=%KEX%
+
+[Manufacturer]
+%VIRTIO%=Models
+
+[Models]
+%vio_1AF41000%=vio_1AF41000.ndi,PCI\VEN_1AF4&DEV_1000
+
+[vio_1AF41000.ndi]
+AddReg=vio_1AF41000.id,kexvio.reg,kexvio.params
+CopyFiles=kexvio.copy
+DeviceID=PCI\VEN_1AF4&DEV_1000
+MaxInstance=8
+
+[vio_1AF41000.id]
+HKR,Ndi,DeviceID,,"PCI\VEN_1AF4&DEV_1000"
+HKR,Ndi,MaxInstance,,8
+
+[kexvio.reg]
+HKR,,DevLoader,,"*ndis"
+HKR,,DeviceVxDs,,kexvio.sys
+HKR,,EnumPropPages,,"netdi.dll,EnumPropPages"
+HKR,NDIS,LogDriverName,,kexvio
+HKR,NDIS,MajorNdisVersion,1,05
+HKR,NDIS,MinorNdisVersion,1,00
+HKR,Ndi,HelpText,,%HELP%
+HKR,Ndi\Interfaces,DefUpper,,"ndis3"
+HKR,Ndi\Interfaces,DefLower,,"ethernet"
+HKR,Ndi\Interfaces,UpperRange,,"ndis3"
+HKR,Ndi\Interfaces,LowerRange,,"ethernet"
+HKR,Ndi\Install,ndis3,,kexvio.ndis3
+
+[kexvio.ndis3]   ; netdi runs this with no source path: the files come from the device section
+
+[kexvio.params]
+HKR,Ndi\params\NetworkAddress,ParamDesc,,%NETADDR%
+HKR,Ndi\params\NetworkAddress,type,,edit
+HKR,Ndi\params\NetworkAddress,LimitText,,12
+HKR,Ndi\params\NetworkAddress,UpperCase,,1
+HKR,Ndi\params\NetworkAddress,optional,,1
+
+[kexvio.copy]
+kexvio.sys
+kexbsd.sys
+
+[DestinationDirs]
+kexvio.copy=11
+
+[SourceDisksNames]
+1=%DISK%,,
+
+[SourceDisksFiles]
+kexvio.sys=1
+kexbsd.sys=1
+
+[Strings]
+KEX="KernelExEx"
+VIRTIO="Virtio"
+DISK="KernelExEx drivers"
+NETADDR="Network Address"
+HELP="virtio network adapter of a virtual machine (KernelExEx kexvio)."
+vio_1AF41000="virtio network adapter"

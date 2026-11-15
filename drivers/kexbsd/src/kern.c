@@ -584,7 +584,7 @@ int kexbsd_vsnprintf(char *out, size_t size, const char *fmt, va_list ap)
 	size_t pos = 0;
 	for (; *fmt; fmt++)
 	{
-		int left = 0, zeropad = 0, width = 0, lng = 0;
+		int left = 0, zeropad = 0, width = 0, lng = 0, prec = -1;
 		if (*fmt != '%')
 		{
 			if (pos + 1 < size)
@@ -602,6 +602,19 @@ int kexbsd_vsnprintf(char *out, size_t size, const char *fmt, va_list ap)
 				break;
 		while (*fmt >= '0' && *fmt <= '9')
 			width = width * 10 + (*fmt++ - '0');
+		if (*fmt == '.')
+		{
+			fmt++;
+			prec = 0;
+			if (*fmt == '*')
+			{
+				prec = va_arg(ap, int);
+				fmt++;
+			}
+			else
+				while (*fmt >= '0' && *fmt <= '9')
+					prec = prec * 10 + (*fmt++ - '0');
+		}
 		for (;; fmt++)
 			if (*fmt == 'l')
 				lng++;
@@ -647,7 +660,7 @@ int kexbsd_vsnprintf(char *out, size_t size, const char *fmt, va_list ap)
 			int len = 0, i;
 			if (!s)
 				s = "(null)";
-			while (s[len])
+			while ((prec < 0 || len < prec) && s[len])
 				len++;
 			for (i = len; !left && i < width; i++, pos++)
 				if (pos + 1 < size)

@@ -149,6 +149,11 @@ typedef struct kexnet_adapter
 	int beats;
 	volatile int bringup_pending;
 	struct wifi_settings *wifi;
+	/* the Wi-Fi program's channel (kexnet_wifi_ops) */
+	int wifi_ctl;               /* open */
+	volatile int wifi_ctl_busy; /* a tick is queued or running */
+	int wifi_off;               /* turned off by the user: keep IFF_UP clear */
+	struct kexbsd_work wifi_ctl_work;
 } KEXNET_ADAPTER;
 
 /* NDIS wants its indications at DISPATCH_LEVEL; a USB driver makes them
@@ -1084,20 +1089,56 @@ static void apply_flags(KEXNET_ADAPTER *a, int flags);
 static void bringup_fn(void *arg)
 {
 	KEXNET_ADAPTER *a = (KEXNET_ADAPTER *) arg;
+	int fixed = 0;
 	if (a->wifi)
 	{
-		a->drv->wifi_config(a->ifp, a->wifi->ssid, a->wifi->pass, a->wifi->tkip);
+		fixed = a->wifi->ssid[0] != 0;
+		if (fixed)
+			a->drv->wifi_config(a->ifp, a->wifi->ssid, a->wifi->pass, a->wifi->tkip);
 		explicit_bzero(a->wifi, sizeof(*a->wifi));
 		kexbsd_free(a->wifi, M_DEVBUF);
 		a->wifi = NULL;
 	}
+	/* saved networks become the join list before the interface comes up */
+	if (a->drv->wifi_ops)
+		a->wifi_ctl = a->drv->wifi_ops->start(a->ifp, a->drv->description, fixed);
 	apply_flags(a, filter_flags_up(a));
+	if (a->wifi_ctl)
+		a->drv->wifi_ops->after(a->ifp);
+}
+
+/* the Wi-Fi program's requests, every 2 s on the driver thread */
+static void wifi_ctl_fn(void *arg)
+{
+	KEXNET_ADAPTER *a = (KEXNET_ADAPTER *) arg;
+	int act = a->drv->wifi_ops->tick(a->ifp);
+	switch (act)
+	{
+	case KEXNET_WIFI_RESTART:
+		apply_flags(a, 0);
+		a->wifi_off = 0;
+		apply_flags(a, filter_flags_up(a));
+		break;
+	case KEXNET_WIFI_DOWN:
+		a->wifi_off = 1;
+		apply_flags(a, 0);
+		break;
+	case KEXNET_WIFI_UP:
+		a->wifi_off = 0;
+		apply_flags(a, filter_flags_up(a));
+		break;
+	}
+	if (act != KEXNET_WIFI_NONE)
+		a->drv->wifi_ops->after(a->ifp);
+	a->wifi_ctl_busy = 0;
 }
 
 static void apply_flags(KEXNET_ADAPTER *a, int flags)
 {
 	struct ifreq ifr;
 	memset(&ifr, 0, sizeof(ifr));
+	if (a->wifi_off)
+		flags = 0;
 	a->ifp->if_flags = (a->ifp->if_flags & ~(IFF_UP | IFF_PROMISC | IFF_ALLMULTI)) | flags;
 	ifr.ifr_flags = a->ifp->if_flags;
 	a->ifp->if_ioctl(a->ifp, SIOCSIFFLAGS, (caddr_t) &ifr);
@@ -1425,6 +1466,11 @@ static VOID NTAPI mp_halt(NDIS_HANDLE ctx)
 {
 	KEXNET_ADAPTER *a = (KEXNET_ADAPTER *) ctx;
 	int i;
+	if (a->wifi_ctl)
+	{
+		a->wifi_ctl = 0;
+		a->drv->wifi_ops->stop(a->ifp);
+	}
 	set_flags(a, 0);   /* the driver's stop: interrupts off, rings freed */
 	if (a->udev)
 		obsd_usb_detach(a->udev);
@@ -1464,6 +1510,13 @@ static BOOLEAN NTAPI mp_check_hang(NDIS_HANDLE ctx)
 	{
 		a->bringup_pending = 0;
 		kexbsd_worker_post(a->worker, &a->bringup_work);
+	}
+	if (a->wifi_ctl && !a->wifi_ctl_busy)
+	{
+		a->wifi_ctl_busy = 1;
+		a->wifi_ctl_work.fn = wifi_ctl_fn;
+		a->wifi_ctl_work.arg = a;
+		kexbsd_worker_post(a->worker, &a->wifi_ctl_work);
 	}
 	/* OpenBSD's if_timer watchdog, at NDIS's two-second cadence */
 	if (a->ifp->if_timer > 0)

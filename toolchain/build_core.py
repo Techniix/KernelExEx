@@ -477,6 +477,29 @@ def build_verify(b: Build):
            base="0x400000", entry="entrypoint", kind="exe")
 
 
+def build_kexwifi(b: Build):
+    """kexwifi.exe (Wi-Fi taskbar icon and window) and kexwifi.cpl (its
+    Control Panel icon). Plain Win32, no KernelEx needed to run."""
+    d = ROOT / "kexwifi"
+    flags = [f"-I{d}", f"-I{ROOT / 'common'}", "-D_WIN32_WINNT=0x0400", *COMPAT]
+    objs = b.compile("kexwifi", [d / "kexwifi.c", d / "sha1.c"], flags)
+    res = b.resource("kexwifi", d / "kexwifi.rc")
+    b.link("kexwifi", [*objs, res], ["kexcrt", "kernel32", "user32", "gdi32", "advapi32", "comctl32", "shell32"],
+           base="0x400000", entry="entrypoint", kind="exe")
+    cobjs = b.compile("kexwcpl", [d / "kexwcpl.c"], flags)
+    cres = b.resource("kexwcpl", d / "kexwcpl.rc")
+    b.link("kexwifi", [*cobjs, cres], ["kexcrt", "kernel32", "user32", "shell32"], base="0x66E00000",
+           entry="DllMain@12", ext=".cpl", defs=d / "kexwcpl.def", kill_at=True)
+
+
+def build_kexvmm(b: Build):
+    """kexvmm.exe: mouse integration in QEMU and VMware (vmmouse)."""
+    d = ROOT / "kexvmm"
+    objs = b.compile("kexvmm", [d / "kexvmm.c"], [f"-I{d}", f"-I{ROOT / 'common'}", *COMPAT])
+    res = b.resource("kexvmm", d / "kexvmm.rc")
+    b.link("kexvmm", [*objs, res], ["kexcrt", "kernel32", "user32"], base="0x400000", entry="entrypoint", kind="exe")
+
+
 def build_vxd(b: Build):
     """VKrnlEx.vxd: compiled as ring-0 code, linked as a PE DLL by lld, then
     converted to the LE format by toolchain/vxd/le_link.py."""
@@ -511,7 +534,8 @@ def build_vxd(b: Build):
 
 STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "gen": prepare_apilibs,
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
-         "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd}
+         "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
+         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm}
 
 
 def main():
@@ -526,7 +550,7 @@ def main():
     b = Build(a.sdk.resolve(), a.out.resolve(), a.j, a.debugcon)
     mingw_inc = Path((b.sdk / "MINGW_INCLUDE").read_text().strip())
     TREES = [ROOT / x for x in ("core", "common", "kexcrt", "sheet", "kexCOM", "auxiliary", "kexcontrol", "verify",
-                                "vxd")]
+                                "vxd", "kexwifi", "kexvmm")]
     TREES += [mingw_inc, mingw_inc.parent / "crt"]  # sources say <RpcProxy.h>, mingw-w64 has rpcproxy.h
     b.case_overlay(TREES + ([b.gen / "apilibs"] if (b.gen / "apilibs").exists() else []))
     for name, fn in STEPS.items():
