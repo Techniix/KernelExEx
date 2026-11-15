@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 12 | [KernelExEx-1.0.0-testbuild12.zip](KernelExEx-1.0.0-testbuild12.zip) | [c9e69d0](https://github.com/Techniix/KernelExEx/commit/c9e69d0e4bf8c762084a2b8271c14949f92ef887) | Wi-Fi program, new setup, virtio and mouse integration for VMs; USB network driver freeze fixes (steps 16-18) |
 | 11 | [KernelExEx-1.0.0-testbuild11.zip](KernelExEx-1.0.0-testbuild11.zip) | [a9d243b](https://github.com/Techniix/KernelExEx/commit/a9d243b2bb32627071b92f8abf5b2d2599ac833c) | USB flash drives, USB hard disks, card readers and USB CD/DVD drives (step 15) |
 | 10 | [KernelExEx-1.0.0-testbuild10.zip](KernelExEx-1.0.0-testbuild10.zip) | [9a62e54](https://github.com/Techniix/KernelExEx/commit/9a62e541ac61976922ae5f6212964bd31e2b76e4) | Fixes from the first test on the MSI 848P Neo2-V: RTL8139 driver no longer claims shared interrupts (boot hang, Code 11); AC'97 start diagnostics in the registry (Code 10). |
 | 9 | [KernelExEx-1.0.0-testbuild9.zip](KernelExEx-1.0.0-testbuild9.zip) | [e16e7be](https://github.com/Techniix/KernelExEx/commit/e16e7befa5021a7529562683ed575809735021ba) | Disks over 128 GB (own IDE/ATA driver with 48-bit LBA), see step 14; chipset INFs now set up the IDE channels (step 11, please redo); first build under the 1.0.0 version scheme. |
