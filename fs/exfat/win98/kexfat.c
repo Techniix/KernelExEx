@@ -118,7 +118,7 @@ static void ifs_block(ULONG key)
 {
 	__asm__ __volatile__("pushl %0\n\t"
 	                     "int $0x20\n\t"
-	                     ".long 0x00400012\n\t"   /* IFSMgr_Block */
+	                     ".long 0x00400036\n\t"   /* IFSMgr_BlockNoEvents: nothing else (no nested IFSMgr request) runs on this thread while it waits */
 	                     "addl $4, %%esp"
 	                     :
 	                     : "r"(key)
