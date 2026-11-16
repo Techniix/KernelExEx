@@ -648,6 +648,7 @@ LangString DESC_GRPCHIP ${LANG_ENGLISH} "Chipset device names and onboard sound.
 LangString DESC_GRPWIFI ${LANG_ENGLISH} "Wi-Fi with WPA2 for USB adapters, with a taskbar icon and a Control Panel icon to choose a network and type its password."
 LangString DESC_GRPVM ${LANG_ENGLISH} "For running Windows 98 in a virtual machine."
 LangString DESC_KEXVIO ${LANG_ENGLISH} "The virtio network adapter of QEMU/KVM, Proxmox and VirtualBox (virtio-net): faster than an emulated network card. OpenBSD's vio driver."
+LangString DESC_KEXFAT ${LANG_ENGLISH} "Reads SD cards, USB sticks and disks formatted exFAT (cards over 32 GB come that way): they get a drive letter and open in Explorer and in programs. Read-only for now: copying files onto them is not possible yet. Experimental."
 LangString DESC_KEXVMM ${LANG_ENGLISH} "The mouse pointer moves in and out of the virtual machine's window freely, with no need to click into it or press keys to release it. For QEMU (the default PC machine) and VMware. Does nothing on a real PC."
 LangString DESC_GRPINET ${LANG_ENGLISH} "Internet helpers."
 LangString DESC_KEXCHIP ${LANG_ENGLISH} "Names every part of Intel chipsets newer than Windows 98 (ICH2 to ICH10: SMBus, LPC, USB, IDE/SATA, bridges) so Device Manager shows no unknown devices, and sets them up with Windows' own drivers."
@@ -757,6 +758,18 @@ Section /o "USB flash drives, disks and card readers" SECKEXUMASS
   WriteRegStr HKLM "Software\KernelEx\Components" "KexUmass" "1"
   ;Windows 98 finds drivers by itself only in its INF folder
   !insertmacro KexInfOther_kexumass
+SectionEnd
+
+Section /o "exFAT drives (read-only, experimental)" SECKEXFAT
+  ;not ticked by any install type yet: reading is tested, writing is not done
+  ;KEXFAT.VXD: a file system driver for exFAT (SD cards over 32 GB, most
+  ;sticks sold today); it also gives exFAT partitions a drive letter, which
+  ;Windows 98 does not. It is loaded at boot as a static VxD.
+  !insertmacro KexUpd "fs\exfat\KEXFAT.VXD" "$INSTDIR" "KEXFAT.VXD"
+  SetOutPath "$INSTDIR"
+  WriteRegStr HKLM "System\CurrentControlSet\Services\VxD\KEXFAT" "StaticVxD" "$INSTDIR\KEXFAT.VXD"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexFat" "1"
+  SetRebootFlag true
 SectionEnd
 
 SectionGroupEnd
@@ -1055,6 +1068,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAC97} $(DESC_KEXAC97)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEHCI} $(DESC_KEXEHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXUMASS} $(DESC_KEXUMASS)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXFAT} $(DESC_KEXFAT)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRL} $(DESC_KEXRL)
@@ -1251,6 +1265,11 @@ Section "Uninstall"
     Delete /REBOOTOK "$INSTDIR\kexvmm.exe"
     Delete /REBOOTOK "$INSTDIR\KEXVMM.VXD"
   un_kexvmm_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexFat"
+  StrCmp $0 "1" 0 un_kexfat_done
+    DeleteRegKey HKLM "System\CurrentControlSet\Services\VxD\KEXFAT"
+    Delete /REBOOTOK "$INSTDIR\KEXFAT.VXD"
+  un_kexfat_done:
   ;the driver INFs in Windows' INF folder, so it no longer offers them
   !insertmacro un.KexInfOther_kexpad
   !insertmacro un.KexInfOther_kexata

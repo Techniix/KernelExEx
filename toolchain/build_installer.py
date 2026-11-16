@@ -106,6 +106,7 @@ LAYOUT = {
     "kexwifi/kexwifi.cpl": "core:kexwifi.cpl",
     "kexvmm/kexvmm.exe": "core:kexvmm.exe",
     "kexvmm/KEXVMM.VXD": "core:KEXVMM.VXD",
+    "fs/exfat/KEXFAT.VXD": "core:KEXFAT.VXD",
     "drivers/kexnet/kexvio.sys": "kexnet:kexvio.sys",
     "drivers/kexnet/kexvio.inf": "drivers/kexnet/vio/kexvio.inf",
     "docs/logo/kexex.ico": "docs/logo/kexex.ico",
