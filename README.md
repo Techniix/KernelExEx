@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 16 | [KernelExEx-1.0.0-testbuild16.zip](KernelExEx-1.0.0-testbuild16.zip) | [261e515](https://github.com/Techniix/KernelExEx/commit/261e5158da7b481d6bf2b72654b771799945aaed) | AC'97: codec on the third input (848P Neo2-V); network drivers write a start report to the registry |
 | 15 | [KernelExEx-1.0.0-testbuild15.zip](KernelExEx-1.0.0-testbuild15.zip) | [363439c](https://github.com/Techniix/KernelExEx/commit/363439cd78460a5d5243710db852c185dad5e2e9) | Network/Wi-Fi adapters that fail to start (Code 10) still write KEXNET.LOG |
 | 14 | [KernelExEx-1.0.0-testbuild14.zip](KernelExEx-1.0.0-testbuild14.zip) | [450bd39](https://github.com/Techniix/KernelExEx/commit/450bd399fbf651a2a3b1f9e181e263e185af9e3a) | Realtek LAN: silence the chip before Windows connects its interrupt (suspected boot hang on the RTL8100C) |
 | 13 | [KernelExEx-1.0.0-testbuild13.zip](KernelExEx-1.0.0-testbuild13.zip) | [7ff864c](https://github.com/Techniix/KernelExEx/commit/7ff864c9fdcefd0c0bc1257ada68a90fca066627) | Updating over a running install, Xbox 360-style controllers (8BitDo Ultimate 2C) start and read correctly, AC'97 brings Windows' sound files from the CD, Recommended ticks decided |
