@@ -512,6 +512,23 @@ def build_kexvmm(b: Build):
     run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXVMM.VXD", "--allow", "0x00010000"])
 
 
+def build_kexfatp(b: Build):
+    """KEXFATP.VXD: test-only probe for the exFAT driver's development: logs
+    IFSMgr's mount requests to port 0xE9. Never installed by setup."""
+    d = ROOT / "fs/exfat/win98"
+    tv = ROOT / "toolchain/vxd"
+    objs = b.compile("kexfatp", [d / "kexfat_probe.c"],
+                     [f"-I{tv / 'include'}", "-mgeneral-regs-only", "-fno-jump-tables", "-mno-stack-arg-probe", *COMPAT])
+    defs = b.obj / "defs" / "kexfatp.def"
+    defs.parent.mkdir(parents=True, exist_ok=True)
+    defs.write_text("LIBRARY KEXFATP.dll\nEXPORTS\n    KEXFATP_DDB @1 DATA\n")
+    pe = b.link("kexfatp", objs, ["kexcrt"], base="0x10000000", entry="KEXFATP_CTRL", defs=defs, ext=".pe")
+    out = run([sys.executable, tv / "le_link.py", pe, b.out / "KEXFATP.VXD", "--name", "KEXFATP",
+               "--description", "KernelExEx exFAT probe (test only)"])
+    print("  " + out.strip())
+    run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXFATP.VXD", "--allow", "0x00400001"])
+
+
 def build_vxd(b: Build):
     """VKrnlEx.vxd: compiled as ring-0 code, linked as a PE DLL by lld, then
     converted to the LE format by toolchain/vxd/le_link.py."""
@@ -547,7 +564,7 @@ def build_vxd(b: Build):
 STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "gen": prepare_apilibs,
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
          "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
-         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm}
+         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp}
 
 
 def main():
