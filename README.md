@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 17 | [KernelExEx-1.0.0-testbuild17.zip](KernelExEx-1.0.0-testbuild17.zip) | [ff911a2](https://github.com/Techniix/KernelExEx/commit/ff911a2df3a3678692ae62e741d5f9dcf98273c7) | T2U Plus Code 10 fixed (two transmit queues on one endpoint), found with a simulated RTL8821AU |
 | 16 | [KernelExEx-1.0.0-testbuild16.zip](KernelExEx-1.0.0-testbuild16.zip) | [261e515](https://github.com/Techniix/KernelExEx/commit/261e5158da7b481d6bf2b72654b771799945aaed) | AC'97: codec on the third input (848P Neo2-V); network drivers write a start report to the registry |
 | 15 | [KernelExEx-1.0.0-testbuild15.zip](KernelExEx-1.0.0-testbuild15.zip) | [363439c](https://github.com/Techniix/KernelExEx/commit/363439cd78460a5d5243710db852c185dad5e2e9) | Network/Wi-Fi adapters that fail to start (Code 10) still write KEXNET.LOG |
 | 14 | [KernelExEx-1.0.0-testbuild14.zip](KernelExEx-1.0.0-testbuild14.zip) | [450bd39](https://github.com/Techniix/KernelExEx/commit/450bd399fbf651a2a3b1f9e181e263e185af9e3a) | Realtek LAN: silence the chip before Windows connects its interrupt (suspected boot hang on the RTL8100C) |
