@@ -21,6 +21,16 @@
 ;KernelEx net modules (clang/lld build): copy beside KernelEx and map the
 ;DLL name through KernelEx's KnownDLLs so every process finds it.
 
+;A file a running program may hold open (an .exe, .cpl, .dll or VxD): copy
+;to a temporary name, then replace now, or at the restart if it is in use.
+!macro KexUpd src dir name
+  SetOutPath "${dir}"
+  GetTempFileName $0 "${dir}"
+  File /oname=$0 "${src}"
+  Delete "${dir}\${name}"
+  Rename /REBOOTOK $0 "${dir}\${name}"
+!macroend
+
 !macro NetModule name KEY
   GetTempFileName $0 "$INSTDIR"
   File /oname=$0 net-out\${name}.dll
@@ -63,8 +73,11 @@
   Var StartMenuFolder
 
 ;--------------------------------
-;Install types: what "Recommended" ticks is decided before the first
-;release (README decision 19); "Full" is every component but Protoweb
+;Install types. "Recommended": the software (TLS, APIs, clock sync, XInput),
+;the drivers for USB devices (they only load when one is plugged in), and
+;the PCI drivers for hardware found on this PC. Never by default: the disk
+;driver (it replaces Windows' own IDE driver) and Protoweb.
+;"Full" is every component but Protoweb.
 
   InstType "Recommended"
   InstType "Full (everything except the Protoweb proxy)"
@@ -418,8 +431,9 @@ Section "-Install"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KernelEx" "UninstallString" '"$INSTDIR\uninstall.exe"'
   
   ;Write verifier
+  !insertmacro KexUpd "verify\${FLAVOUR}\verify.exe" "$INSTDIR" "verify.exe"
+  SetOutPath "$INSTDIR"
   SetOverWrite on
-  File verify\${FLAVOUR}\verify.exe
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" \
     "KexVerify" "$INSTDIR\verify.exe"
   SetOverwrite lastused
@@ -669,14 +683,11 @@ LangString DESC_PROTOWEB ${LANG_ENGLISH} "Browse restored 1990s websites. Plain 
 ;Panel icon (kexwifi.cpl), installed with either Wi-Fi driver.
 
 Function KexWifiProgram
-  SetOutPath "$INSTDIR"
-  File "kexwifi\kexwifi.exe"
-  SetOutPath "$SYSDIR"
-  File "kexwifi\kexwifi.cpl"
-  SetOutPath "$INSTDIR"
+  ;the tray icon and an open Control Panel hold these files open
+  !insertmacro KexUpd "kexwifi\kexwifi.exe" "$INSTDIR" "kexwifi.exe"
+  !insertmacro KexUpd "kexwifi\kexwifi.cpl" "$SYSDIR" "kexwifi.cpl"
   ;the .cpl finds kexwifi.exe beside itself: a copy in SYSTEM too
-  SetOutPath "$SYSDIR"
-  File "kexwifi\kexwifi.exe"
+  !insertmacro KexUpd "kexwifi\kexwifi.exe" "$SYSDIR" "kexwifi.exe"
   SetOutPath "$INSTDIR"
   ReadRegDWORD $0 HKLM "Software\KernelEx\WiFi" "TrayIcon"
   StrCmp $0 "0" +2
@@ -735,7 +746,7 @@ Section /o "USB 2.0 speed" SECKEXEHCI
 SectionEnd
 
 Section /o "USB flash drives, disks and card readers" SECKEXUMASS
-  SectionIn 2
+  SectionIn 1 2
   ;function driver for USB mass storage; Windows' own NTMAP (from the
   ;Windows 98 SE CD) connects the disks to Windows
   SetOutPath "$INSTDIR\drivers\usbstor"
@@ -779,7 +790,47 @@ Section /o "AC'97 onboard sound" SECKEXAC97
   WriteRegStr HKLM "Software\KernelEx\Components" "KexAc97" "1"
   ;Windows 98 finds drivers by itself only in its INF folder
   !insertmacro KexInfOther_kexac97
+  ;Windows' WDM audio files (PortCls and friends) come from the Windows CD
+  IfFileExists "$WINDIR\system32\drivers\portcls.sys" ac97_wdm_ok
+    Call KexAc97Repair
+    MessageBox MB_ICONINFORMATION|MB_OK "Your PC has not had a WDM sound driver before. When Windows sets up the sound card (after the restart), it asks for the Windows 98 CD for its sound system files (portcls.sys and others). Have the CD ready, or point Windows to the folder that holds its setup files (for example C:\WINDOWS\OPTIONS\CABS)." /SD IDOK
+  ac97_wdm_ok:
 SectionEnd
+
+;A sound device that our earlier builds set up without Windows' WDM audio
+;files cannot start (Code 2). Detect it again at the restart, so it is set
+;up again from the new INF, which brings those files along.
+Function KexAc97Repair
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R4
+  StrCpy $R0 0
+  kar_loop:
+    EnumRegKey $R1 HKLM "Enum\PCI" $R0
+    StrCmp $R1 "" kar_done
+    IntOp $R0 $R0 + 1
+    StrCpy $R2 0
+    kar_inst:
+      EnumRegKey $R3 HKLM "Enum\PCI\$R1" $R2
+      StrCmp $R3 "" kar_loop
+      IntOp $R2 $R2 + 1
+      ReadRegStr $R4 HKLM "Enum\PCI\$R1\$R3" "Driver"
+      StrCmp $R4 "" kar_inst
+      ReadRegStr $R4 HKLM "System\CurrentControlSet\Services\Class\$R4" "NTMPDriver"
+      StrCmp $R4 "kexac97.sys" 0 kar_inst
+        DetailPrint "Will set up again: PCI\$R1"
+        DeleteRegKey HKLM "Enum\PCI\$R1\$R3"
+        IntOp $R2 $R2 - 1
+        Goto kar_inst
+  kar_done:
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
 
 SectionGroupEnd
 
@@ -815,7 +866,7 @@ Section /o "Intel PRO/1000 (gigabit)" SECKEXEM
 SectionEnd
 
 Section /o "USB Ethernet adapters (CDC Ethernet)" SECKEXCDCE
-  SectionIn 2
+  SectionIn 1 2
   SetOutPath "$INSTDIR\drivers\kexcdce"
   File "drivers\kexnet\kexcdce.sys"
   File "drivers\kexnet\kexbsd.sys"
@@ -828,7 +879,7 @@ Section /o "USB Ethernet adapters (CDC Ethernet)" SECKEXCDCE
 SectionEnd
 
 Section /o "USB tethering (Android) and RNDIS adapters" SECKEXRNDIS
-  SectionIn 2
+  SectionIn 1 2
   SetOutPath "$INSTDIR\drivers\kexrndis"
   File "drivers\kexnet\kexrndis.sys"
   File "drivers\kexnet\kexbsd.sys"
@@ -844,7 +895,7 @@ SectionGroupEnd
 
 SectionGroup "Wi-Fi" SECGRPWIFI
 Section /o "Realtek USB Wi-Fi (TP-Link Archer T2U family and others)" SECKEXRTWN
-  SectionIn 2
+  SectionIn 1 2
   SetOutPath "$INSTDIR\drivers\kexrtwn"
   File "drivers\kexnet\kexrtwn.sys"
   File "drivers\kexnet\kexbsd.sys"
@@ -872,7 +923,7 @@ Section /o "Realtek USB Wi-Fi (TP-Link Archer T2U family and others)" SECKEXRTWN
 SectionEnd
 
 Section /o "Realtek USB Wi-Fi, older adapters" SECKEXURTWN
-  SectionIn 2
+  SectionIn 1 2
   SetOutPath "$INSTDIR\drivers\kexurtwn"
   File "drivers\kexnet\kexurtwn.sys"
   File "drivers\kexnet\kexbsd.sys"
@@ -915,10 +966,10 @@ Section /o "Mouse integration (QEMU and VMware)" SECKEXVMM
   SectionIn 2
   ;kexvmm.exe: the pointer follows the host's mouse, no capture needed;
   ;it does nothing (and exits) outside QEMU and VMware
-  SetOutPath "$INSTDIR"
-  File "kexvmm\kexvmm.exe"
+  !insertmacro KexUpd "kexvmm\kexvmm.exe" "$INSTDIR" "kexvmm.exe"
   ;its ring-0 half: Windows 98 traps the backdoor port for programs
-  File "kexvmm\KEXVMM.VXD"
+  !insertmacro KexUpd "kexvmm\KEXVMM.VXD" "$INSTDIR" "KEXVMM.VXD"
+  SetOutPath "$INSTDIR"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexVmMouse" '"$INSTDIR\kexvmm.exe"'
   WriteRegStr HKLM "Software\KernelEx\Components" "KexVmm" "1"
 SectionEnd
@@ -928,13 +979,12 @@ SectionGroup "Game controllers" SECGAMEPAD
 Section "XInput for modern games" SECXINPUT
   SectionIn 1 2
   ;xinput1_3.dll on top of the joystick API, with SDL-style mappings
-  SetOutPath "$SYSDIR"
-  File "net-out\xinput1_3.dll"
+  !insertmacro KexUpd "net-out\xinput1_3.dll" "$SYSDIR" "xinput1_3.dll"
   ;one DLL answers to every XInput name games link against
-  File "/oname=xinput1_1.dll" "net-out\xinput1_3.dll"
-  File "/oname=xinput1_2.dll" "net-out\xinput1_3.dll"
-  File "/oname=xinput1_4.dll" "net-out\xinput1_3.dll"
-  File "/oname=xinput9_1_0.dll" "net-out\xinput1_3.dll"
+  !insertmacro KexUpd "net-out\xinput1_3.dll" "$SYSDIR" "xinput1_1.dll"
+  !insertmacro KexUpd "net-out\xinput1_3.dll" "$SYSDIR" "xinput1_2.dll"
+  !insertmacro KexUpd "net-out\xinput1_3.dll" "$SYSDIR" "xinput1_4.dll"
+  !insertmacro KexUpd "net-out\xinput1_3.dll" "$SYSDIR" "xinput9_1_0.dll"
   WriteRegStr HKLM "Software\KernelEx\Components" "XInput" "1"
   SetOutPath "$INSTDIR\gamepad"
   File "input\gamepad\gamecontrollerdb.txt"
@@ -959,10 +1009,10 @@ SectionGroupEnd
 
 SectionGroup "Internet" SECGRPINET
 Section /o "Keep the clock right (internet time)" SECTIMESYNC
-  SectionIn 2
+  SectionIn 1 2
   ;kexntp.exe: SNTP from several servers, median, sanity checks
+  !insertmacro KexUpd "net-out\kexntp.exe" "$INSTDIR" "kexntp.exe"
   SetOutPath "$INSTDIR"
-  File "net-out\kexntp.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KernelExEx TimeSync" '"$INSTDIR\kexntp.exe"'
   WriteRegDWORD HKLM "Software\KernelEx\TimeSync" "Enabled" 1
   WriteRegStr HKLM "Software\KernelEx\Components" "TimeSync" "1"
@@ -1340,10 +1390,49 @@ Function DetectDowngrade
 FunctionEnd
 
 ;--------------------------------
-;Hardware found on this PC: its components say so on the Components page
-;(they are not ticked by themselves; README decision 19)
+;Hardware found on this PC: its components say so on the Components page,
+;and "Recommended" ticks them (the disk driver is never marked)
 
-;$R8: subkey of HKLM\Enum\PCI starting with this text? 1/0 in $R9
+;Devices Windows has recorded in HKLM\Enum\PCI. That includes cards taken out
+;since (a driver ticked for one costs a little disk space: it loads only for
+;its device), but HKEY_DYN_DATA would miss a card whose New Hardware wizard
+;was cancelled, which Windows only records once it has a driver.
+;KexPciScan: $R7 = mode (0: ID starts with, 1: ID contains, 2: compatible
+;IDs contain), $R8 = the text; 1/0 in $R9. The ID is "VEN_...&DEV_...".
+Function KexPciScan
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  StrCpy $R9 0
+  StrCpy $R0 0
+  kps_loop:
+    EnumRegKey $R2 HKLM "Enum\PCI" $R0
+    StrCmp $R2 "" kps_done
+    IntOp $R0 $R0 + 1
+    EnumRegKey $R1 HKLM "Enum\PCI\$R2" 0
+    StrCmp $R1 "" kps_loop
+    StrCmp $R7 0 0 kps_contains
+      StrLen $R3 $R8
+      StrCpy $R3 $R2 $R3
+      StrCmp $R3 $R8 kps_found kps_loop
+    kps_contains:
+    StrCmp $R7 2 0 +2
+      ReadRegStr $R2 HKLM "Enum\PCI\$R2\$R1" "CompatibleIDs"
+    ClearErrors
+    ${WordFind} "$R2" "$R8" "E+1{" $R3
+    IfErrors kps_loop
+  kps_found:
+    StrCpy $R9 1
+  kps_done:
+  ClearErrors
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
+;a PCI device whose ID starts with this text: $R9
 !macro KexPciHas prefix
   Push "${prefix}"
   Call KexPciHas
@@ -1351,82 +1440,41 @@ FunctionEnd
 
 Function KexPciHas
   Exch $R8
-  Push $R0
-  Push $R1
-  Push $R2
-  StrLen $R2 $R8
-  StrCpy $R9 0
-  StrCpy $R0 0
-  kph_loop:
-    EnumRegKey $R1 HKLM "Enum\PCI" $R0
-    StrCmp $R1 "" kph_done
-    IntOp $R0 $R0 + 1
-    StrCpy $R1 $R1 $R2
-    StrCmp $R1 $R8 0 kph_loop
-    StrCpy $R9 1
-  kph_done:
-  Pop $R2
-  Pop $R1
-  Pop $R0
+  Push $R7
+  StrCpy $R7 0
+  Call KexPciScan
+  Pop $R7
   Pop $R8
 FunctionEnd
 
-;any PCI device whose name contains this text (e.g. a subsystem ID): $R9
+;a PCI device whose ID contains this text (e.g. a subsystem ID): $R9
 Function KexPciNameHas
   Exch $R8
-  Push $R0
-  Push $R1
-  Push $R2
-  StrCpy $R9 0
-  StrCpy $R0 0
-  kpn_loop:
-    EnumRegKey $R1 HKLM "Enum\PCI" $R0
-    StrCmp $R1 "" kpn_done
-    IntOp $R0 $R0 + 1
-    ClearErrors
-    ${WordFind} "$R1" "$R8" "E+1{" $R2
-    IfErrors kpn_loop
-    StrCpy $R9 1
-  kpn_done:
-  ClearErrors
-  Pop $R2
-  Pop $R1
-  Pop $R0
+  Push $R7
+  StrCpy $R7 1
+  Call KexPciScan
+  Pop $R7
   Pop $R8
 FunctionEnd
 
-;any PCI device whose compatible IDs contain this text (a class code): $R9
+;a PCI device whose compatible IDs contain this text (a class code): $R9
 Function KexPciClass
   Exch $R8
-  Push $R0
-  Push $R1
-  Push $R2
-  Push $R3
-  StrCpy $R9 0
-  StrCpy $R0 0
-  kpc_loop:
-    EnumRegKey $R1 HKLM "Enum\PCI" $R0
-    StrCmp $R1 "" kpc_done
-    IntOp $R0 $R0 + 1
-    EnumRegKey $R2 HKLM "Enum\PCI\$R1" 0
-    StrCmp $R2 "" kpc_loop
-    ReadRegStr $R3 HKLM "Enum\PCI\$R1\$R2" "CompatibleIDs"
-    ClearErrors
-    ${WordFind} "$R3" "$R8" "E+1{" $R2
-    IfErrors kpc_loop
-    StrCpy $R9 1
-  kpc_done:
-  ClearErrors
-  Pop $R3
-  Pop $R2
-  Pop $R1
-  Pop $R0
+  Push $R7
+  StrCpy $R7 2
+  Call KexPciScan
+  Pop $R7
   Pop $R8
 FunctionEnd
 
+;marks a driver whose hardware is in this PC and makes it part of
+;"Recommended" (install type 1; .onInit applies the type afterwards)
 !macro KexMarkFound sec
   SectionGetText ${sec} $R7
   SectionSetText ${sec} "$R7 - found on this PC"
+  SectionGetInstTypes ${sec} $R7
+  IntOp $R7 $R7 | 1
+  SectionSetInstTypes ${sec} $R7
 !macroend
 
 Function KexFindHardware
@@ -1451,6 +1499,21 @@ Function KexFindHardware
   kfh_vio:
     !insertmacro KexMarkFound ${SECKEXVIO}
   kfh_novio:
+  ;Intel PRO/1000: Intel's 10xx device IDs are its gigabit adapters
+  Push "VEN_8086&DEV_10"
+  Call KexPciNameHas
+  StrCmp $R9 1 0 kfh_noem
+    !insertmacro KexMarkFound ${SECKEXEM}
+  kfh_noem:
+  ;Intel chipset: an Intel ISA/LPC bridge
+  Push "VEN_8086"
+  Call KexPciNameHas
+  StrCmp $R9 1 0 kfh_nochip
+  Push "CC_0601"
+  Call KexPciClass
+  StrCmp $R9 1 0 kfh_nochip
+    !insertmacro KexMarkFound ${SECKEXCHIP}
+  kfh_nochip:
   ;QEMU (its VGA, its PCI devices) or VMware
   !insertmacro KexPciHas "VEN_1234&DEV_1111"
   StrCmp $R9 1 kfh_vm
@@ -1496,6 +1559,8 @@ Function .onInit
   Call DetectOldKex
   Call DetectDowngrade
   Call KexFindHardware
+  ;"Recommended" again, now with the drivers for hardware found on this PC
+  SetCurInstType 0
 
 FunctionEnd
 

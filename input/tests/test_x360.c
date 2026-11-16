@@ -38,6 +38,8 @@ int main(void)
 	/* idle */
 	CHECK(x360_translate(pkt, 20, r) == 1);
 	CHECK(r[0] == 0 && r[1] == 0 && r[2] == 8);
+	CHECK(r[3] == 0x00 && r[4] == 0x80);     /* X centred: 32768 of 0..65535 */
+	CHECK(r[5] == 0xFF && r[6] == 0x7F);     /* Y centred (32767: Y is flipped) */
 
 	/* A + guide, dpad up+right, left stick full up, right stick full left, triggers */
 	pkt[3] = 0x10 | 0x04;
@@ -48,14 +50,14 @@ int main(void)
 	CHECK(x360_translate(pkt, 20, r) == 1);
 	CHECK(r[0] == 0x01 && r[1] == 0x04);     /* button 1 and button 11 */
 	CHECK(r[2] == 1);                         /* up-right */
-	CHECK(r[5] == 0x01 && r[6] == 0x80);     /* Y = -32767 (HID: up is negative) */
-	CHECK(r[7] == 0x00 && r[8] == 0x80);     /* Rx = -32768 */
+	CHECK(r[5] == 0x00 && r[6] == 0x00);     /* Y = 0 (HID: up is small) */
+	CHECK(r[7] == 0x00 && r[8] == 0x00);     /* Rx = 0, full left */
 	CHECK(r[11] == 200 && r[12] == 17);
 
-	/* LY = -32768 (fully down) maps to +32767, not overflow */
+	/* LY = -32768 (fully down) maps to 65535 */
 	pkt[8] = 0x00; pkt[9] = 0x80;
 	x360_translate(pkt, 20, r);
-	CHECK(r[5] == 0xFF && r[6] == 0x7F);
+	CHECK(r[5] == 0xFF && r[6] == 0xFF);
 
 	/* other packet types and short packets are not input */
 	pkt[0] = 0x01; pkt[1] = 0x03;

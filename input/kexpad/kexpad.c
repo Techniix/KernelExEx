@@ -159,16 +159,18 @@ static void send_out(PDEVICE_OBJECT fdo, const unsigned char *data, ULONG len)
 
 /* ---- device start ----------------------------------------------------- */
 
+#define MAX_IF 8
+
 static NTSTATUS select_config(PDEVICE_OBJECT fdo)
 {
 	PAD *p = pad_of(fdo);
 	USB_CONFIGURATION_DESCRIPTOR head;
 	PUSB_CONFIGURATION_DESCRIPTOR cfg;
 	PUSB_INTERFACE_DESCRIPTOR ifd;
-	USBD_INTERFACE_LIST_ENTRY list[2];
+	USBD_INTERFACE_LIST_ENTRY list[MAX_IF + 1];
 	PURB urb;
 	NTSTATUS st;
-	ULONG got, i;
+	ULONG got, i, n, pad_if;
 
 	st = get_descriptor(fdo, USB_DEVICE_DESCRIPTOR_TYPE, &p->dev, sizeof(p->dev), &got);
 	if (!NT_SUCCESS(st))
@@ -194,10 +196,32 @@ static NTSTATUS select_config(PDEVICE_OBJECT fdo)
 		ExFreePool(cfg);
 		return STATUS_DEVICE_CONFIGURATION_ERROR;
 	}
-	list[0].InterfaceDescriptor = ifd;
-	list[0].Interface = NULL;
-	list[1].InterfaceDescriptor = NULL;
-	list[1].Interface = NULL;
+	/* USBD selects a configuration only with every one of its interfaces in
+	 * the request (an Xbox 360 pad has four: pad, headset, plug-in module,
+	 * security); the pad's pipes are then taken from its own entry */
+	n = 0;
+	pad_if = 0;
+	for (i = 0; i < cfg->bNumInterfaces && n < MAX_IF; i++)
+	{
+		PUSB_INTERFACE_DESCRIPTOR d = USBD_ParseConfigurationDescriptorEx(cfg, cfg, (LONG) i, 0, -1, -1, -1);
+		if (!d)
+			continue;
+		if (d == ifd)
+			pad_if = n;
+		list[n].InterfaceDescriptor = d;
+		list[n].Interface = NULL;
+		n++;
+	}
+	if (!n || list[pad_if].InterfaceDescriptor != ifd)
+	{
+		/* interface numbers not 0..n-1: the pad's interface alone */
+		list[0].InterfaceDescriptor = ifd;
+		list[0].Interface = NULL;
+		n = 1;
+		pad_if = 0;
+	}
+	list[n].InterfaceDescriptor = NULL;
+	list[n].Interface = NULL;
 	urb = USBD_CreateConfigurationRequestEx(cfg, list);
 	if (!urb)
 	{
@@ -207,7 +231,7 @@ static NTSTATUS select_config(PDEVICE_OBJECT fdo)
 	st = submit_urb_sync(fdo, urb);
 	if (NT_SUCCESS(st))
 	{
-		PUSBD_INTERFACE_INFORMATION info = list[0].Interface;
+		PUSBD_INTERFACE_INFORMATION info = list[pad_if].Interface;
 		for (i = 0; i < info->NumberOfPipes; i++)
 		{
 			PUSBD_PIPE_INFORMATION pi = &info->Pipes[i];

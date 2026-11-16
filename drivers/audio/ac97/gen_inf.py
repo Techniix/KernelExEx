@@ -44,7 +44,7 @@ def main():
     for v, p, _ in DEVS:
         L.append(f"%a{v:04X}{p:04X}%=KexAc97,PCI\\VEN_{v:04X}&DEV_{p:04X}")
     L += ["", "[KexAc97]", "Include=ks.inf, wdmaudio.inf", "Needs=KS.Registration, WDMAUDIO.Registration",
-          "CopyFiles=KexAc97.CopyList", "AddReg=KexAc97.AddReg", "",
+          "CopyFiles=KexAc97.CopyList,KexAc97.WdmDrv,KexAc97.WdmSys", "AddReg=KexAc97.AddReg", "",
           "[KexAc97.Interfaces]",
           "AddInterface=%KSCATEGORY_AUDIO%,%KSNAME_Wave%,KexAc97.Interface.Wave",
           "AddInterface=%KSCATEGORY_RENDER%,%KSNAME_Wave%,KexAc97.Interface.Wave",
@@ -64,7 +64,14 @@ def main():
           "HKR,Drivers\\midi\\wdmaud.drv,Description,,%MIDI%",
           "HKR,Drivers\\mixer\\wdmaud.drv,Description,,%Desc%", "",
           "[KexAc97.CopyList]", "kexac97.sys", "",
-          "[DestinationDirs]", "KexAc97.CopyList=10,system32\\drivers", "",
+          # Windows' own WDM audio files, from the Windows 98 CD (layout*.inf).
+          # On 98 SE wdmaudio.inf copies them only later, from a RunOnce entry
+          # at the next logon; listed here, a PC that never had a WDM sound
+          # card asks for the CD now and the driver starts straight away.
+          "[KexAc97.WdmDrv]", "portcls.sys", "stream.sys", "ks.sys", "kmixer.sys", "sysaudio.sys",
+          "swmidi.sys", "wdmaud.sys", "redbook.sys", "sbemul.sys", "",
+          "[KexAc97.WdmSys]", "wdmaud.drv", "ksuser.dll", "",
+          "[DestinationDirs]", "KexAc97.CopyList=10,system32\\drivers", "KexAc97.WdmDrv=10,system32\\drivers", "KexAc97.WdmSys=11", "",
           "[SourceDisksNames]", "1=%DISK%,,", "", "[SourceDisksFiles]", "kexac97.sys=1", "",
           "[Strings]", 'KEX="KernelExEx"', 'DISK="KernelExEx drivers"', 'Desc="AC\'97 Audio (KernelExEx)"',
           'MIDI="AC\'97 Audio MIDI (software synthesizer)"', 'Wave.szPname="AC\'97 Audio"',

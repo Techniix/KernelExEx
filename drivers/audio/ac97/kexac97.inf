@@ -37,7 +37,7 @@ DriverVer=11/11/2026, 1.0.0.0
 [KexAc97]
 Include=ks.inf, wdmaudio.inf
 Needs=KS.Registration, WDMAUDIO.Registration
-CopyFiles=KexAc97.CopyList
+CopyFiles=KexAc97.CopyList,KexAc97.WdmDrv,KexAc97.WdmSys
 AddReg=KexAc97.AddReg
 
 [KexAc97.Interfaces]
@@ -74,8 +74,25 @@ HKR,Drivers\mixer\wdmaud.drv,Description,,%Desc%
 [KexAc97.CopyList]
 kexac97.sys
 
+[KexAc97.WdmDrv]
+portcls.sys
+stream.sys
+ks.sys
+kmixer.sys
+sysaudio.sys
+swmidi.sys
+wdmaud.sys
+redbook.sys
+sbemul.sys
+
+[KexAc97.WdmSys]
+wdmaud.drv
+ksuser.dll
+
 [DestinationDirs]
 KexAc97.CopyList=10,system32\drivers
+KexAc97.WdmDrv=10,system32\drivers
+KexAc97.WdmSys=11
 
 [SourceDisksNames]
 1=%DISK%,,

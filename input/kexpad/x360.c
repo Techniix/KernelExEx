@@ -36,10 +36,12 @@ const unsigned char x360_report_descriptor[] = {
 	0x09, 0x31,             /*     Usage (Y) */
 	0x09, 0x33,             /*     Usage (Rx) */
 	0x09, 0x34,             /*     Usage (Ry) */
-	0x16, 0x00, 0x80,       /*     Logical Minimum (-32768) */
-	0x26, 0xFF, 0x7F,       /*     Logical Maximum (32767) */
-	0x36, 0x00, 0x80,       /*     Physical Minimum (-32768) */
-	0x46, 0xFF, 0x7F,       /*     Physical Maximum (32767) */
+	/* unsigned: Windows 98's HID joystick driver (JOYHID) gets signed
+	 * ranges wrong, every value lands at one end */
+	0x15, 0x00,             /*     Logical Minimum (0) */
+	0x27, 0xFF, 0xFF, 0x00, 0x00, /* Logical Maximum (65535) */
+	0x35, 0x00,             /*     Physical Minimum (0) */
+	0x47, 0xFF, 0xFF, 0x00, 0x00, /* Physical Maximum (65535) */
 	0x75, 0x10,             /*     Report Size (16) */
 	0x95, 0x04,             /*     Report Count (4) */
 	0x81, 0x02,             /*     Input (Data, Variable, Absolute) */
@@ -105,12 +107,14 @@ int x360_translate(const unsigned char *pkt, unsigned len, unsigned char report[
 	else hat = 8;
 	report[2] = (unsigned char) hat;
 
-	put16(report + 3, s16(pkt + 6));            /* X */
-	y = s16(pkt + 8);                            /* controller: up = positive */
-	put16(report + 5, y == -32768 ? 32767 : -y);
-	put16(report + 7, s16(pkt + 10));           /* Rx */
+	/* 0..65535 with 32768 the centre; the controller's Y is up = positive,
+	 * HID's is down = larger */
+	put16(report + 3, s16(pkt + 6) + 32768);    /* X */
+	y = s16(pkt + 8);
+	put16(report + 5, 32767 - y);
+	put16(report + 7, s16(pkt + 10) + 32768);   /* Rx */
 	y = s16(pkt + 12);
-	put16(report + 9, y == -32768 ? 32767 : -y);
+	put16(report + 9, 32767 - y);
 	report[11] = pkt[4];                         /* LT */
 	report[12] = pkt[5];                         /* RT */
 	return 1;

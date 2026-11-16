@@ -174,8 +174,14 @@ list.
 19. **Every optional feature is a checkbox** on the installer's components
     page; only the core is mandatory. Features that act per program can also
     be switched per program on the KernelEx tab of a program's Properties.
-    Which boxes are ticked by default will be settled before the first
-    release.
+    "Recommended" (decided in test build 13) ticks the software (TLS and
+    crypto, the newer APIs, clock sync, XInput), every driver for USB
+    devices (Wi-Fi with the Wi-Fi program, USB storage, Xbox-style pads,
+    tethering, USB Ethernet: each loads only when its device is plugged
+    in, so a new adapter works the first time), and the drivers for PCI
+    hardware Windows has recorded in this PC. Never ticked by default: the
+    disk driver (it replaces Windows' own IDE driver, boot disk included)
+    and the Protoweb proxy.
 20. **No Microsoft redistributables required.** MSLU is no longer offered
     for download, so `kexuni.dll` implements the 208 functions KernelEx
     forwarded to it. A real `unicows.dll`, if installed, is still preferred.
@@ -335,6 +341,18 @@ list.
       the system stopped. USB drivers' timers run on their worker thread.
     - NTKERN spinlocks do not keep out Windows 98's interrupt-time
       callbacks: short queue locks turn interrupts off instead.
+    - (test build 13) USBD selects a configuration only with all of its
+      interfaces in the request: a driver for one interface of a
+      multi-interface device (an Xbox 360 pad has four) lists them all and
+      takes its own pipes. Otherwise the device stops with Code 10.
+    - (test build 13) On 98 SE, `WDMAUDIO.Registration` does not copy
+      Windows' WDM audio files (PortCls, KMixer and the rest); its RunOnce
+      entry copies them only at the next logon. A WDM sound driver lists
+      them in its own CopyFiles, so Windows asks for the CD while it sets
+      the card up and the driver can start at once.
+    - Setup replaces files a running program may hold (the Wi-Fi tray,
+      an open Control Panel, clock sync, XInput in a game) through a
+      temporary name, at the restart if needed (`KexUpd` in the script).
 
 ## Installer components
 
@@ -342,33 +360,33 @@ Setup groups the components (Hardware drivers: Disks and USB, Chipset and
 sound, Network adapters, Wi-Fi; Virtual machines; Game controllers;
 Internet) and offers three install types: Recommended, Full (everything but
 the Protoweb proxy) and KernelEx only. Components for hardware it finds in
-the PC are marked "found on this PC". What Recommended ticks is decided
-before 1.0.0.
+the PC are marked "found on this PC". Recommended ticks the software, the
+drivers for USB devices and the drivers for hardware found (decision 19).
 
 | Component | Contents | Status | Ticked by default |
 |---|---|---|---|
 | KernelEx core | Core, `kexbases`, `kexbasen`, VxD, Properties tab | builds | always installed |
-| Modern TLS and crypto | `kextls`, `winhttp`, `bcrypt`, root certificates | builds | to be decided |
-| Vista/7 APIs | `kexrt` | builds | to be decided |
-| Clock sync | `kexntp.exe`: several servers, median, sanity checks | builds, in installer | to be decided |
+| Modern TLS and crypto | `kextls`, `winhttp`, `bcrypt`, root certificates | builds | yes |
+| Vista/7 APIs | `kexrt` | builds | yes |
+| Clock sync | `kexntp.exe`: several servers, median, sanity checks | builds, in installer | yes |
 | Root certificate updates | signed updater | planned | to be decided |
 | Protoweb proxy | IE proxy for HTTP and FTP | in installer script | no (decided) |
 | RetroZilla | browser with Protoweb settings | planned | to be decided |
-| XInput | `xinput1_1`-`1_4`, `xinput9_1_0`, controller database | builds, in installer | to be decided |
-| Xbox controller driver | `kexpad.sys`, 360 protocol (173 pads); later One/Series | builds, in installer; untested on hardware | to be decided |
-| Intel PRO/1000 driver | `kexem.sys` + `kexbsd.sys`: OpenBSD em(4) through kexbsd, 192 adapters | DHCP + ping in QEMU (e1000); untested on hardware | to be decided |
-| AC'97 audio | `kexac97.sys`: own GPLv2 WDM audio driver (PortCls WaveCyclic + Topology); Intel ICH to ICH7, nForce 1-4, AMD-8111/768, any AC'97 codec (ALC655 on the 848P Neo2-V) | QEMU AC97: installs, startup and Welcome sounds play (captured and compared with the source WAV), volume icon; untested on hardware | to be decided |
-| USB 2.0 | `kexehci.sys`: own GPLv2 EHCI driver, a complete stack for high-speed devices (control, bulk, interrupt; USB 2.0 hubs with split transactions); full/low-speed devices go to the USB 1.1 controllers and Windows' own drivers. Gives each device a PDO with Windows 98's usual IDs, so Windows' class drivers and ours load unchanged; KernelExEx USB drivers learn they run at high speed. Every EHCI controller (113 named, plus any by PCI class). No isochronous transfers yet | QEMU ICH9 EHCI: Windows' own HID driver runs a high-speed tablet (pointer and buttons), unplug and replug; bulk test with a USB disk: INQUIRY, 4 MB read, 64 KB write/read-back; full-speed device handed to the UHCI companion. Hubs and split transactions untested (QEMU has no USB 2.0 hub) | to be decided |
-| Disks over 128 GB | `kexata.mpd`: own GPLv2 IDE/ATA + ATAPI driver (NT SCSI miniport for Windows 98's SCSIPORT) with 48-bit LBA, bus-master DMA, PIO fallback; replaces ESDI_506.PDR per IDE channel, Windows disk included; disks up to 2 TB | QEMU: 200 GB disk, files read and written past 128 GB by DMA and PIO (76 MB copies compared, host check), boot disk on it without compatibility mode, 120 MB from the CD drive byte-identical. Untested on hardware | to be decided |
-| USB storage | `kexumass.sys`: own GPLv2 USB mass storage driver (Bulk-Only Transport, SCSI), children with Windows 98's `USBSTOR\GenDisk`/`GenCdRom` IDs; Windows' own NTMAP (upper filter, as for 1394 disks) connects them to the disk layer. On Windows' USB 1.1 stack and on kexehci | QEMU: stick installed on the first plug-in, no restart; 76 MB written and compared on USB 1.1 and on USB 2.0 (host check too); unplug and replug while running. Not yet: CBI floppy drives | to be decided |
-| Intel chipset INFs | `kexchip.inf`, `kexide.inf`, `kexuhci.inf` from pci.ids: ICH2 to ICH10, 845 to P45 | QEMU: ICH9 UHCI installs and runs; untested on hardware | to be decided |
-| Realtek RTL8139/810x Ethernet | `kexrl.sys`: own GPLv2 driver; RTL8139/C/C+/D, RTL8100/8100C (MSI 848P Neo2-V onboard), RTL8101L and 19 OEM cards | DHCP, ping 4/4 and 30/30 at 1450 bytes in QEMU (rtl8139); untested on hardware | to be decided |
-| USB RNDIS / phone tethering | `kexrndis.sys`: OpenBSD urndis(4) through kexbsd's USB layer | DHCP + ping in QEMU (usb-net on UHCI); untested on hardware | to be decided |
-| USB CDC Ethernet | `kexcdce.sys`: own GPLv2 CDC ECM driver (OpenBSD cdce is BSD-4) | DHCP + ping in QEMU (usb-net ECM); untested on hardware | to be decided |
-| Wi-Fi program | `kexwifi.exe` (taskbar icon, window) and `kexwifi.cpl` (Control Panel): networks in range with signal and security, connect with a password (WPA2; the key is derived on the PC and only the key is stored), saved networks rejoined by themselves (best in range first), other/hidden networks, disconnect, forget; renews the DHCP address when a connection comes up or moves. Refuses WEP; WPA3-only and Enterprise shown as not supported yet | QEMU, with a simulated radio (`tests/wifi/kexwsim.c`: five access points, a real WPA2 4-way handshake and CCMP both ways, a DHCP router): scan, WPA2 and open connect, address and pings over CCMP, switch network, disconnect/on, forget, rejoin after restart | to be decided |
-| Virtual machines | `kexvio.sys`: virtio network adapter (own driver, legacy virtio-net, as in QEMU/KVM, Proxmox, VirtualBox). `kexvmm.exe` + `KEXVMM.VXD`: mouse integration (vmmouse, QEMU and VMware): the pointer follows the host's | QEMU: virtio found and installed by itself, 60/60 full-size pings, 20 MB in 4.9 s; pointer positioned exactly, clicks and double-clicks | to be decided |
-| Realtek USB Wi-Fi (new chips) | `kexrtwn.sys`: FreeBSD rtwn (RTL8188CU/EU/FU, 8192CU/EU, 8723BU, 8812AU, 8821AU) on OpenBSD net80211; 115 adapters incl. TP-Link Archer T2U/T2U Plus/T2U Nano | loads on 98, declines non-Realtek devices; needs hardware (no USB Wi-Fi in QEMU) | to be decided |
-| Realtek USB Wi-Fi (older) | `kexurtwn.sys`: OpenBSD urtwn + net80211, WPA2-PSK (CCMP) by default; the 20 adapters FreeBSD's table lacks | builds, crypto self-test passes; needs hardware | to be decided |
+| XInput | `xinput1_1`-`1_4`, `xinput9_1_0`, controller database | builds, in installer | yes |
+| Xbox controller driver | `kexpad.sys`, 360 protocol (173 pads, 8BitDo Ultimate/2C included); later One/Series | QEMU, with a simulated wired 360 pad (`tests/usbredir/padsim.c`, four interfaces like the real one): installed by itself from `INF\OTHER`, Game Controllers test page shows buttons and stick; untested on hardware | yes |
+| Intel PRO/1000 driver | `kexem.sys` + `kexbsd.sys`: OpenBSD em(4) through kexbsd, 192 adapters | DHCP + ping in QEMU (e1000); untested on hardware | if found |
+| AC'97 audio | `kexac97.sys`: own GPLv2 WDM audio driver (PortCls WaveCyclic + Topology); Intel ICH to ICH7, nForce 1-4, AMD-8111/768, any AC'97 codec (ALC655 on the 848P Neo2-V) | QEMU AC97: installs, startup and Welcome sounds play (captured and compared with the source WAV), volume icon; untested on hardware | if found |
+| USB 2.0 | `kexehci.sys`: own GPLv2 EHCI driver, a complete stack for high-speed devices (control, bulk, interrupt; USB 2.0 hubs with split transactions); full/low-speed devices go to the USB 1.1 controllers and Windows' own drivers. Gives each device a PDO with Windows 98's usual IDs, so Windows' class drivers and ours load unchanged; KernelExEx USB drivers learn they run at high speed. Every EHCI controller (113 named, plus any by PCI class). No isochronous transfers yet | QEMU ICH9 EHCI: Windows' own HID driver runs a high-speed tablet (pointer and buttons), unplug and replug; bulk test with a USB disk: INQUIRY, 4 MB read, 64 KB write/read-back; full-speed device handed to the UHCI companion. Hubs and split transactions untested (QEMU has no USB 2.0 hub) | if found |
+| Disks over 128 GB | `kexata.mpd`: own GPLv2 IDE/ATA + ATAPI driver (NT SCSI miniport for Windows 98's SCSIPORT) with 48-bit LBA, bus-master DMA, PIO fallback; replaces ESDI_506.PDR per IDE channel, Windows disk included; disks up to 2 TB | QEMU: 200 GB disk, files read and written past 128 GB by DMA and PIO (76 MB copies compared, host check), boot disk on it without compatibility mode, 120 MB from the CD drive byte-identical. Untested on hardware | no (decided) |
+| USB storage | `kexumass.sys`: own GPLv2 USB mass storage driver (Bulk-Only Transport, SCSI), children with Windows 98's `USBSTOR\GenDisk`/`GenCdRom` IDs; Windows' own NTMAP (upper filter, as for 1394 disks) connects them to the disk layer. On Windows' USB 1.1 stack and on kexehci | QEMU: stick installed on the first plug-in, no restart; 76 MB written and compared on USB 1.1 and on USB 2.0 (host check too); unplug and replug while running. Not yet: CBI floppy drives | yes |
+| Intel chipset INFs | `kexchip.inf`, `kexide.inf`, `kexuhci.inf` from pci.ids: ICH2 to ICH10, 845 to P45 | QEMU: ICH9 UHCI installs and runs; untested on hardware | if found (Intel ISA bridge) |
+| Realtek RTL8139/810x Ethernet | `kexrl.sys`: own GPLv2 driver; RTL8139/C/C+/D, RTL8100/8100C (MSI 848P Neo2-V onboard), RTL8101L and 19 OEM cards | DHCP, ping 4/4 and 30/30 at 1450 bytes in QEMU (rtl8139); untested on hardware | if found |
+| USB RNDIS / phone tethering | `kexrndis.sys`: OpenBSD urndis(4) through kexbsd's USB layer | DHCP + ping in QEMU (usb-net on UHCI); untested on hardware | yes |
+| USB CDC Ethernet | `kexcdce.sys`: own GPLv2 CDC ECM driver (OpenBSD cdce is BSD-4) | DHCP + ping in QEMU (usb-net ECM); untested on hardware | yes |
+| Wi-Fi program | `kexwifi.exe` (taskbar icon, window) and `kexwifi.cpl` (Control Panel): networks in range with signal and security, connect with a password (WPA2; the key is derived on the PC and only the key is stored), saved networks rejoined by themselves (best in range first), other/hidden networks, disconnect, forget; renews the DHCP address when a connection comes up or moves. Refuses WEP; WPA3-only and Enterprise shown as not supported yet | QEMU, with a simulated radio (`tests/wifi/kexwsim.c`: five access points, a real WPA2 4-way handshake and CCMP both ways, a DHCP router): scan, WPA2 and open connect, address and pings over CCMP, switch network, disconnect/on, forget, rejoin after restart | with either Wi-Fi driver |
+| Virtual machines | `kexvio.sys`: virtio network adapter (own driver, legacy virtio-net, as in QEMU/KVM, Proxmox, VirtualBox). `kexvmm.exe` + `KEXVMM.VXD`: mouse integration (vmmouse, QEMU and VMware): the pointer follows the host's | QEMU: virtio found and installed by itself, 60/60 full-size pings, 20 MB in 4.9 s; pointer positioned exactly, clicks and double-clicks | if found |
+| Realtek USB Wi-Fi (new chips) | `kexrtwn.sys`: FreeBSD rtwn (RTL8188CU/EU/FU, 8192CU/EU, 8723BU, 8812AU, 8821AU) on OpenBSD net80211; 115 adapters incl. TP-Link Archer T2U/T2U Plus/T2U Nano | loads on 98, declines non-Realtek devices; needs hardware (no USB Wi-Fi in QEMU) | yes |
+| Realtek USB Wi-Fi (older) | `kexurtwn.sys`: OpenBSD urtwn + net80211, WPA2-PSK (CCMP) by default; the 20 adapters FreeBSD's table lacks | builds, crypto self-test passes; needs hardware | yes |
 | Gamepad Configurator | mapping, test, profiles | planned | to be decided |
 | Per-program mixer | audio API library, mixer, tray icon | planned | to be decided |
 | USB audio driver | headsets and microphones | research | to be decided |
