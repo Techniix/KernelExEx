@@ -895,6 +895,7 @@ static int controller_up(NVME *n)
 				can = 1;
 		logf("kexnvme: %u-byte blocks: Windows 98 needs 512 (%s)\n", 1u << n->lba_shift,
 		     can ? "the drive offers a 512-byte format" : "the drive offers no 512-byte format");
+		(void) can;
 		return 0;
 	}
 	/* the I/O queue pairs, completion queue first: 1 with the interrupt (vector 0,
