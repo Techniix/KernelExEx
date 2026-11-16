@@ -26,7 +26,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     extra = (["-DKEX_DEBUGCON"] if a.debugcon else []) + ["-D" + d for d in a.defines]
     rt = wdm.ROOT / "net/rt/w9xrt_div.c"   # 64-bit division helpers
-    drivers = {"kexata": [SRC / "ata" / "kexata.c", rt]}
+    drivers = {"kexata": [SRC / "ata" / "kexata.c", rt], "kexahci": [SRC / "ahci" / "kexahci.c", rt]}
     for name, srcs in drivers.items():
         dout = out / name
         dout.mkdir(exist_ok=True)
