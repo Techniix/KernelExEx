@@ -546,6 +546,40 @@ def build_kexfat(b: Build):
          "--allow", "0x00400001,0x00400036,0x00400012,0x00400013,0x00400014,0x00400039,0x00100004,0x00100007,0x0001004F,0x00010051,0x00010052,0x00010053,0x00010063,0x0001012D,0x00010041"])
 
 
+def build_kexacpi(b: Build):
+    """KEXACPI.VXD: laptop batteries, AC adapter and lid from the firmware's ACPI
+    methods (drivers/acpi), with ACPICA (drivers/acpi/acpica, BSD-3/GPLv2)."""
+    d = ROOT / "drivers/acpi"
+    tv = ROOT / "toolchain/vxd"
+    acpica = d / "acpica"
+    srcs = [d / "kexacpi.c", d / "osl98.c"]
+    for comp in ("dispatcher", "events", "executer", "hardware", "namespace", "parser", "tables", "utilities",
+                 "resources"):
+        srcs += sorted(f for f in (acpica / "components" / comp).glob("*.c") if not f.name.startswith("rsdump"))
+    flags = [f"-I{acpica / 'include'}", f"-I{d}", "-D_KEX98", "-DACPI_LIBRARY_NOT", "-mgeneral-regs-only",
+             "-fno-jump-tables", "-mno-stack-arg-probe", "-Wno-everything"]
+    objs = b.compile("kexacpi", srcs, flags)
+    defs = b.obj / "defs" / "kexacpi.def"
+    defs.parent.mkdir(parents=True, exist_ok=True)
+    defs.write_text("LIBRARY KEXACPI.dll\nEXPORTS\n    KEXACPI_DDB @1 DATA\n")
+    pe = b.link("kexacpi", objs, [], base="0x10000000", entry="KEXACPI_CTRL", defs=defs, ext=".pe")
+    dis = run(["llvm-objdump", "-d", "--no-show-raw-insn", pe])
+    fpu = sorted(set(re.findall(r"^\s+[0-9a-f]+:\s+(f[a-z]+|emms|movq|movd|\w*xmm\w*)\b", dis, re.M)) -
+                 {"fs", "fwait"})
+    if fpu:
+        sys.exit(f"kexacpi: FPU/SIMD instructions in ring-0 code: {fpu}")
+    out = run([sys.executable, tv / "le_link.py", pe, b.out / "KEXACPI.VXD", "--name", "KEXACPI",
+               "--description", "KernelExEx ACPI batteries"])
+    print("  " + out.strip())
+    # _HeapAllocate, _HeapFree, _MapPhysToLinear, Get_System_Time
+    run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXACPI.VXD",
+         "--allow", "0x0001004F,0x00010051,0x0001006C,0x0001003F"])
+    # test client (not shipped)
+    tobjs = b.compile("acpitest", [ROOT / "tests/acpi/acpitest.c"], [f"-I{d}", f"-I{ROOT / 'common'}", *COMPAT])
+    b.link("acpitest", tobjs, ["kexcrt", "kernel32"], base="0x400000", entry="entrypoint", kind="exe",
+           subsystem="console")
+
+
 def build_vxd(b: Build):
     """VKrnlEx.vxd: compiled as ring-0 code, linked as a PE DLL by lld, then
     converted to the LE format by toolchain/vxd/le_link.py."""
@@ -581,7 +615,8 @@ def build_vxd(b: Build):
 STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "gen": prepare_apilibs,
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
          "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
-         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexfat": build_kexfat}
+         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexfat": build_kexfat,
+         "kexacpi": build_kexacpi}
 
 
 def main():
