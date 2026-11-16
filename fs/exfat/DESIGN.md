@@ -102,3 +102,12 @@ any FAT drive: Explorer, programs, long names, reading and writing.
   0x18C, delta_to_ior 0x134, 0x10 = 0x800, 0x14 = 0x20AEB, fsd_entry
   c0049468, 0x1C = d2ea5893, 0x28 = d2ea57d0. Again 0x1C = 0x28 + 0xC3:
   0x28 is the volume's DCB. The probe now dumps it.
+- DCB (from VRP+0x28), matching the DDK's DCB_COMMON: 0x00 physical DCB
+  (itself for the CD; the disk's DCB for the stick's partition, so the
+  stick volume is a logical DCB), 0x04 expansion length, 0x08 calldown
+  pointer, 0x0C next DCB, 0x14/0x15 drive letter / unit (03 = D: for the
+  stick, 04 = E: for the CD), 0x18 VRP back pointer, 0x20 device flags,
+  0x80+ vendor/product strings and the port driver's name (ESDI_506).
+  In the stick's VRP, 0x10 = 0x800 = the partition's first sector (2048).
+- Drive letters move: with the stick attached at boot it was D: and the
+  CD E:. The FSD must take the drive from the request, never assume it.
