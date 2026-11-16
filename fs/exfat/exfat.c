@@ -23,6 +23,7 @@ struct exfat_vol
 {
 	struct exfat_dev dev;
 	int ro;
+	int boot_stamped;   /* sector 0 carries a Windows 9x time stamp (see stamped_boot) */
 	uint32_t sec_shift, spc_shift;
 	uint32_t sec_size, cl_size;
 	uint32_t fat_off, fat_len, heap_off;
@@ -1222,6 +1223,35 @@ static uint32_t boot_checksum(const uint8_t *sectors, uint32_t sec_size)
 	return cs;
 }
 
+/* Windows 95 OSR2 and 98 write a time stamp into the first sector of a hard
+ * disk, at 0xDA..0xDF, without looking at what is there. On a disk with no
+ * partition table that sector is the exFAT boot sector, and its checksum no
+ * longer matches. Such a volume is still good when the backup boot region
+ * (sectors 12..23) checks out and differs from the main one only in those
+ * bytes (and in the fields the checksum leaves out). */
+static int stamped_boot(exfat_vol *v, const uint8_t *main_region)
+{
+	uint32_t n = 12 * v->sec_size, i, cs;
+	uint8_t *bak = (uint8_t *) v->dev.alloc(v->dev.ctx, n);
+	int ok = 0;
+	if (!bak)
+		return 0;
+	if (!v->dev.read(v->dev.ctx, 12, 12, bak))
+	{
+		cs = boot_checksum(bak, v->sec_size);
+		ok = 1;
+		for (i = 0; i < v->sec_size / 4 && ok; i++)
+			ok = g32(bak + 11 * v->sec_size + i * 4) == cs;
+		for (i = 0; i < 11 * v->sec_size && ok; i++)
+			if (main_region[i] != bak[i] && i != 106 && i != 107 && i != 112 && !(i >= 0xDA && i <= 0xDF))
+				ok = 0;
+	}
+	v->dev.free(v->dev.ctx, bak);
+	if (ok)
+		v->boot_stamped = 1;
+	return ok;
+}
+
 static int load_upcase(exfat_vol *v, uint32_t first, uint64_t len)
 {
 	struct chain c;
@@ -1375,7 +1405,9 @@ int exfat_mount(exfat_vol **pv, const struct exfat_dev *dev, int readonly)
 	cs = boot_checksum(boot, v->sec_size);
 	for (i = 0; i < v->sec_size / 4; i++)
 		if (g32(boot + 11 * v->sec_size + i * 4) != cs)
-			goto fail;
+			break;
+	if (i < v->sec_size / 4 && !stamped_boot(v, boot))
+		goto fail;
 	v->fat_off = g32(boot + 80);
 	v->fat_len = g32(boot + 84);
 	v->heap_off = g32(boot + 88);

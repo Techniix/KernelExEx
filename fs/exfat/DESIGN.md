@@ -209,3 +209,46 @@ Next (stage 2): getdiskinfo, getdiskparms, fileattrib (get), findopen +
 find handle functions, open + read + close; then match the volume to its
 partition exactly (the logical DCB or the VRP should say which partition
 it is, instead of "first exFAT not yet mounted"); _PageFree on unmount.
+
+### Stage 2 and the drive letters (16 Nov, night)
+
+- **Reading works** (volume functions on the core, see kexfat.c): DIR,
+  TYPE, COPY, wildcards, Explorer with long names; times through
+  IFSMgr_DosToWin32Time. Writes answer ERROR_WRITE_PROTECT for now.
+- **Letters.** KEXFAT registers with IOS (IOS_Register, packed 0x38-byte
+  DRP, load group VSD 9, feature DRP_FC_1_SEC) and gets every AEP. IOS's
+  own logical DCBs (C:'s) are: physical DCB, the TSD's calldown entry and
+  then the disk's chain, partition start at 0x28, type at 0x3D, 'BC' at
+  0x3E. For a type-07 partition (or a whole disk) whose boot sector says
+  EXFAT, KEXFAT does ISP_CREATE_DCB (0x140), fills it the same way with the
+  disk's own chain, ISP_DRIVE_LETTER_PICK, ISP_ASSOCIATE_DCB: Explorer and
+  DOS show the letter and IFSMgr sends the mount. Fixed disks are scanned at
+  AEP_BOOT_COMPLETE; disks that arrive later (USB sticks) at the next
+  AEP_1_SEC. On AEP_UNCONFIG_DCB (stick pulled) the volume stops all I/O
+  and the letter is released (ISP_DISASSOCIATE_DCB): "invalid drive".
+- **Routing.** IOS routes IOR_vol_designtr: 0..25 through its letter
+  table, 0x80 + n through its disk table (BIOS disks first, then disks
+  found later, a USB stick for one, which has no BIOS number: it was 0x82),
+  0..7 with IORF_PHYS_CMD through a third table (the floppy). The disk
+  table answers ISP_GET_DCB with IORF_PHYS_CMD in the drive number, which
+  is how KEXFAT finds a disk's designator.
+- **Calldown conventions** (from IOS's own code): a layer gets the IOP at
+  [esp+4]; it passes down with IOP_calldown_ptr (+0x10) = entry->next
+  (+0x0C) and calls [entry]; it registers a callback by storing it at
+  IOP_callback_ptr (+0x14) and adding 8; a request is completed by
+  subtracting 8 from IOP_callback_ptr and calling the entry there with the
+  IOP. KEXFAT puts a small filter (ISP_INSERT_CALLDOWN, packed 24-byte
+  packet) on every disk.
+- **Windows 98 time-stamps sector 0 of hard disks** (bytes 0xDA..0xDF:
+  drive number and the boot time in BCD). On a disk without a partition
+  table that is the exFAT boot sector, and its checksum breaks: Linux's
+  fsck.exfat calls the boot region corrupted. The write happens before
+  KEXFAT can see it (neither the IOS filter nor a V86 INT 13h hook caught
+  it; real mode up to ScanDisk leaves the disk alone, so it is early in the
+  protected-mode boot, before KEXFAT loads). The core now accepts such a
+  boot region when the backup region (sectors 12..23) checks out and the
+  main one differs from it only there. Partitioned disks are not affected
+  (sector 0 is the MBR, where the stamp belongs). TODO: find the writer;
+  repair the main region from the backup when the volume is first written.
+
+Next: stage 3, writing; then the installer component.

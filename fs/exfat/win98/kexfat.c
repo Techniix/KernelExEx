@@ -89,6 +89,7 @@ struct kvol
 	ULONG phys_handle;  /* the disk's physical DCB */
 	ULONG part_start;   /* the partition's first sector (VRP 0x10) */
 	int physical;       /* read through the disk, not the volume */
+	volatile int gone;  /* the disk was removed: every request fails */
 	UCHAR unit;         /* the disk's BIOS-style number (0x80 + n): IOS routes by IOR_vol_designtr */
 	UCHAR drive;
 	USHORT max_req;
@@ -173,6 +174,11 @@ static int ios_rw(struct kvol *v, ULONG func, ULONG sector, ULONG count, void *b
 
 static int ios_rw1(struct kvol *v, ULONG func, ULONG sector, ULONG count, void *buf, USHORT *st)
 {
+	if (v->gone)
+	{
+		*st = 0x17;   /* IORS_NO_DEVICE */
+		return -1;
+	}
 	UCHAR *ior = v->iop + v->delta;
 	ULONG esi = (ULONG) ior, edi = v->physical ? v->phys_handle : v->dev_handle;
 	USHORT status;
@@ -232,7 +238,7 @@ static int n_disks;
 
 /* the logical DCBs we made, and what they are */
 #define MAX_OWN 8
-static struct { ULONG dcb; UCHAR unit; ULONG pdcb; ULONG start; } own[MAX_OWN];
+static struct { ULONG dcb; UCHAR unit; UCHAR letter; ULONG pdcb; ULONG start; struct kvol *vol; } own[MAX_OWN];
 static int n_own;
 
 static int is_own(UCHAR unit, ULONG start)
@@ -285,6 +291,7 @@ static int find_volume(struct kvol *v, ULONG ldcb, UCHAR *sec)
 		{
 			v->unit = own[i].unit;
 			v->phys_handle = own[i].pdcb;
+			own[i].vol = v;
 			if (try_at(v, own[i].unit, own[i].start, sec))
 				goto found;
 			v->physical = 0;
@@ -1215,6 +1222,7 @@ struct ilb
 #define AEP_INITIALIZE 0
 #define AEP_BOOT_COMPLETE 2
 #define AEP_CONFIG_DCB 3
+#define AEP_UNCONFIG_DCB 4
 #define AEP_1_SEC 8
 #define DRP_FC_1_SEC 0x2000
 
@@ -1361,6 +1369,8 @@ static void add_volume(ULONG pdcb, UCHAR unit, ULONG start, ULONG count)
 		own[n_own].dcb = dcb;
 		own[n_own].unit = unit;
 		own[n_own].pdcb = pdcb;
+		own[n_own].letter = letter;
+		own[n_own].vol = NULL;
 		own[n_own].start = start;
 		n_own++;
 	}
@@ -1454,12 +1464,194 @@ static void scan_disks(void)
 static ULONG pending[MAX_DISKS];
 static int n_pending;
 
+#define ISP_INSERT_CALLDOWN 5
+#define ISP_DISASSOCIATE_DCB 15
+
+/* ---- the calldown filter on every disk --------------------------------------------------
+ * Windows 98 writes a time stamp into sector 0 of a disk (bytes 0xDA..0xDF,
+ * where an MBR has none of its own data). On a disk with no partition table
+ * sector 0 is the exFAT boot sector, whose checksum that breaks (seen in
+ * QEMU: the volume no longer mounts anywhere). So a write of one sector to
+ * sector 0 that carries an exFAT boot sector, from anyone but KEXFAT, is
+ * answered "done" without going to the disk. Everything else passes. */
+static ULONG n_dropped;
+
+__attribute__((used)) int __cdecl filter_c(UCHAR *iop)
+{
+	UCHAR *ior = iop + 0x64;
+	ULONG flags = *(ULONG *) (ior + 0x08);
+	if (*(USHORT *) (ior + 4) == IOR_WRITE && *(ULONG *) (ior + 0x10) == 0 && *(ULONG *) (ior + 0x14) == 0 &&
+	    *(ULONG *) (ior + 0x18) == 1 && !(flags & 0x00000202u) /* scatter-gather, bytes */ &&
+	    *(ULONG *) (ior + 0x0C) != (ULONG) io_done)
+	{
+		UCHAR *buf = (UCHAR *) *(ULONG *) (ior + 0x1C);
+		if ((ULONG) buf >= 0x00400000u && !memcmp(buf + 3, "EXFAT   ", 8))
+		{
+			n_dropped++;
+			outs("kexfat: kept a write off an exFAT boot sector\r\n");
+			*(USHORT *) (ior + 6) = 0;   /* IORS_SUCCESS */
+			return 1;
+		}
+	}
+	return 0;
+}
+
+__attribute__((naked)) void filter(void)
+{
+	__asm__("movl 4(%esp), %eax\n\t"
+	        "pushl %eax\n\t"
+	        "call _filter_c\n\t"
+	        "popl %edx\n\t"
+	        "testl %eax, %eax\n\t"
+	        "jnz 1f\n\t"
+	        /* pass down: the next entry of the calldown list */
+	        "movl 0x10(%edx), %ecx\n\t"
+	        "movl 0x0c(%ecx), %ecx\n\t"
+	        "movl %ecx, 0x10(%edx)\n\t"
+	        "pushl %edx\n\t"
+	        "call *(%ecx)\n\t"
+	        "addl $4, %esp\n\t"
+	        "ret\n"
+	        /* done here: up through the callback list */
+	        "1:\n\t"
+	        "movl 0x14(%edx), %ecx\n\t"
+	        "subl $8, %ecx\n\t"
+	        "movl %ecx, 0x14(%edx)\n\t"
+	        "pushl %edx\n\t"
+	        "call *(%ecx)\n\t"
+	        "addl $4, %esp\n\t"
+	        "ret");
+}
+
+/* The same, for the time stamp written through the BIOS (V86 INT 13h, early
+ * in boot while the real-mode mapper still drives the disks): a write of
+ * one sector to the first sector of a hard disk that carries an exFAT boot
+ * sector is answered "done" without calling the BIOS. */
+#define CRS_EBX 0x10
+#define CRS_EDX 0x14
+#define CRS_ECX 0x18
+#define CRS_EAX 0x1C
+#define CRS_EFLAGS 0x2C
+#define CRS_ES 0x38
+#define CRS_DS 0x3C
+#define CRS_ESI 0x04
+
+__attribute__((used)) int __cdecl int13_c(ULONG vm, UCHAR *crs)
+{
+	ULONG eax = *(ULONG *) (crs + CRS_EAX), high = *(ULONG *) (vm + 4);   /* CB_High_Linear */
+	UCHAR ah = (UCHAR) (eax >> 8), dl = *(UCHAR *) (crs + CRS_EDX);
+	UCHAR *buf = NULL;
+	if (dl < 0x80)
+		return 0;
+	if (ah == 0x03 && (UCHAR) eax == 1 && *(USHORT *) (crs + CRS_ECX) == 0x0001 && *(UCHAR *) (crs + CRS_EDX + 1) == 0)
+		buf = (UCHAR *) (high + (*(USHORT *) (crs + CRS_ES) << 4) + *(USHORT *) (crs + CRS_EBX));
+	else if (ah == 0x43)
+	{
+		UCHAR *dap = (UCHAR *) (high + (*(USHORT *) (crs + CRS_DS) << 4) + *(USHORT *) (crs + CRS_ESI));
+		if (*(USHORT *) (dap + 2) == 1 && *(ULONG *) (dap + 8) == 0 && *(ULONG *) (dap + 12) == 0)
+			buf = (UCHAR *) (high + (*(USHORT *) (dap + 6) << 4) + *(USHORT *) (dap + 4));
+	}
+	if (!buf || memcmp(buf + 3, "EXFAT   ", 8))
+		return 0;
+	outs("kexfat: kept a BIOS write off an exFAT boot sector, disk ");
+	outx(dl, 2);
+	outs("\r\n");
+	*(UCHAR *) (crs + CRS_EAX + 1) = 0;            /* AH = 0: success */
+	*(ULONG *) (crs + CRS_EFLAGS) &= ~1u;          /* CF clear */
+	return 1;
+}
+
+__attribute__((naked)) void int13_hook(void)
+{
+	/* EBX = VM, EBP = client registers; carry clear: handled, set: next handler */
+	__asm__("pushal\n\t"
+	        "pushl %ebp\n\t"
+	        "pushl %ebx\n\t"
+	        "call _int13_c\n\t"
+	        "addl $8, %esp\n\t"
+	        "testl %eax, %eax\n\t"
+	        "popal\n\t"
+	        "jz 1f\n\t"
+	        "clc\n\t"
+	        "ret\n"
+	        "1:\n\t"
+	        "stc\n\t"
+	        "ret");
+}
+
+static void hook_int13(void)
+{
+	__asm__ __volatile__("int $0x20\n\t"
+	                     ".long 0x00010041"   /* Hook_V86_Int_Chain */
+	                     :
+	                     : "a"(0x13), "S"(int13_hook)
+	                     : "memory", "cc");
+}
+
+static void insert_filter(ULONG dcb, ULONG ddb)
+{
+	UCHAR pk[24];
+	int r;
+	memset(pk, 0, sizeof pk);
+	*(USHORT *) pk = ISP_INSERT_CALLDOWN;
+	*(ULONG *) (pk + 4) = dcb;
+	*(ULONG *) (pk + 8) = (ULONG) filter;
+	*(ULONG *) (pk + 12) = ddb;
+	pk[0x16] = 0x11;   /* our load group: vendor layer 9 */
+	r = isp_call(pk);
+	outs("kexfat: filter on disk dcb ");
+	outx(dcb, 8);
+	outs(": ");
+	outx(r, 4);
+	outs("\r\n");
+}
+#define ISP_DESTROY_DCB 10
+
+/* a disk went away (a stick pulled out): its volumes stop doing I/O at once,
+ * so a later disk that takes its designator is never read or written in
+ * their name, and their letters go */
+static void disk_gone(ULONG pdcb)
+{
+	int i, j;
+	for (i = 0; i < n_disks; i++)
+		if (disks[i] == pdcb)
+		{
+			disks[i] = disks[--n_disks];
+			break;
+		}
+	for (i = 0; i < n_pending; i++)
+		if (pending[i] == pdcb)
+			pending[i--] = pending[--n_pending];
+	for (i = 0; i < n_own; i++)
+	{
+		ULONG pk[2];
+		if (own[i].pdcb != pdcb)
+			continue;
+		if (own[i].vol)
+			own[i].vol->gone = 1;
+		outs("kexfat: disk removed, letter ");
+		outx(own[i].letter, 2);
+		pk[0] = ISP_DISASSOCIATE_DCB;
+		pk[1] = own[i].letter;
+		outs(" disassociate ");
+		outx((ULONG) isp_call(pk), 4);
+		outs("\r\n");
+		/* forget the volume in the mount list too */
+		for (j = 0; j < n_mounted; j++)
+			if (mounted[j].unit == own[i].unit && mounted[j].start == own[i].start)
+				mounted[j--] = mounted[--n_mounted];
+		own[i--] = own[--n_own];
+	}
+}
+
 __attribute__((used)) void __cdecl aer_c(UCHAR *aep)
 {
 	USHORT func = *(USHORT *) aep;
 	if (func == AEP_CONFIG_DCB)
 	{
 		ULONG dcb = *(ULONG *) (aep + 0x0C);
+		if (dcb >= 0xC0000000u && *(ULONG *) dcb == dcb && *(UCHAR *) (dcb + 0x40) == 0)
+			insert_filter(dcb, *(ULONG *) (aep + 4));
 		if (dcb >= 0xC0000000u && *(ULONG *) dcb == dcb)
 		{
 			outs("kexfat: config physical dcb ");
@@ -1489,6 +1681,8 @@ __attribute__((used)) void __cdecl aer_c(UCHAR *aep)
 			outs("\r\n");
 		}
 	}
+	if (func == AEP_UNCONFIG_DCB)
+		disk_gone(*(ULONG *) (aep + 0x0C));
 	if (func == AEP_BOOT_COMPLETE && !boot_done++)
 		scan_disks();
 	if (func == AEP_1_SEC && n_pending)
@@ -1531,6 +1725,7 @@ static void ios_register(void)
 static void init(void)
 {
 	int id;
+	hook_int13();
 	ios_register();
 	__asm__ __volatile__("pushl %3\n\t"
 	                     "pushl %2\n\t"
