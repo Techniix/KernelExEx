@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 20 | [KernelExEx-1.0.0-testbuild20.zip](KernelExEx-1.0.0-testbuild20.zip) | [fb6849a](https://github.com/Techniix/KernelExEx/commit/fb6849a569a3aaa3050f35b586a458668f2b1b27) | SATA AHCI and NVMe SSD drivers (newer PCs) |
 | 19 | [KernelExEx-1.0.0-testbuild19.zip](KernelExEx-1.0.0-testbuild19.zip) | [bdfd925](https://github.com/Techniix/KernelExEx/commit/bdfd925e56614b8953d27305d0b593d9454cf419) | exFAT: fix for an occasional hang (use instead of 18) |
 | 18 | [KernelExEx-1.0.0-testbuild18.zip](KernelExEx-1.0.0-testbuild18.zip) | [12b57c9](https://github.com/Techniix/KernelExEx/commit/12b57c910faf256030b37a51d87750123f5b49c8) | exFAT cards and sticks: drive letters and reading (optional, read-only) |
 | 17 | [KernelExEx-1.0.0-testbuild17.zip](KernelExEx-1.0.0-testbuild17.zip) | [ff911a2](https://github.com/Techniix/KernelExEx/commit/ff911a2df3a3678692ae62e741d5f9dcf98273c7) | T2U Plus Code 10 fixed (two transmit queues on one endpoint), found with a simulated RTL8821AU |
