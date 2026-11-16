@@ -66,6 +66,140 @@ static int sys_ptr(ULONG p)
 
 static ULONG mounts;
 
+/* ---- watching the I/O requests other drivers send ------------------------------------ */
+__attribute__((used)) ULONG prev_send;   /* IOS_SendCommand before our hook */
+__attribute__((used)) ULONG orig_fsd_entry;   /* the VRPs' fsd_entry (one IOS routine) */
+static ULONG n_send, n_fsd;
+
+struct pushal_regs;
+static int armed;   /* set by the first mount request: boot-time traffic is not logged */
+__attribute__((used)) ULONG cb_orig;   /* the callback the logged requests carry */
+static ULONG n_cb;
+void cb_hook(void);
+
+__attribute__((used)) void __cdecl log_send(ULONG ior, ULONG dcb)
+{
+	if (!armed || ++n_send > 30)
+		return;
+	/* follow the completion: the callback is wrapped once we know its target */
+	if (sys_ptr(ior) && sys_ptr(*(ULONG *) (ior + 0x0C)))
+	{
+		ULONG cb = *(ULONG *) (ior + 0x0C);
+		if (!cb_orig)
+			cb_orig = cb;
+		if (cb == cb_orig)
+			*(ULONG *) (ior + 0x0C) = (ULONG) cb_hook;
+	}
+	outs("IOS_SendCommand #");
+	outx(n_send, 2);
+	outs(" dcb ");
+	outx(dcb, 8);
+	if (sys_ptr(dcb))
+	{
+		outs(" drive ");
+		outx(*(UCHAR *) (dcb + 0x14), 2);
+	}
+	outs("\r\n");
+	if (sys_ptr(ior))
+		dump("  ior", (void *) ior, 0x58);
+}
+
+/* the registers as pushal left them, then the caller's return address and arguments */
+struct pushal
+{
+	ULONG edi, esi, ebp, esp, ebx, edx, ecx, eax;
+	ULONG ret, arg1, arg2, arg3;
+};
+
+__attribute__((used)) void __cdecl log_fsd(struct pushal *r)
+{
+	if (++n_fsd > 24)
+		return;
+	outs("fsd_entry #");
+	outx(n_fsd, 2);
+	outs(" ret ");
+	outx(r->ret, 8);
+	outs(" args ");
+	outx(r->arg1, 8);
+	outc(' ');
+	outx(r->arg2, 8);
+	outs(" eax ");
+	outx(r->eax, 8);
+	outs(" esi ");
+	outx(r->esi, 8);
+	outs(" edi ");
+	outx(r->edi, 8);
+	outs("\r\n");
+	if (sys_ptr(r->arg1))
+		dump("  arg1", (void *) r->arg1, 0x18C);
+}
+
+struct pushal_regs
+{
+	ULONG edi, esi, ebp, esp, ebx, edx, ecx, eax;
+	ULONG ret, arg1, arg2;
+};
+
+__attribute__((used)) void __cdecl log_cb(struct pushal_regs *r)
+{
+	if (++n_cb > 30)
+		return;
+	outs("callback #");
+	outx(n_cb, 2);
+	outs(" eax ");
+	outx(r->eax, 8);
+	outs(" ebx ");
+	outx(r->ebx, 8);
+	outs(" ecx ");
+	outx(r->ecx, 8);
+	outs(" edx ");
+	outx(r->edx, 8);
+	outs(" esi ");
+	outx(r->esi, 8);
+	outs(" edi ");
+	outx(r->edi, 8);
+	outs(" ebp ");
+	outx(r->ebp, 8);
+	outs(" ret ");
+	outx(r->ret, 8);
+	outs(" arg1 ");
+	outx(r->arg1, 8);
+	outs("\r\n");
+	if (sys_ptr(r->esi))
+		dump("  esi", (void *) r->esi, 0x20);
+}
+
+__attribute__((naked)) void cb_hook(void)
+{
+	__asm__("pushal\n\t"
+	        "pushl %esp\n\t"
+	        "call _log_cb\n\t"
+	        "addl $4, %esp\n\t"
+	        "popal\n\t"
+	        "jmp *_cb_orig");
+}
+
+__attribute__((naked)) void send_hook(void)
+{
+	__asm__("pushal\n\t"
+	        "pushl %edi\n\t"
+	        "pushl %esi\n\t"
+	        "call _log_send\n\t"
+	        "addl $8, %esp\n\t"
+	        "popal\n\t"
+	        "jmp *_prev_send");
+}
+
+__attribute__((naked)) void fsd_entry_hook(void)
+{
+	__asm__("pushal\n\t"
+	        "pushl %esp\n\t"
+	        "call _log_fsd\n\t"
+	        "addl $4, %esp\n\t"
+	        "popal\n\t"
+	        "jmp *_orig_fsd_entry");
+}
+
 static void maybe_dump(const char *what, ULONG p, ULONG n)
 {
 	if (sys_ptr(p))
@@ -78,6 +212,7 @@ static int __cdecl probe_mount(UCHAR *pir)
 	 * volume's IOS parameters (VRP), ir_aux2 (0x28) is the drive number
 	 * (3 = D:), ir_rh (0x1C) and ir_fh (0x20) are IFSMgr structures */
 	ULONG vrp = *(ULONG *) (pir + 0x10);
+	armed = 1;
 	outs("kexfatp: mount #");
 	outx(++mounts, 4);
 	outs(" flags ");
@@ -93,6 +228,17 @@ static int __cdecl probe_mount(UCHAR *pir)
 		maybe_dump("dcb(vrp+28)", *(ULONG *) (vrp + 0x28), 0x100);
 	}
 	maybe_dump("rh", *(ULONG *) (pir + 0x1C), 0x40);
+	/* watch what the FSD that takes this volume sends through its VRP */
+	if (sys_ptr(vrp))
+	{
+		ULONG *fe = (ULONG *) (vrp + 0x18);
+		if (*fe != (ULONG) fsd_entry_hook)
+		{
+			orig_fsd_entry = *fe;
+			*fe = (ULONG) fsd_entry_hook;
+			outs("kexfatp: fsd_entry wrapped\r\n");
+		}
+	}
 	/* not ours: ERROR_UNRECOGNIZED_VOLUME, so IFSMgr asks the next FSD */
 	*(short *) (pir + 0x1A) = 1005;
 	return 1005;
@@ -111,6 +257,23 @@ static void init(void)
 	                     : "=a"(id)
 	                     : "r"(probe_mount), "r"(IFSMGRVERSION), "r"(NORMAL_FSD)
 	                     : "ecx", "edx", "memory", "cc");
+	{
+		/* Hook_Device_Service(IOS_SendCommand): the old handler comes back
+		 * in ESI; interrupts off so no request runs through the hook first */
+		ULONG eax = 0x00100004, esi = (ULONG) send_hook;
+		__asm__ __volatile__("pushfl\n\t"
+		                     "cli\n\t"
+		                     "int $0x20\n\t"
+		                     ".long 0x00010090\n\t"
+		                     "movl %%esi, _prev_send\n\t"
+		                     "popfl"
+		                     : "+a"(eax), "+S"(esi)
+		                     :
+		                     : "ecx", "edx", "memory", "cc");
+		outs("kexfatp: IOS_SendCommand hooked, previous ");
+		outx(prev_send, 8);
+		outs("\r\n");
+	}
 	outs("kexfatp: provider id ");
 	outx((ULONG) id, 8);
 	outs("\r\n");

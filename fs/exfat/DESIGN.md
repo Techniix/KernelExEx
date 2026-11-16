@@ -111,3 +111,18 @@ any FAT drive: Explorer, programs, long names, reading and writing.
   In the stick's VRP, 0x10 = 0x800 = the partition's first sector (2048).
 - Drive letters move: with the stick attached at boot it was D: and the
   CD E:. The FSD must take the drive from the request, never assume it.
+- **IOR, as IOS receives it (`IOS_SendCommand` hooked)**: the DDK layout
+  holds: 0x00 next, 0x04 func (0 read, 1 write, 0x0D media check),
+  0x06 status, 0x08 flags, 0x0C callback, 0x10 start sector (64-bit),
+  0x18 count (sectors), 0x1C buffer (or the SGD list), 0x20
+  private_client (= the VRP's delta_to_ior), 0x24 IOS private (the IOP),
+  0x44 req_vol_handle, 0x48 sgd_lin_phys, 0x4C num_sgds, 0x4D drive
+  (0 = A:). Flags seen: 0x400 on every request (version 2), 0x2 with an
+  SGD list, 0x8 on volume requests (start sector counted from the
+  partition), 0x1 on boot-time reads. EDI = the VRP's 0x1C value.
+- **Completion**: IOS calls the IOR's callback with ESI = the IOR, EDI =
+  the DCB, EAX = the IOP. The FSD's wait: the callback sets a flag; the
+  requesting thread calls IFSMgr_Yield until it is set (no lost wakeup,
+  no semaphore service needed).
+- VFAT is asked before KEXFAT for FAT volumes (it took the FAT stick and
+  KEXFAT never saw it); CDFS after KEXFAT (the CD came to KEXFAT first).
