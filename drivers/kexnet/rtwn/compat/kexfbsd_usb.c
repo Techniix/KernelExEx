@@ -209,7 +209,11 @@ static int find_endpoint(struct usb_device *udev, uint8_t iface_index, const str
 	{
 		struct usb_endpoint_descriptor *ed = udev->endpoints[i].edesc;
 		uint8_t addr;
-		if (!ed || udev->endpoints[i].iface_index != iface_index || used[i])
+		/* an endpoint named outright may carry several transfers, as in
+		 * FreeBSD (rtwn puts its BE and BK queues on one bulk-out pipe);
+		 * "any endpoint" picks among the ones not taken yet */
+		if (!ed || udev->endpoints[i].iface_index != iface_index ||
+		    (used[i] && c->endpoint == UE_ADDR_ANY))
 			continue;
 		addr = ed->bEndpointAddress;
 		if ((ed->bmAttributes & UE_XFERTYPE) != c->type)

@@ -20,3 +20,15 @@ Windows makes and every packet the driver sends (LED, rumble).
 
 Plug it in after Windows has started: a `usb-redir` device present from boot
 is not needed, and hot plugging is what a user does.
+
+`rtwnsim.c` is a Realtek RTL8821AU stick (the TP-Link Archer T2U Plus,
+2357:0120: its endpoints, a register file behind Realtek's vendor request,
+the eFuse read protocol, a firmware download that succeeds), at USB 2.0
+high speed or USB 1.1 full speed. kexrtwn.sys attaches to it, downloads
+its firmware, starts and scans, on Windows' USB 1.1 stack and on kexehci.
+No radio. It found the T2U Plus's Code 10 (two transmit queues on one
+bulk-out endpoint, which our FreeBSD USB layer refused).
+
+    ./rtwnsim listen:/tmp/wifi.sock high      # or full; -v logs registers
+    chardev-add socket,id=wifi,path=/tmp/wifi.sock
+    device_add usb-redir,chardev=wifi,id=wifi0,bus=ehci.0
