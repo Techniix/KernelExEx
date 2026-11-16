@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 22 | [KernelExEx-1.0.0-testbuild22.zip](KernelExEx-1.0.0-testbuild22.zip) | [7e2172d](https://github.com/Techniix/KernelExEx/commit/7e2172df89b89200c341730ddaaabc471511ee0d) | Laptop battery: KEXACPI.VXD (ACPICA) reads _BIX/_BIF/_BST, _PSR, _LID; kexpower taskbar icon and window, low-battery warning, shutdown when nearly empty, lid action |
 | 21 | [KernelExEx-1.0.0-testbuild21.zip](KernelExEx-1.0.0-testbuild21.zip) | [c546420](https://github.com/Techniix/KernelExEx/commit/c546420acddc8850fea9a161800dc8ca95f5a62b) | AHCI and NVMe: interrupts and several commands at once (NCQ); Windows can start from an AHCI disk; an NVMe SSD the BIOS uses is left to the BIOS |
 | 20 | [KernelExEx-1.0.0-testbuild20.zip](KernelExEx-1.0.0-testbuild20.zip) | [fb6849a](https://github.com/Techniix/KernelExEx/commit/fb6849a569a3aaa3050f35b586a458668f2b1b27) | SATA AHCI and NVMe SSD drivers (newer PCs) |
 | 19 | [KernelExEx-1.0.0-testbuild19.zip](KernelExEx-1.0.0-testbuild19.zip) | [bdfd925](https://github.com/Techniix/KernelExEx/commit/bdfd925e56614b8953d27305d0b593d9454cf419) | exFAT: fix for an occasional hang (use instead of 18) |
