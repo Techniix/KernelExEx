@@ -83,3 +83,13 @@ any FAT drive: Explorer, programs, long names, reading and writing.
   IOS's disk TSD reads its sector 0 as an MBR (it ends in 55 AA) with no
   partitions. So the drive-letter layer (step 4) is needed for sticks as
   well as for type-07 partitions; it comes before mounting can be tested.
+- The VRP for D: (ATAPI CD, ESDI_506) read as the DDK layout: demand 0,
+  event 0x80, max_sgd 1, max_req_size 0xBC, delta_to_ior 0x64,
+  block_size 0x200, fsd_hvol 0, fsd_entry c0049468 (in IOS),
+  0x1C = d2ea55c3 (not aligned: a handle, not the DCB), 0x24 a pointer,
+  0x28 = d2ea5500 (aligned: the logical DCB, to be confirmed by reading
+  its signature). Next session: dump 0x28's target and check the DCB
+  layout before building IORs.
+- The probe was asked about D: three times (it declined each time) and
+  never about a FAT USB stick's drive, which VFAT took first: the order
+  in which IFSMgr asks FSDs is still to be pinned down.
