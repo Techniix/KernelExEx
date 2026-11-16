@@ -90,7 +90,11 @@ static int guid_eq(REFIID a, const GUID *b)
 #define CR_IOCE 0x10
 #define CNT_COLD 0x00000002   /* 1: out of cold reset */
 #define CNT_WARM 0x00000004
-#define STA_PCR 0x00000100    /* primary codec ready */
+#define STA_PCR 0x00000100    /* codec ready on AC_SDIN0 */
+#define STA_SCR 0x00000200    /* ... on AC_SDIN1 */
+#define STA_TCR 0x10000000    /* ... on AC_SDIN2 (ICH4 and later) */
+#define STA_READY (STA_PCR | STA_SCR | STA_TCR)
+#define STA_RCS 0x00008000    /* a codec read timed out (write 1 to clear) */
 #define STA_POINT 0x00000040  /* PCM out interrupt */
 /* the codec (NAMBAR) */
 #define AC97_RESET 0x00
@@ -121,6 +125,7 @@ typedef struct adapter
 {
 	PUCHAR mixer;     /* NAMBAR */
 	PUCHAR bm;        /* NABMBAR */
+	UCHAR cbase;      /* the codec's registers in NAMBAR: 0 (codec ID 0) or 0x80 (ID 1) */
 	KSPIN_LOCK codec_lock;
 	USHORT vendor1, vendor2;
 	USHORT master;    /* shadow of AC97_MASTER */
@@ -152,7 +157,7 @@ static USHORT codec_read(ADAPTER *ad, UCHAR reg)
 	USHORT v;
 	KeAcquireSpinLock(&ad->codec_lock, &irql);
 	codec_wait(ad);
-	v = READ_PORT_USHORT((PUSHORT) (ad->mixer + reg));
+	v = READ_PORT_USHORT((PUSHORT) (ad->mixer + ad->cbase + reg));
 	KeReleaseSpinLock(&ad->codec_lock, irql);
 	return v;
 }
@@ -162,7 +167,7 @@ static void codec_write(ADAPTER *ad, UCHAR reg, USHORT v)
 	KIRQL irql;
 	KeAcquireSpinLock(&ad->codec_lock, &irql);
 	codec_wait(ad);
-	WRITE_PORT_USHORT((PUSHORT) (ad->mixer + reg), v);
+	WRITE_PORT_USHORT((PUSHORT) (ad->mixer + ad->cbase + reg), v);
 	KeReleaseSpinLock(&ad->codec_lock, irql);
 }
 
@@ -180,7 +185,9 @@ static NTSTATUS hw_init(ADAPTER *ad)
 	WRITE_PORT_ULONG((PULONG) (ad->bm + GLOB_CNT), cnt);
 	for (i = 0; i < 500; i++)   /* the spec allows a long wait for the codec */
 	{
-		if (READ_PORT_ULONG((PULONG) (ad->bm + GLOB_STA)) & STA_PCR)
+		/* boards wire the codec to any of the SDATA_IN lines: the MSI 848P
+		 * Neo2-V's ALC655 reports on the third (GLOB_STA 10700000) */
+		if (READ_PORT_ULONG((PULONG) (ad->bm + GLOB_STA)) & STA_READY)
 			break;
 		KeStallExecutionProcessor(1000);
 	}
@@ -189,6 +196,26 @@ static NTSTATUS hw_init(ADAPTER *ad)
 		DPRINT("kexac97: no codec ready (GLOB_STA %08lx)\n", READ_PORT_ULONG((PULONG) (ad->bm + GLOB_STA)));
 		return STATUS_DEVICE_NOT_READY;
 	}
+	DPRINT("kexac97: codec ready (GLOB_STA %08lx)\n", READ_PORT_ULONG((PULONG) (ad->bm + GLOB_STA)));
+	/* which register window answers: the codec's ID (its strap pins), not
+	 * its SDATA_IN line, decides; a read of an absent ID times out (RCS) */
+	ad->cbase = 0;
+	for (i = 0; i < 2; i++)
+	{
+		USHORT v;
+		WRITE_PORT_ULONG((PULONG) (ad->bm + GLOB_STA), STA_RCS);
+		v = codec_read(ad, AC97_VENDOR1);
+		if (!(READ_PORT_ULONG((PULONG) (ad->bm + GLOB_STA)) & STA_RCS) && v != 0xffff && v != 0)
+			break;
+		ad->cbase = 0x80;
+	}
+	if (i == 2)
+	{
+		DPRINT("kexac97: no codec answers at ID 0 or 1\n");
+		ad->cbase = 0;
+	}
+	else
+		DPRINT("kexac97: codec at ID %d\n", i);
 	codec_write(ad, AC97_RESET, 0);
 	for (i = 0; i < 500; i++)
 	{

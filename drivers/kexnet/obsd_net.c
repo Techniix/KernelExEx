@@ -182,6 +182,57 @@ static void log_flush(void *arg)
 		obsd_write_file("KEXNET.LOG", log_buf, (size_t) n);
 }
 
+/* the same log in the registry, HKLM\Software\KernelEx\Diag, value named
+ * after the driver: the registry needs no file access, so it works at any
+ * time, also for an adapter that fails while Windows is still starting.
+ * Written when the driver loads and when an adapter's start ends. */
+static WCHAR diag_w[sizeof(log_buf) + 128];
+
+static void diag_save(const char *stage)
+{
+	static const WCHAR *const keys[] = { L"\\Registry\\Machine\\Software\\KernelEx",
+	                                     L"\\Registry\\Machine\\Software\\KernelEx\\Diag" };
+	UNICODE_STRING us;
+	OBJECT_ATTRIBUTES oa;
+	HANDLE h;
+	ULONG disp, k = 0;
+	WCHAR name[24];
+	const char *p;
+	int i, n;
+	for (p = stage; *p && k < 120; p++)
+		diag_w[k++] = (WCHAR) (UCHAR) *p;
+	diag_w[k++] = '\r';
+	diag_w[k++] = '\n';
+	n = kexbsd_log_tail(log_buf, sizeof(log_buf));
+	for (i = 0; i < n && k + 2 < sizeof(diag_w) / sizeof(diag_w[0]); i++)
+	{
+		if (log_buf[i] == '\n')
+			diag_w[k++] = '\r';
+		diag_w[k++] = (WCHAR) (UCHAR) log_buf[i];
+	}
+	diag_w[k] = 0;
+	for (i = 0; i < 2; i++)
+	{
+		RtlInitUnicodeString(&us, keys[i]);
+		InitializeObjectAttributes(&oa, &us, OBJ_CASE_INSENSITIVE, NULL, NULL);
+		if (!NT_SUCCESS(ZwCreateKey(&h, KEY_ALL_ACCESS, &oa, 0, NULL, REG_OPTION_NON_VOLATILE, &disp)))
+			return;
+		if (i == 1)
+		{
+			const char *dn = the_driver ? the_driver->name : "kexnet";
+			int j = 0;
+			for (p = "kexnet-"; *p; p++)
+				name[j++] = (WCHAR) *p;
+			for (p = dn; *p && j < 22; p++)
+				name[j++] = (WCHAR) *p;
+			name[j] = 0;
+			RtlInitUnicodeString(&us, name);
+			ZwSetValueKey(h, &us, 0, REG_SZ, diag_w, (k + 1) * sizeof(WCHAR));
+		}
+		ZwClose(h);
+	}
+}
+
 static void log_post(kexbsd_worker *w)
 {
 	if (!w)
@@ -1474,6 +1525,7 @@ attached:
 		set_flags(a, IFF_UP);
 	attached_last = a;
 	attaching = NULL;
+	diag_save("kexnet: adapter started");
 	return NDIS_STATUS_SUCCESS;
 
 fail_attached:
@@ -1482,6 +1534,7 @@ fail_attached:
 fail:
 	/* the log is otherwise written only by a running adapter: an adapter
 	 * that fails to start (Code 10) must still leave KEXNET.LOG behind */
+	diag_save("kexnet: adapter start FAILED");
 	if (kex_files_ready())
 		log_flush(NULL);
 	if (res)
@@ -1918,5 +1971,6 @@ NTSTATUS kexnet_register(PDRIVER_OBJECT drv, PUNICODE_STRING reg, const struct k
 	st = NdisMRegisterMiniport(wrapper, &mc, sizeof(mc));
 	if (st != NDIS_STATUS_SUCCESS)
 		NdisTerminateWrapper(wrapper, NULL);
+	diag_save(st == NDIS_STATUS_SUCCESS ? "kexnet: driver loaded" : "kexnet: NdisMRegisterMiniport FAILED");
 	return st;
 }
