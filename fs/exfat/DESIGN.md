@@ -252,3 +252,20 @@ it is, instead of "first exFAT not yet mounted"); _PageFree on unmount.
   repair the main region from the backup when the volume is first written.
 
 Next: stage 3, writing; then the installer component.
+
+### Writing: on branch `exfat-write-wip` (16 Nov, morning)
+
+Stage 3 is written there (create, write, truncate, delete with wildcards,
+rename, mkdir/rmdir, attributes and times, one shared node per open file,
+IFSMgr_Get_DOSTime for new times) and once did everything right in QEMU
+(files, a 300 KB copy, folders, rename, delete). It is not stable: later
+runs hang in open or find the core's in-memory state corrupt, and that
+happens even with the volume mounted read-only, while this branch's open
+and read (the same core calls) never do. So the fault is in the new open
+or handle code, not in IOS or the core. Leads written down there:
+IFSMgr_Block services events (an IFSMgr call was seen nested on the same
+stack while a request waited; IFSMgr_BlockNoEvents exists, service 0x36),
+the packet's offset in its page (IOS layers keep private data before the
+IOP: C:'s chain has expansion offsets of -0x48 and -0x4C), stack depth.
+Also: heavy debug output (port 0xE9) on every call changed the timing
+enough to reset the guest, so trace lightly.
