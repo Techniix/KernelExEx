@@ -617,11 +617,19 @@ static void rl_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_sh = 0;
 		return;
 	}
+	/* quiet first: a boot ROM (PXE) or an earlier driver can leave the
+	 * receiver writing into memory Windows now uses and interrupts enabled
+	 * (a software reset keeps IMR); nothing may happen before rl_init */
+	CSR_WRITE_2(sc, RL_IMR, 0);
+	CSR_WRITE_1(sc, RL_CR, 0);
+	CSR_WRITE_2(sc, RL_ISR, 0xffff);
 	/* power on (some BIOSes leave the chip in D3 or with PCI power management engaged) */
 	CSR_WRITE_1(sc, RL_9346CR, 0xc0);
 	CSR_WRITE_1(sc, RL_CONFIG1, CSR_READ_1(sc, RL_CONFIG1) & ~0x03);
 	CSR_WRITE_1(sc, RL_9346CR, 0x00);
 	rl_reset(sc);
+	CSR_WRITE_2(sc, RL_IMR, 0);
+	CSR_WRITE_2(sc, RL_ISR, 0xffff);
 	/* the TCR hardware version: 8139C+ (and the 8100/8101 that share its MAC) handle overflow themselves */
 	{
 		uint32_t hwrev = CSR_READ_4(sc, RL_TCR) & 0x7cc00000;
