@@ -526,7 +526,24 @@ def build_kexfatp(b: Build):
     out = run([sys.executable, tv / "le_link.py", pe, b.out / "KEXFATP.VXD", "--name", "KEXFATP",
                "--description", "KernelExEx exFAT probe (test only)"])
     print("  " + out.strip())
-    run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXFATP.VXD", "--allow", "0x00400001"])
+    run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXFATP.VXD", "--allow", "0x00400001,0x00010090"])
+
+
+def build_kexfat(b: Build):
+    """KEXFAT.VXD: exFAT file system driver (fs/exfat; in development)."""
+    d = ROOT / "fs/exfat"
+    tv = ROOT / "toolchain/vxd"
+    objs = b.compile("kexfat", [d / "win98" / "kexfat.c", d / "exfat.c", tv / "vxdwraps.c"],
+                     [f"-I{tv / 'include'}", "-mgeneral-regs-only", "-fno-jump-tables", "-mno-stack-arg-probe", *COMPAT])
+    defs = b.obj / "defs" / "kexfat.def"
+    defs.parent.mkdir(parents=True, exist_ok=True)
+    defs.write_text("LIBRARY KEXFAT.dll\nEXPORTS\n    KEXFAT_DDB @1 DATA\n")
+    pe = b.link("kexfat", [*objs, *[]], ["kexcrt"], base="0x10000000", entry="KEXFAT_CTRL", defs=defs, ext=".pe")
+    out = run([sys.executable, tv / "le_link.py", pe, b.out / "KEXFAT.VXD", "--name", "KEXFAT",
+               "--description", "KernelExEx exFAT file system"])
+    print("  " + out.strip())
+    run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXFAT.VXD",
+         "--allow", "0x00400001,0x00400014,0x00100004,0x0001004F,0x00010051,0x00010052,0x00010063,0x0001012D"])
 
 
 def build_vxd(b: Build):
@@ -564,7 +581,7 @@ def build_vxd(b: Build):
 STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "gen": prepare_apilibs,
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
          "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
-         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp}
+         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexfat": build_kexfat}
 
 
 def main():

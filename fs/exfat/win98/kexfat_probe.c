@@ -79,7 +79,8 @@ void cb_hook(void);
 
 __attribute__((used)) void __cdecl log_send(ULONG ior, ULONG dcb)
 {
-	if (!armed || ++n_send > 30)
+	/* everything except C: (drive 2), from boot on: how VFAT mounts removable media */
+	if (!sys_ptr(ior) || *(UCHAR *) (ior + 0x4D) == 2 || ++n_send > 40)
 		return;
 	/* follow the completion: the callback is wrapped once we know its target */
 	if (sys_ptr(ior) && sys_ptr(*(ULONG *) (ior + 0x0C)))

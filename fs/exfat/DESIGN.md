@@ -126,3 +126,27 @@ any FAT drive: Explorer, programs, long names, reading and writing.
   no semaphore service needed).
 - VFAT is asked before KEXFAT for FAT volumes (it took the FAT stick and
   KEXFAT never saw it); CDFS after KEXFAT (the CD came to KEXFAT first).
+
+## Stage 1 driver (KEXFAT.VXD) so far
+
+- Registers, gets the mount request for an exFAT volume in a type-0C
+  partition (USB stick on kexumass, or a second IDE disk), allocates a
+  request packet of VRP max_req_size, fills the IOR at delta_to_ior as
+  VFAT does (func 0, flags 0x409, start 0, count 1, callback, 0x20 =
+  delta, 0x48 = packet space after the IOR, drive at 0x4D) and sends it
+  with IOS_SendCommand (EDI = VRP+0x1C). IOS takes it (fills 0x28,
+  calls the callback with ESI = IOR), but completes it with status 0x1C,
+  on the stick and on the IDE disk alike. A media check (func 0x0D,
+  flags 0x80519, synchronous: no callback) is refused with 0x16.
+- Reading of 0x1C: very likely IORS_UNFORMATTED_MEDIA. IOS marks a
+  FAT-type partition whose boot sector is not FAT as unformatted and
+  refuses I/O through its logical DCB; this is what WINUDF's changelog
+  describes ("partitions Windows 9x calls unformatted"). So the type-0C
+  test shortcut cannot carry I/O. Next:
+  1. read through the physical DCB (VRP+0x28 -> logical DCB, whose
+     first field is the physical DCB) with physical sector numbers
+     (partition start + sector, without flag 0x8); find the handle form
+     IOS_SendCommand wants for a physical DCB (requests IOS itself sends
+     to the disk use DCB + 0x83, to a volume DCB + 0xC3);
+  2. or go straight to step 4, our own logical DCB for exFAT partitions,
+     whose state we control.
