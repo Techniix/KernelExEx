@@ -649,6 +649,7 @@ LangString DESC_GRPWIFI ${LANG_ENGLISH} "Wi-Fi with WPA2 for USB adapters, with 
 LangString DESC_GRPVM ${LANG_ENGLISH} "For running Windows 98 in a virtual machine."
 LangString DESC_KEXVIO ${LANG_ENGLISH} "The virtio network adapter of QEMU/KVM, Proxmox and VirtualBox (virtio-net): faster than an emulated network card. OpenBSD's vio driver."
 LangString DESC_KEXAHCI ${LANG_ENGLISH} "SATA hard disks, SSDs and DVD drives on boards whose SATA controller is in AHCI mode (most boards since 2008; Windows 98 does not see those disks at all). Not needed when the BIOS has the controller in IDE mode."
+LangString DESC_KEXNVME ${LANG_ENGLISH} "NVMe SSDs: M.2 NVMe drives and PCIe SSD cards (Windows 98 does not see them at all). For a second drive: booting Windows 98 from an NVMe SSD needs a BIOS that can boot from it."
 LangString DESC_KEXFAT ${LANG_ENGLISH} "Reads SD cards, USB sticks and disks formatted exFAT (cards over 32 GB come that way): they get a drive letter and open in Explorer and in programs. Read-only for now: copying files onto them is not possible yet. Experimental."
 LangString DESC_KEXVMM ${LANG_ENGLISH} "The mouse pointer moves in and out of the virtual machine's window freely, with no need to click into it or press keys to release it. For QEMU (the default PC machine) and VMware. Does nothing on a real PC."
 LangString DESC_GRPINET ${LANG_ENGLISH} "Internet helpers."
@@ -745,6 +746,18 @@ Section /o "SATA disks in AHCI mode" SECKEXAHCI
   WriteRegStr HKLM "Software\KernelEx\Components" "KexAhci" "1"
   ;Windows 98 finds drivers by itself only in its INF folder
   !insertmacro KexInfOther_kexahci
+SectionEnd
+
+Section /o "NVMe SSDs (M.2, PCIe)" SECKEXNVME
+  SectionIn 2
+  ;an NT SCSI miniport for Windows 98's SCSIPORT: Windows 98 has no NVMe driver
+  SetOutPath "$INSTDIR\drivers\storage"
+  File "drivers\storage\kexnvme.mpd"
+  File "drivers\storage\kexnvme.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\storage"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexNvme" "1"
+  !insertmacro KexInfOther_kexnvme
 SectionEnd
 
 Section /o "USB 2.0 speed" SECKEXEHCI
@@ -1086,6 +1099,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXFAT} $(DESC_KEXFAT)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAHCI} $(DESC_KEXAHCI)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXNVME} $(DESC_KEXNVME)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRL} $(DESC_KEXRL)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRNDIS} $(DESC_KEXRNDIS)
@@ -1181,6 +1195,14 @@ Section "Uninstall"
     Delete "$INSTDIR\drivers\storage\kexahci.inf"
     RMDir "$INSTDIR\drivers\storage"
   un_kexahci_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexNvme"
+  StrCmp $0 "1" 0 un_kexnvme_done
+    !insertmacro un.KexInfOther_kexnvme
+    Delete /REBOOTOK "$SYSDIR\IOSUBSYS\kexnvme.mpd"
+    Delete "$INSTDIR\drivers\storage\kexnvme.mpd"
+    Delete "$INSTDIR\drivers\storage\kexnvme.inf"
+    RMDir "$INSTDIR\drivers\storage"
+  un_kexnvme_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexChip"
   StrCmp $0 "1" 0 un_kexchip_done
     ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
@@ -1535,6 +1557,11 @@ Function KexFindHardware
   StrCmp $R9 1 0 kfh_noahci
     !insertmacro KexMarkFound ${SECKEXAHCI}
   kfh_noahci:
+  Push "CC_010802"
+  Call KexPciClass
+  StrCmp $R9 1 0 kfh_nonvme
+    !insertmacro KexMarkFound ${SECKEXNVME}
+  kfh_nonvme:
   Push "CC_0401"
   Call KexPciClass
   StrCmp $R9 1 0 kfh_3

@@ -1,0 +1,41 @@
+; kexnvme.inf - KernelExEx NVMe driver for Windows 98 SE / ME
+; NVMe SSDs (PCI class 01 08 02): M.2 and U.2 drives, PCIe SSD cards.
+[Version]
+Signature="$CHICAGO$"
+Class=SCSIAdapter
+ClassGUID={4D36E97B-E325-11CE-BFC1-08002BE10318}
+Provider=%KEX%
+DriverVer=11/16/2026, 1.0.0.0
+
+[Manufacturer]
+%KEX%=Models
+
+[Models]
+%nvme%=KexNvme,PCI\CC_010802
+%qemu%=KexNvme,PCI\VEN_1B36&DEV_0010
+
+[KexNvme]
+CopyFiles=KexNvme.CopyFiles
+AddReg=KexNvme.AddReg
+
+[KexNvme.AddReg]
+HKR,,DevLoader,,*IOS
+HKR,,DontLoadIfConflict,,"Y"
+HKR,,PortDriver,,kexnvme.mpd
+
+[KexNvme.CopyFiles]
+kexnvme.mpd
+
+[DestinationDirs]
+KexNvme.CopyFiles=12
+
+[SourceDisksNames]
+1="KernelExEx NVMe driver",,0
+
+[SourceDisksFiles]
+kexnvme.mpd=1
+
+[Strings]
+KEX="KernelExEx"
+nvme="NVMe SSD controller (KernelExEx)"
+qemu="QEMU NVMe controller (KernelExEx)"
