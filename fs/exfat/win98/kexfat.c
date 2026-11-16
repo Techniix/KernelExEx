@@ -79,6 +79,7 @@ static void dump(const char *what, const void *p, ULONG n)
 #define IORF_SYNC_CMD_DONE 0x00000080
 #define IORF_SYNC_COMMAND 0x00000100
 #define IORF_VERSION_002 0x00000400
+#define IORF_PHYS_CMD 0x40000000u
 #define IORF_LOGICAL_START_SECTOR 0x00080000   /* start_addr counts from the volume, not the disk */
 
 struct kvol
@@ -224,6 +225,25 @@ static int ios_rw1(struct kvol *v, ULONG func, ULONG sector, ULONG count, void *
 	return status < 0x10 ? 0 : -1;   /* IORS_SUCCESS and the "succeeded with ..." codes are below 0x10 */
 }
 
+/* physical disks IOS has configured (protected-mode drivers, not the real-mode mapper) */
+#define MAX_DISKS 8
+static ULONG disks[MAX_DISKS];
+static int n_disks;
+
+/* the logical DCBs we made, and what they are */
+#define MAX_OWN 8
+static struct { ULONG dcb; UCHAR unit; ULONG pdcb; ULONG start; } own[MAX_OWN];
+static int n_own;
+
+static int is_own(UCHAR unit, ULONG start)
+{
+	int i;
+	for (i = 0; i < n_own; i++)
+		if (own[i].unit == unit && own[i].start == start)
+			return 1;
+	return 0;
+}
+
 /* exFAT volumes already mounted, so a second mount finds the next one */
 #define MAX_VOLS 8
 static struct { UCHAR unit; ULONG start; } mounted[MAX_VOLS];
@@ -247,22 +267,42 @@ static int try_at(struct kvol *v, UCHAR unit, ULONG start, UCHAR *sec)
 	return !memcmp(sec + 3, "EXFAT   ", 8);
 }
 
-/* TODO: match the volume to its partition exactly (IOS's logical DCB);
- * for now the first exFAT volume not yet mounted, disk by disk */
-static int find_on_disks(struct kvol *v, UCHAR *sec)
+/* Which disk and partition the volume IFSMgr asks about is. Our own logical
+ * DCBs say it exactly. A letter real-mode DOS gave to a FAT-type partition
+ * holding exFAT says nothing (its DCB belongs to the real-mode mapper), so
+ * the configured disks are searched for the first such volume not yet
+ * mounted; never the BIOS unit numbers blindly (a unit IOS does not drive in
+ * protected mode, a USB stick for one, only times out). */
+static UCHAR designator_of(ULONG pdcb);
+
+static int find_volume(struct kvol *v, ULONG ldcb, UCHAR *sec)
 {
-	UCHAR mbr[64 + 2];
-	int u, i;
+	UCHAR mbr[64];
+	int d, i;
 	v->physical = 1;
-	for (u = 0x80; u < 0x88; u++)
+	for (i = 0; i < n_own; i++)
+		if (own[i].dcb == ldcb)
+		{
+			v->unit = own[i].unit;
+			v->phys_handle = own[i].pdcb;
+			if (try_at(v, own[i].unit, own[i].start, sec))
+				goto found;
+			v->physical = 0;
+			return -1;
+		}
+	for (d = 0; d < n_disks; d++)
 	{
-		v->unit = (UCHAR) u;
+		UCHAR u = designator_of(disks[d]);
+		if (!u)
+			continue;
+		v->unit = u;
+		v->phys_handle = disks[d];
 		v->part_start = 0;
 		if (ios_rw(v, IOR_READ, 0, 1, sec))
 			continue;
 		if (!memcmp(sec + 3, "EXFAT   ", 8))
 		{
-			if (!is_mounted((UCHAR) u, 0))
+			if (!is_mounted(u, 0) && !is_own(u, 0))
 				goto found;   /* no partition table: the whole disk */
 			continue;
 		}
@@ -273,10 +313,10 @@ static int find_on_disks(struct kvol *v, UCHAR *sec)
 		{
 			UCHAR type = mbr[i * 16 + 4];
 			ULONG start = *(ULONG *) (mbr + i * 16 + 8);
-			/* 07 is what exFAT is given; 0C/0B/0E/06 when a tool kept the old type */
-			if (type != 0x07 && type != 0x0C && type != 0x0B && type != 0x0E && type != 0x06)
+			/* FAT types: a tool that kept the old type after formatting exFAT */
+			if (type != 0x0C && type != 0x0B && type != 0x0E && type != 0x06)
 				continue;
-			if (try_at(v, (UCHAR) u, start, sec))
+			if (!is_own(u, start) && try_at(v, u, start, sec))
 				goto found;
 		}
 	}
@@ -1073,7 +1113,7 @@ static int __cdecl fsd_mount(UCHAR *pir)
 	/* IOS refuses every request to the volume itself (IORS_UNFORMATTED_MEDIA):
 	 * its logical layer found no FAT BPB. The disk underneath takes them, so
 	 * the volume is found on the disks and read through them. */
-	r = find_on_disks(v, sec);
+	r = find_volume(v, *(ULONG *) (vrp + 0x28), sec);
 	outs("kexfat: boot sector read ");
 	outx((ULONG) r, 8);
 	outs(": ");
@@ -1175,11 +1215,13 @@ struct ilb
 #define AEP_INITIALIZE 0
 #define AEP_BOOT_COMPLETE 2
 #define AEP_CONFIG_DCB 3
+#define AEP_1_SEC 8
+#define DRP_FC_1_SEC 0x2000
 
 static struct ilb ios_ilb;
 static struct drp ios_drp = { { 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X' }, DRP_VSD_9, 0, &ios_ilb,
 	                          { 'K', 'E', 'X', 'F', 'A', 'T', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ' },
-	                          1, 0, 0x00FF, 0, 0, 0, { 0, 0 }, 0 };
+	                          1, DRP_FC_1_SEC, 0x00FF, 0, 0, 0, { 0, 0 }, 0 };
 
 static int isp_call(void *packet)
 {
@@ -1197,6 +1239,15 @@ static int isp_call(void *packet)
 static ULONG get_dcb(UCHAR drive)
 {
 	ULONG pk[3] = { ISP_GET_DCB, 0, drive };
+	int r = isp_call(pk);
+	return r ? 0 : pk[1];
+}
+
+#define IORF_PHYS_CMD_ 0x40000000u
+
+static ULONG get_dcb_phys(UCHAR designator)
+{
+	ULONG pk[3] = { ISP_GET_DCB, 0, designator | IORF_PHYS_CMD_ };
 	int r = isp_call(pk);
 	return r ? 0 : pk[1];
 }
@@ -1243,15 +1294,6 @@ static void dump_chain(const char *what, ULONG dcb)
 
 static int boot_done;
 
-/* physical disks IOS has configured (protected-mode drivers, not the real-mode mapper) */
-#define MAX_DISKS 8
-static ULONG disks[MAX_DISKS];
-static int n_disks;
-
-/* the logical DCBs we made, and what they are */
-#define MAX_OWN 8
-static struct { ULONG dcb; UCHAR unit; ULONG start; } own[MAX_OWN];
-static int n_own;
 
 #define ISP_CREATE_DCB 1
 #define ISP_ASSOCIATE_DCB 6
@@ -1318,99 +1360,144 @@ static void add_volume(ULONG pdcb, UCHAR unit, ULONG start, ULONG count)
 	{
 		own[n_own].dcb = dcb;
 		own[n_own].unit = unit;
+		own[n_own].pdcb = pdcb;
 		own[n_own].start = start;
 		n_own++;
 	}
 }
 
-static int is_own(UCHAR unit, ULONG start)
+/* exFAT partitions of type 07 on the configured disks get a logical DCB */
+/* The designator IOS routes a disk's requests by: 0x80 + its place in IOS's
+ * table of disks, which BIOS disks fill first (0x80, 0x81) and disks found
+ * later (a USB stick) after them. ISP_GET_DCB with IORF_PHYS_CMD in the
+ * drive number answers for that table. */
+static UCHAR designator_of(ULONG pdcb)
 {
-	int i;
-	for (i = 0; i < n_own; i++)
-		if (own[i].unit == unit && own[i].start == start)
-			return 1;
+	int n;
+	for (n = 0; n < 0x19; n++)
+		if (get_dcb_phys((UCHAR) (0x80 + n)) == pdcb)
+			return (UCHAR) (0x80 + n);
 	return 0;
 }
 
-/* exFAT partitions of type 07 on the configured disks get a logical DCB */
+static struct kvol *scan_vol;   /* the scan's own packet, kept */
+static UCHAR *scan_sec;
+
+/* exFAT on one disk that IOS left without a letter: a type-07 partition,
+ * or the whole disk (no partition table, as sticks and cards often are) */
+static void scan_disk(ULONG pdcb)
+{
+	struct kvol *t = scan_vol;
+	UCHAR *sec = scan_sec;
+	UCHAR mbr[64];
+	int i;
+	if (!t)
+	{
+		t = (struct kvol *) _HeapAllocate(sizeof(*t), HEAPZEROINIT);
+		sec = (UCHAR *) _HeapAllocate(512, HEAPZEROINIT);
+		if (!t || !sec)
+			return;
+		t->iop = (UCHAR *) page_packet(&t->iop_phys);
+		if (!t->iop)
+			return;
+		t->delta = 0x64;
+		t->max_req = 0x200;
+		t->physical = 1;
+		scan_vol = t;
+		scan_sec = sec;
+	}
+	t->unit = designator_of(pdcb);
+	t->phys_handle = pdcb;
+	t->part_start = 0;
+	outs("kexfat: scanning disk dcb ");
+	outx(pdcb, 8);
+	outs(" as ");
+	outx(t->unit, 2);
+	outs("\r\n");
+	if (!t->unit || ios_rw(t, IOR_READ, 0, 1, sec) || *(USHORT *) (sec + 510) != 0xAA55)
+		return;
+	if (!memcmp(sec + 3, "EXFAT   ", 8))
+	{
+		outs("kexfat: whole-disk exFAT on ");
+		outx(t->unit, 2);
+		outs("\r\n");
+		add_volume(pdcb, t->unit, 0, 0);
+		return;
+	}
+	memcpy(mbr, sec + 0x1BE, sizeof mbr);
+	for (i = 0; i < 4; i++)
+	{
+		ULONG start = *(ULONG *) (mbr + i * 16 + 8), count = *(ULONG *) (mbr + i * 16 + 12);
+		if (mbr[i * 16 + 4] != 0x07 || !start)
+			continue;
+		t->part_start = start;
+		if (ios_rw(t, IOR_READ, 0, 1, sec) || memcmp(sec + 3, "EXFAT   ", 8))
+			continue;
+		outs("kexfat: type-07 exFAT partition on disk ");
+		outx(t->unit, 2);
+		outs(" at ");
+		outx(start, 8);
+		outs("\r\n");
+		add_volume(pdcb, t->unit, start, count);
+	}
+}
+
 static void scan_disks(void)
 {
-	struct kvol *t;
-	UCHAR *sec;
-	int d, i;
-	t = (struct kvol *) _HeapAllocate(sizeof(*t), HEAPZEROINIT);
-	sec = (UCHAR *) _HeapAllocate(512, HEAPZEROINIT);
-	if (!t || !sec)
-		return;
-	t->iop = (UCHAR *) page_packet(&t->iop_phys);
-	t->delta = 0x64;
-	t->max_req = 0x200;
-	t->physical = 1;
-	for (d = 0; d < n_disks && t->iop; d++)
-	{
-		UCHAR mbr[64];
-		t->unit = *(UCHAR *) (disks[d] + 0x15);
-		t->phys_handle = disks[d];
-		t->part_start = 0;
-		if (ios_rw(t, IOR_READ, 0, 1, sec) || *(USHORT *) (sec + 510) != 0xAA55)
-			continue;
-		memcpy(mbr, sec + 0x1BE, sizeof mbr);
-		for (i = 0; i < 4; i++)
-		{
-			ULONG start = *(ULONG *) (mbr + i * 16 + 8), count = *(ULONG *) (mbr + i * 16 + 12);
-			if (mbr[i * 16 + 4] != 0x07 || !start)
-				continue;
-			t->part_start = start;
-			if (ios_rw(t, IOR_READ, 0, 1, sec) || memcmp(sec + 3, "EXFAT   ", 8))
-				continue;
-			outs("kexfat: type-07 exFAT partition on disk ");
-			outx(t->unit, 2);
-			outs(" at ");
-			outx(start, 8);
-			outs("\r\n");
-			add_volume(disks[d], t->unit, start, count);
-		}
-	}
-	_HeapFree(sec, 0);
-	/* the scan packet stays: one page */
-	_HeapFree(t, 0);
+	int d;
+	for (d = 0; d < n_disks; d++)
+		scan_disk(disks[d]);
 }
+
+/* disks that arrive after boot are scanned at the next one-second tick,
+ * once IOS and the type-specific driver are done configuring them */
+static ULONG pending[MAX_DISKS];
+static int n_pending;
 
 __attribute__((used)) void __cdecl aer_c(UCHAR *aep)
 {
 	USHORT func = *(USHORT *) aep;
-	outs("kexfat: aep ");
-	outx(func, 2);
 	if (func == AEP_CONFIG_DCB)
 	{
 		ULONG dcb = *(ULONG *) (aep + 0x0C);
-		if (dcb >= 0xC0000000u && *(ULONG *) dcb == dcb && *(UCHAR *) (dcb + 0x40) == 0 &&
-		    (*(ULONG *) (dcb + 0x20) & DCB_DEV_PHYSICAL) && !(*(ULONG *) (dcb + 0x20) & DCB_DEV_RMM) &&
-		    *(UCHAR *) (dcb + 0x15) >= 0x80 && n_disks < MAX_DISKS)
-			disks[n_disks++] = dcb;
-		outs(" dcb ");
-		outx(dcb, 8);
-		if (dcb >= 0xC0000000u)
+		if (dcb >= 0xC0000000u && *(ULONG *) dcb == dcb)
 		{
-			outs(" phys ");
-			outx(*(ULONG *) dcb, 8);
-			outs(" flags ");
-			outx(*(ULONG *) (dcb + 0x20), 8);
+			outs("kexfat: config physical dcb ");
+			outx(dcb, 8);
 			outs(" type ");
 			outx(*(UCHAR *) (dcb + 0x40), 2);
-			outs(" letter ");
-			outx(*(UCHAR *) (dcb + 0x14), 2);
+			outs(" flags ");
+			outx(*(ULONG *) (dcb + 0x20), 8);
 			outs(" unit ");
 			outx(*(UCHAR *) (dcb + 0x15), 2);
-			outs(" ptype ");
-			outx(*(UCHAR *) (dcb + 0x3D), 2);
-			outs(" pstart ");
-			outx(*(ULONG *) (dcb + 0x28), 8);
+			outs(boot_done ? " (after boot)\r\n" : "\r\n");
+		}
+		/* a disk driven in protected mode: its own physical DCB, type disk, not the real-mode mapper */
+		if (dcb >= 0xC0000000u && *(ULONG *) dcb == dcb && *(UCHAR *) (dcb + 0x40) == 0 &&
+		    (*(ULONG *) (dcb + 0x20) & DCB_DEV_PHYSICAL) && !(*(ULONG *) (dcb + 0x20) & DCB_DEV_RMM) &&
+		    n_disks < MAX_DISKS)
+		{
+			disks[n_disks++] = dcb;
+			if (boot_done && n_pending < MAX_DISKS)
+				pending[n_pending++] = dcb;
+			outs("kexfat: disk ");
+			outx(*(UCHAR *) (dcb + 0x15), 2);
+			outs(" dcb ");
+			outx(dcb, 8);
+			outs(" flags ");
+			outx(*(ULONG *) (dcb + 0x20), 8);
+			outs("\r\n");
 		}
 	}
-	outs("\r\n");
 	if (func == AEP_BOOT_COMPLETE && !boot_done++)
 		scan_disks();
+	if (func == AEP_1_SEC && n_pending)
+	{
+		int i, n = n_pending;
+		n_pending = 0;
+		for (i = 0; i < n; i++)
+			scan_disk(pending[i]);
+	}
 	*(USHORT *) (aep + 2) = 0;   /* AEP_SUCCESS */
 }
 
