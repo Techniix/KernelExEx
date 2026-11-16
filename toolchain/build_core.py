@@ -492,6 +492,21 @@ def build_kexwifi(b: Build):
            entry="DllMain@12", ext=".cpl", defs=d / "kexwcpl.def", kill_at=True)
 
 
+def build_kexpower(b: Build):
+    """kexpower.exe (battery taskbar icon and window, reads KEXACPI.VXD) and
+    kexpower.cpl (its Control Panel icon). Plain Win32."""
+    d = ROOT / "kexpower"
+    flags = [f"-I{d}", f"-I{ROOT / 'common'}", "-D_WIN32_WINNT=0x0400", *COMPAT]
+    objs = b.compile("kexpower", [d / "kexpower.c"], flags)
+    res = b.resource("kexpower", d / "kexpower.rc")
+    b.link("kexpower", [*objs, res], ["kexcrt", "kernel32", "user32", "gdi32", "advapi32", "comctl32", "shell32"],
+           base="0x400000", entry="entrypoint", kind="exe")
+    cobjs = b.compile("kexpcpl", [d / "kexpcpl.c"], flags)
+    cres = b.resource("kexpcpl", d / "kexpcpl.rc")
+    b.link("kexpower", [*cobjs, cres], ["kexcrt", "kernel32", "user32", "shell32"], base="0x66D00000",
+           entry="DllMain@12", ext=".cpl", defs=d / "kexpcpl.def", kill_at=True)
+
+
 def build_kexvmm(b: Build):
     """kexvmm.exe: mouse integration in QEMU and VMware (vmmouse)."""
     d = ROOT / "kexvmm"
@@ -616,7 +631,7 @@ STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "ge
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
          "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
          "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexfat": build_kexfat,
-         "kexacpi": build_kexacpi}
+         "kexacpi": build_kexacpi, "kexpower": build_kexpower}
 
 
 def main():

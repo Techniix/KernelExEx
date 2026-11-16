@@ -75,7 +75,10 @@ static struct
 	int glk;                      /* _GLK: take the firmware's global lock around each access */
 	int ok;
 	ULONG errors;
+	ULONG fails;                  /* time-outs in a row: after EC_GIVE_UP, the EC counts as dead */
 } ec;
+
+#define EC_GIVE_UP 8
 
 static int ec_wait(UCHAR mask, UCHAR want)
 {
@@ -171,6 +174,9 @@ static ACPI_STATUS ec_space(UINT32 Function, ACPI_PHYSICAL_ADDRESS Address, UINT
 	(void) RegionContext;
 	if (!n || a + n > 256)
 		return AE_BAD_PARAMETER;
+	/* an EC that keeps timing out would make every reading take seconds */
+	if (ec.fails >= EC_GIVE_UP)
+		return AE_TIME;
 	if ((Function & ACPI_IO_MASK) == ACPI_READ)
 		*Value = 0;
 	for (i = 0; i < n; i++)
@@ -179,11 +185,20 @@ static ACPI_STATUS ec_space(UINT32 Function, ACPI_PHYSICAL_ADDRESS Address, UINT
 		{
 			UCHAR v;
 			if (!ec_read((UCHAR) (a + i), &v))
+			{
+				if (++ec.fails == EC_GIVE_UP)
+					dbg("kexacpi: the embedded controller does not answer; giving up on it\n");
 				return AE_TIME;
+			}
 			*Value |= (UINT64) v << (i * 8);
 		}
 		else if (!ec_write((UCHAR) (a + i), (UCHAR) (*Value >> (i * 8))))
+		{
+			if (++ec.fails == EC_GIVE_UP)
+				dbg("kexacpi: the embedded controller does not answer; giving up on it\n");
 			return AE_TIME;
+		}
+		ec.fails = 0;
 	}
 	return AE_OK;
 }
@@ -381,7 +396,6 @@ static void bat_read(BAT *bt)
 	 * (a large unsigned number) or the top bit set while discharging */
 	if (b->rate != KEXACPI_UNKNOWN && (b->rate & 0x80000000u))
 		b->rate = (ULONG) -(LONG) b->rate;
-	b->rate &= 0x7FFFFFFFu;
 	b->percent = KEXACPI_UNKNOWN;
 	{
 		ULONG full = b->full_cap;
@@ -393,7 +407,7 @@ static void bat_read(BAT *bt)
 			b->percent = pc > 100 ? 100 : pc;
 		}
 		b->minutes_left = b->minutes_full = KEXACPI_UNKNOWN;
-		if (b->rate && b->rate != 0x7FFFFFFFu && b->remaining != KEXACPI_UNKNOWN)
+		if (b->rate && b->rate != KEXACPI_UNKNOWN && b->remaining != KEXACPI_UNKNOWN)
 		{
 			if (b->state & KEXACPI_BAT_DISCHARGING)
 				b->minutes_left = (ULONG) ((unsigned long long) b->remaining * 60 / b->rate);
@@ -574,6 +588,7 @@ static ULONG ioctl(DIOCPARAMS *p)
 		int i;
 		for (i = 0; i < nbats; i++)
 			bats[i].static_ok = 0;
+		ec.fails = 0;
 		break;
 	}
 	default:

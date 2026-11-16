@@ -1,0 +1,67 @@
+/* KernelExEx - kexpower.exe resources. GPLv2. */
+#include <windows.h>
+#include <commctrl.h>
+#include "resource.h"
+#include "version.h"
+
+IDI_POWER ICON "kexpower.ico"
+
+IDD_MAIN DIALOGEX 0, 0, 300, 250
+STYLE DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "Battery"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "", IDC_POWER, 7, 7, 286, 10
+    LTEXT           "&Battery:", -1, 7, 23, 30, 8
+    COMBOBOX        IDC_BATTERY, 40, 21, 253, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "", IDC_CHARGE, "msctls_progress32", WS_BORDER, 7, 39, 286, 10
+    LTEXT           "", IDC_DETAILS, 7, 54, 286, 74
+    GROUPBOX        "Settings", -1, 7, 132, 286, 90
+    AUTOCHECKBOX    "Show the battery &icon on the taskbar", IDC_TRAYICON, 14, 145, 200, 10
+    AUTOCHECKBOX    "&Warn when the charge falls to", IDC_WARN, 14, 160, 118, 10
+    EDITTEXT        IDC_WARNPC, 134, 158, 22, 12, ES_NUMBER
+    LTEXT           "%", -1, 159, 160, 10, 8
+    AUTOCHECKBOX    "Shut &down when the charge falls to", IDC_CRITACT, 14, 175, 130, 10
+    EDITTEXT        IDC_CRITPC, 146, 173, 22, 12, ES_NUMBER
+    LTEXT           "% (after a minute's notice)", -1, 171, 175, 110, 8
+    LTEXT           "When the &lid is closed:", -1, 14, 193, 80, 8
+    COMBOBOX        IDC_LID, 96, 191, 120, 60, CBS_DROPDOWNLIST | WS_TABSTOP
+    LTEXT           "", IDC_NOTE, 7, 226, 210, 18
+    PUSHBUTTON      "Close", IDCANCEL, 236, 229, 57, 14
+END
+
+IDD_CRIT DIALOGEX 0, 0, 220, 64
+STYLE DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | DS_SYSMODAL
+EXSTYLE WS_EX_TOPMOST
+CAPTION "Battery nearly empty"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "", IDC_COUNT, 7, 7, 206, 28
+    DEFPUSHBUTTON   "Shut down &now", IDOK, 49, 43, 70, 14
+    PUSHBUTTON      "&Cancel", IDCANCEL, 124, 43, 50, 14
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+FILEOS VOS__WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "KernelExEx"
+            VALUE "FileDescription", "KernelExEx battery"
+            VALUE "FileVersion", KEXEX_VERSION_STR
+            VALUE "LegalCopyright", "GPL version 2"
+            VALUE "ProductName", "KernelExEx"
+            VALUE "ProductVersion", KEXEX_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
