@@ -291,6 +291,14 @@ found:
 	return 0;
 }
 
+/* one fixed, contiguous page for a request packet, and its physical address */
+static void *page_packet(ULONG *phys)
+{
+	unsigned long long r = _PageAllocate(1, PG_SYS, 0, 0, 0, 0xFFFFF, phys,
+	                                     PAGEFIXED | PAGECONTIG | PAGEUSEALIGN | PAGEZEROINIT);
+	return (ULONG) r ? (void *) (ULONG) (r >> 32) : NULL;
+}
+
 /* the core's device: whole sectors, buffers from the locked heap */
 static int dev_read(void *ctx, uint64_t sector, uint32_t count, void *buf)
 {
@@ -1053,20 +1061,7 @@ static int __cdecl fsd_mount(UCHAR *pir)
 	/* the packet from fixed, contiguous memory whose physical address goes in
 	 * IOP_physical (0x00): IOS and the port drivers find the packet's parts
 	 * in physical memory (bus-master DMA lists) from it */
-	{
-		ULONG phys = 0;
-		unsigned long long r2 = _PageAllocate(1, PG_SYS, 0, 0, 0, 0xFFFFF, &phys,
-		                                      PAGEFIXED | PAGECONTIG | PAGEUSEALIGN | PAGEZEROINIT);
-		v->iop = (UCHAR *) (ULONG) (r2 >> 32);
-		v->iop_phys = phys;
-		outs("kexfat: packet at ");
-		outx((ULONG) v->iop, 8);
-		outs(", physical ");
-		outx(phys, 8);
-		outs("\r\n");
-		if (!(ULONG) r2)
-			v->iop = NULL;
-	}
+	v->iop = (UCHAR *) page_packet(&v->iop_phys);
 	sec = (UCHAR *) _HeapAllocate(4096, HEAPZEROINIT);
 	if (!v->iop || !sec)
 		goto free_no;
@@ -1142,9 +1137,314 @@ no:
 	return ERROR_UNRECOGNIZED_VOLUME_;
 }
 
+/* ---- the IOS layer (drive letters for exFAT partitions): stage 4 -------------------- */
+/* IOS's driver registration packet (packed: 0x38 bytes) and import block */
+#pragma pack(push, 1)
+struct drp
+{
+	char eyecatch[8];
+	ULONG lgn;
+	void *aer;
+	void *ilb;
+	char name[16];
+	UCHAR revision;
+	ULONG feature;
+	USHORT if_req;
+	UCHAR bus_type;
+	USHORT result;
+	ULONG reference;
+	UCHAR reserved1[2];
+	ULONG reserved2;
+};
+#pragma pack(pop)
+
+struct ilb
+{
+	void *service_rtn;
+	void *dprintf_rtn;
+	void *wait_10th;
+	void *internal_request;
+	void *io_criteria;
+	void *int_io_criteria;
+	ULONG dvt, ios_mem, enqueue, dequeue, r1, r2;
+	USHORT flags;
+	char driver_numb, r3;
+};
+
+#define DRP_VSD_9 (1u << 0x11)
+#define AEP_INITIALIZE 0
+#define AEP_BOOT_COMPLETE 2
+#define AEP_CONFIG_DCB 3
+
+static struct ilb ios_ilb;
+static struct drp ios_drp = { { 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X' }, DRP_VSD_9, 0, &ios_ilb,
+	                          { 'K', 'E', 'X', 'F', 'A', 'T', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ' },
+	                          1, 0, 0x00FF, 0, 0, 0, { 0, 0 }, 0 };
+
+static int isp_call(void *packet)
+{
+	__asm__ __volatile__("pushl %0\n\t"
+	                     "call *%1\n\t"
+	                     "addl $4, %%esp"
+	                     :
+	                     : "d"(packet), "r"(ios_ilb.service_rtn)
+	                     : "eax", "ecx", "memory", "cc");
+	return *(USHORT *) ((UCHAR *) packet + 2);
+}
+
+#define ISP_GET_DCB 7
+
+static ULONG get_dcb(UCHAR drive)
+{
+	ULONG pk[3] = { ISP_GET_DCB, 0, drive };
+	int r = isp_call(pk);
+	return r ? 0 : pk[1];
+}
+
+static void dump_chain(const char *what, ULONG dcb)
+{
+	ULONG cd;
+	int n = 0;
+	outs("kexfat: ");
+	outs(what);
+	outs(" dcb ");
+	outx(dcb, 8);
+	outs("\r\n");
+	if (dcb < 0xC0000000u)
+		return;
+	dump("  dcb", (void *) dcb, 0x80);
+	for (cd = *(ULONG *) (dcb + 8); cd >= 0xC0000000u && n < 12; cd = *(ULONG *) (cd + 12), n++)
+	{
+		outs("  cd ");
+		outx(cd, 8);
+		outs(": io ");
+		outx(*(ULONG *) cd, 8);
+		outs(" flags ");
+		outx(*(ULONG *) (cd + 4), 8);
+		outs(" ddb ");
+		outx(*(ULONG *) (cd + 8), 8);
+		outs(" expan ");
+		outx(*(USHORT *) (cd + 16), 4);
+		outs(" lgn ");
+		outx(*(UCHAR *) (cd + 19), 2);
+		if (*(ULONG *) (cd + 8) >= 0xC0000000u)
+		{
+			int i;
+			outs(" ");
+			for (i = 0; i < 8; i++)
+			{
+				char c = *(char *) (*(ULONG *) (cd + 8) + 12 + i);   /* VxD name in the DDB */
+				outc(c >= 32 && c < 127 ? c : '.');
+			}
+		}
+		outs("\r\n");
+	}
+}
+
+static int boot_done;
+
+/* physical disks IOS has configured (protected-mode drivers, not the real-mode mapper) */
+#define MAX_DISKS 8
+static ULONG disks[MAX_DISKS];
+static int n_disks;
+
+/* the logical DCBs we made, and what they are */
+#define MAX_OWN 8
+static struct { ULONG dcb; UCHAR unit; ULONG start; } own[MAX_OWN];
+static int n_own;
+
+#define ISP_CREATE_DCB 1
+#define ISP_ASSOCIATE_DCB 6
+#define ISP_DRIVE_LETTER_PICK 16
+#define DCB_DEV_LOGICAL 0x00004000u
+#define DCB_DEV_PHYSICAL 0x00008000u
+#define DCB_DEV_RMM 0x00002000u
+
+
+/* a logical DCB and a drive letter for an exFAT partition IOS left without one */
+static void add_volume(ULONG pdcb, UCHAR unit, ULONG start, ULONG count)
+{
+	UCHAR create[12], pick[12], assoc[12];
+	ULONG dcb;
+	UCHAR letter;
+	int r;
+	memset(create, 0, sizeof create);
+	*(USHORT *) create = ISP_CREATE_DCB;
+	*(USHORT *) (create + 4) = 0x140;
+	r = isp_call(create);
+	dcb = *(ULONG *) (create + 6);
+	outs("kexfat: ISP_CREATE_DCB ");
+	outx(r, 4);
+	outs(" dcb ");
+	outx(dcb, 8);
+	outs("\r\n");
+	if (r || dcb < 0xC0000000u)
+		return;
+	memset(pick, 0, sizeof pick);
+	*(USHORT *) pick = ISP_DRIVE_LETTER_PICK;
+	*(ULONG *) (pick + 4) = pdcb;
+	r = isp_call(pick);
+	letter = pick[8];
+	outs("kexfat: ISP_DRIVE_LETTER_PICK ");
+	outx(r, 4);
+	outs(" letter ");
+	outx(letter, 2);
+	outs("\r\n");
+	if (r)
+		return;
+	/* as IOS's own logical DCBs for partitions (C:'s, seen on 98 SE) */
+	*(ULONG *) (dcb + 0x00) = pdcb;                               /* physical DCB */
+	*(ULONG *) (dcb + 0x04) = *(ULONG *) (pdcb + 0x04);           /* IOP expansion */
+	*(ULONG *) (dcb + 0x08) = *(ULONG *) (pdcb + 0x08);           /* the disk's calldown chain */
+	*(UCHAR *) (dcb + 0x14) = letter;
+	*(UCHAR *) (dcb + 0x15) = 0;
+	*(ULONG *) (dcb + 0x1C) = *(ULONG *) (pdcb + 0x1C);           /* demand flags */
+	*(ULONG *) (dcb + 0x20) = DCB_DEV_LOGICAL | (*(ULONG *) (pdcb + 0x20) & ~(DCB_DEV_PHYSICAL | DCB_DEV_RMM));
+	*(ULONG *) (dcb + 0x28) = start;                              /* partition start */
+	*(UCHAR *) (dcb + 0x3C) = 9;                                  /* 512-byte sectors */
+	*(UCHAR *) (dcb + 0x3D) = 0x07;
+	*(USHORT *) (dcb + 0x3E) = 0x4342;                            /* 'BC' */
+	*(UCHAR *) (dcb + 0x40) = 0;                                  /* disk */
+	(void) count;
+	memset(assoc, 0, sizeof assoc);
+	*(USHORT *) assoc = ISP_ASSOCIATE_DCB;
+	*(ULONG *) (assoc + 4) = dcb;
+	assoc[8] = letter;
+	r = isp_call(assoc);
+	outs("kexfat: ISP_ASSOCIATE_DCB ");
+	outx(r, 4);
+	outs("\r\n");
+	if (!r && n_own < MAX_OWN)
+	{
+		own[n_own].dcb = dcb;
+		own[n_own].unit = unit;
+		own[n_own].start = start;
+		n_own++;
+	}
+}
+
+static int is_own(UCHAR unit, ULONG start)
+{
+	int i;
+	for (i = 0; i < n_own; i++)
+		if (own[i].unit == unit && own[i].start == start)
+			return 1;
+	return 0;
+}
+
+/* exFAT partitions of type 07 on the configured disks get a logical DCB */
+static void scan_disks(void)
+{
+	struct kvol *t;
+	UCHAR *sec;
+	int d, i;
+	t = (struct kvol *) _HeapAllocate(sizeof(*t), HEAPZEROINIT);
+	sec = (UCHAR *) _HeapAllocate(512, HEAPZEROINIT);
+	if (!t || !sec)
+		return;
+	t->iop = (UCHAR *) page_packet(&t->iop_phys);
+	t->delta = 0x64;
+	t->max_req = 0x200;
+	t->physical = 1;
+	for (d = 0; d < n_disks && t->iop; d++)
+	{
+		UCHAR mbr[64];
+		t->unit = *(UCHAR *) (disks[d] + 0x15);
+		t->phys_handle = disks[d];
+		t->part_start = 0;
+		if (ios_rw(t, IOR_READ, 0, 1, sec) || *(USHORT *) (sec + 510) != 0xAA55)
+			continue;
+		memcpy(mbr, sec + 0x1BE, sizeof mbr);
+		for (i = 0; i < 4; i++)
+		{
+			ULONG start = *(ULONG *) (mbr + i * 16 + 8), count = *(ULONG *) (mbr + i * 16 + 12);
+			if (mbr[i * 16 + 4] != 0x07 || !start)
+				continue;
+			t->part_start = start;
+			if (ios_rw(t, IOR_READ, 0, 1, sec) || memcmp(sec + 3, "EXFAT   ", 8))
+				continue;
+			outs("kexfat: type-07 exFAT partition on disk ");
+			outx(t->unit, 2);
+			outs(" at ");
+			outx(start, 8);
+			outs("\r\n");
+			add_volume(disks[d], t->unit, start, count);
+		}
+	}
+	_HeapFree(sec, 0);
+	/* the scan packet stays: one page */
+	_HeapFree(t, 0);
+}
+
+__attribute__((used)) void __cdecl aer_c(UCHAR *aep)
+{
+	USHORT func = *(USHORT *) aep;
+	outs("kexfat: aep ");
+	outx(func, 2);
+	if (func == AEP_CONFIG_DCB)
+	{
+		ULONG dcb = *(ULONG *) (aep + 0x0C);
+		if (dcb >= 0xC0000000u && *(ULONG *) dcb == dcb && *(UCHAR *) (dcb + 0x40) == 0 &&
+		    (*(ULONG *) (dcb + 0x20) & DCB_DEV_PHYSICAL) && !(*(ULONG *) (dcb + 0x20) & DCB_DEV_RMM) &&
+		    *(UCHAR *) (dcb + 0x15) >= 0x80 && n_disks < MAX_DISKS)
+			disks[n_disks++] = dcb;
+		outs(" dcb ");
+		outx(dcb, 8);
+		if (dcb >= 0xC0000000u)
+		{
+			outs(" phys ");
+			outx(*(ULONG *) dcb, 8);
+			outs(" flags ");
+			outx(*(ULONG *) (dcb + 0x20), 8);
+			outs(" type ");
+			outx(*(UCHAR *) (dcb + 0x40), 2);
+			outs(" letter ");
+			outx(*(UCHAR *) (dcb + 0x14), 2);
+			outs(" unit ");
+			outx(*(UCHAR *) (dcb + 0x15), 2);
+			outs(" ptype ");
+			outx(*(UCHAR *) (dcb + 0x3D), 2);
+			outs(" pstart ");
+			outx(*(ULONG *) (dcb + 0x28), 8);
+		}
+	}
+	outs("\r\n");
+	if (func == AEP_BOOT_COMPLETE && !boot_done++)
+		scan_disks();
+	*(USHORT *) (aep + 2) = 0;   /* AEP_SUCCESS */
+}
+
+__attribute__((naked)) void aer(void)
+{
+	__asm__("pushal\n\t"
+	        "pushl 36(%esp)\n\t"
+	        "call _aer_c\n\t"
+	        "addl $4, %esp\n\t"
+	        "popal\n\t"
+	        "ret");
+}
+
+static void ios_register(void)
+{
+	ios_drp.aer = (void *) aer;
+	__asm__ __volatile__("pushl %0\n\t"
+	                     "int $0x20\n\t"
+	                     ".long 0x00100007\n\t"   /* IOS_Register */
+	                     "addl $4, %%esp"
+	                     :
+	                     : "r"(&ios_drp)
+	                     : "eax", "ecx", "edx", "memory", "cc");
+	outs("kexfat: IOS_Register result ");
+	outx(ios_drp.result, 4);
+	outs(", service routine ");
+	outx((ULONG) ios_ilb.service_rtn, 8);
+	outs("\r\n");
+}
+
 static void init(void)
 {
 	int id;
+	ios_register();
 	__asm__ __volatile__("pushl %3\n\t"
 	                     "pushl %2\n\t"
 	                     "pushl %1\n\t"

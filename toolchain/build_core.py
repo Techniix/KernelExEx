@@ -543,7 +543,7 @@ def build_kexfat(b: Build):
                "--description", "KernelExEx exFAT file system"])
     print("  " + out.strip())
     run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXFAT.VXD",
-         "--allow", "0x00400001,0x00400012,0x00400013,0x00400014,0x00400039,0x00100004,0x0001004F,0x00010051,0x00010052,0x00010053,0x00010063,0x0001012D"])
+         "--allow", "0x00400001,0x00400012,0x00400013,0x00400014,0x00400039,0x00100004,0x00100007,0x0001004F,0x00010051,0x00010052,0x00010053,0x00010063,0x0001012D"])
 
 
 def build_vxd(b: Build):
