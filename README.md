@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 13 | [KernelExEx-1.0.0-testbuild13.zip](KernelExEx-1.0.0-testbuild13.zip) | [7ff864c](https://github.com/Techniix/KernelExEx/commit/7ff864c9fdcefd0c0bc1257ada68a90fca066627) | Updating over a running install, Xbox 360-style controllers (8BitDo Ultimate 2C) start and read correctly, AC'97 brings Windows' sound files from the CD, Recommended ticks decided |
 | 12 | [KernelExEx-1.0.0-testbuild12.zip](KernelExEx-1.0.0-testbuild12.zip) | [c9e69d0](https://github.com/Techniix/KernelExEx/commit/c9e69d0e4bf8c762084a2b8271c14949f92ef887) | Wi-Fi program, new setup, virtio and mouse integration for VMs; USB network driver freeze fixes (steps 16-18) |
 | 11 | [KernelExEx-1.0.0-testbuild11.zip](KernelExEx-1.0.0-testbuild11.zip) | [a9d243b](https://github.com/Techniix/KernelExEx/commit/a9d243b2bb32627071b92f8abf5b2d2599ac833c) | USB flash drives, USB hard disks, card readers and USB CD/DVD drives (step 15) |
 | 10 | [KernelExEx-1.0.0-testbuild10.zip](KernelExEx-1.0.0-testbuild10.zip) | [9a62e54](https://github.com/Techniix/KernelExEx/commit/9a62e541ac61976922ae5f6212964bd31e2b76e4) | Fixes from the first test on the MSI 848P Neo2-V: RTL8139 driver no longer claims shared interrupts (boot hang, Code 11); AC'97 start diagnostics in the registry (Code 10). |
