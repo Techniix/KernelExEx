@@ -648,6 +648,7 @@ LangString DESC_GRPCHIP ${LANG_ENGLISH} "Chipset device names and onboard sound.
 LangString DESC_GRPWIFI ${LANG_ENGLISH} "Wi-Fi with WPA2 for USB adapters, with a taskbar icon and a Control Panel icon to choose a network and type its password."
 LangString DESC_GRPVM ${LANG_ENGLISH} "For running Windows 98 in a virtual machine."
 LangString DESC_KEXVIO ${LANG_ENGLISH} "The virtio network adapter of QEMU/KVM, Proxmox and VirtualBox (virtio-net): faster than an emulated network card. OpenBSD's vio driver."
+LangString DESC_KEXAHCI ${LANG_ENGLISH} "SATA hard disks, SSDs and DVD drives on boards whose SATA controller is in AHCI mode (most boards since 2008; Windows 98 does not see those disks at all). Not needed when the BIOS has the controller in IDE mode."
 LangString DESC_KEXFAT ${LANG_ENGLISH} "Reads SD cards, USB sticks and disks formatted exFAT (cards over 32 GB come that way): they get a drive letter and open in Explorer and in programs. Read-only for now: copying files onto them is not possible yet. Experimental."
 LangString DESC_KEXVMM ${LANG_ENGLISH} "The mouse pointer moves in and out of the virtual machine's window freely, with no need to click into it or press keys to release it. For QEMU (the default PC machine) and VMware. Does nothing on a real PC."
 LangString DESC_GRPINET ${LANG_ENGLISH} "Internet helpers."
@@ -730,6 +731,20 @@ Section /o "Disks over 128 GB (IDE and SATA in IDE mode)" SECKEXATA
   WriteRegStr HKLM "Software\KernelEx\Components" "KexAta" "1"
   ;Windows 98 finds drivers by itself only in its INF folder
   !insertmacro KexInfOther_kexata
+SectionEnd
+
+Section /o "SATA disks in AHCI mode" SECKEXAHCI
+  SectionIn 2
+  ;an NT SCSI miniport for Windows 98's SCSIPORT: Windows 98 has no driver at all
+  ;for SATA controllers in AHCI mode, the default on most boards since 2008
+  SetOutPath "$INSTDIR\drivers\storage"
+  File "drivers\storage\kexahci.mpd"
+  File "drivers\storage\kexahci.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\storage"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexAhci" "1"
+  ;Windows 98 finds drivers by itself only in its INF folder
+  !insertmacro KexInfOther_kexahci
 SectionEnd
 
 Section /o "USB 2.0 speed" SECKEXEHCI
@@ -1070,6 +1085,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXUMASS} $(DESC_KEXUMASS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXFAT} $(DESC_KEXFAT)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAHCI} $(DESC_KEXAHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRL} $(DESC_KEXRL)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRNDIS} $(DESC_KEXRNDIS)
@@ -1157,6 +1173,14 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\storage"
     RMDir "$INSTDIR\drivers"
   un_kexata_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexAhci"
+  StrCmp $0 "1" 0 un_kexahci_done
+    !insertmacro un.KexInfOther_kexahci
+    Delete /REBOOTOK "$SYSDIR\IOSUBSYS\kexahci.mpd"
+    Delete "$INSTDIR\drivers\storage\kexahci.mpd"
+    Delete "$INSTDIR\drivers\storage\kexahci.inf"
+    RMDir "$INSTDIR\drivers\storage"
+  un_kexahci_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexChip"
   StrCmp $0 "1" 0 un_kexchip_done
     ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
@@ -1506,6 +1530,11 @@ Function KexFindHardware
   StrCmp $R9 1 0 kfh_2
     !insertmacro KexMarkFound ${SECKEXEHCI}
   kfh_2:
+  Push "CC_010601"
+  Call KexPciClass
+  StrCmp $R9 1 0 kfh_noahci
+    !insertmacro KexMarkFound ${SECKEXAHCI}
+  kfh_noahci:
   Push "CC_0401"
   Call KexPciClass
   StrCmp $R9 1 0 kfh_3

@@ -57,6 +57,8 @@ LAYOUT = {
     "drivers/usbstor/kexumass.inf": "drivers/usb/storage/kexumass.inf",
     "drivers/storage/kexata.mpd": "kexstor:kexata.mpd",
     "drivers/storage/kexata.inf": "drivers/storage/ata/kexata.inf",
+    "drivers/storage/kexahci.mpd": "kexstor:kexahci.mpd",
+    "drivers/storage/kexahci.inf": "drivers/storage/ahci/kexahci.inf",
     "drivers/usb2/kexehci.inf": "drivers/usb/ehci/kexehci.inf",
     "input/kexpad/kexpad.inf": "input/kexpad/kexpad.inf",
     "drivers/chipset/kexchip.inf": "drivers/chipset/kexchip.inf",
