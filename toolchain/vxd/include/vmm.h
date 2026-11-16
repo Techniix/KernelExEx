@@ -96,6 +96,7 @@ struct VxD_Desc_Block
 #define __Get_VMM_Version        0x00010000
 #define __Test_Sys_VM_Handle     0x00010004
 #define __HeapAllocate           0x0001004F
+#define __PageAllocate           0x00010053
 #define __HeapFree               0x00010051
 #define __HeapGetSize            0x00010052
 #define __LinPageLock            0x00010063
@@ -108,6 +109,7 @@ struct VxD_Desc_Block
 #define ___HeapFree              __HeapFree
 #define ___HeapGetSize           __HeapGetSize
 #define ___LinPageLock           __LinPageLock
+#define ___PageAllocate          __PageAllocate
 
 /* Dynamic link to a VxD service: INT 20h followed by the service ID. The
  * VMM rewrites the six bytes into CALL [addr] (or JMP [addr] when bit 15
@@ -128,6 +130,14 @@ void * __cdecl _HeapAllocate(ULONG nbytes, ULONG flags);
 ULONG  __cdecl _HeapFree(void *hAddress, ULONG flags);
 ULONG  __cdecl _HeapGetSize(void *hAddress, ULONG flags);
 ULONG  __cdecl _LinPageLock(ULONG HLinPgNum, ULONG nPages, ULONG flags);
+/* returns the memory handle (low half, EAX) and the linear address (high half, EDX) */
+unsigned long long __cdecl _PageAllocate(ULONG nPages, ULONG pType, ULONG VM, ULONG AlignMask, ULONG minPhys,
+                                         ULONG maxPhys, ULONG *PhysAddr, ULONG flags);
+#define PG_SYS 1
+#define PAGEZEROINIT 0x00000001
+#define PAGEUSEALIGN 0x00000002
+#define PAGECONTIG 0x00000004
+#define PAGEFIXED 0x00000008
 void   __cdecl _Debug_Printf_Service(const char *fmt, ...);
 
 /* register-based services */

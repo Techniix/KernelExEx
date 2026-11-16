@@ -30,6 +30,12 @@ __declspec(naked) ULONG __cdecl _LinPageLock(ULONG HLinPgNum, ULONG nPages, ULON
 	VMMJmp(_LinPageLock)
 }
 
+__declspec(naked) unsigned long long __cdecl _PageAllocate(ULONG nPages, ULONG pType, ULONG VM, ULONG AlignMask,
+                                                          ULONG minPhys, ULONG maxPhys, ULONG *PhysAddr, ULONG flags)
+{
+	VMMJmp(_PageAllocate)
+}
+
 __declspec(naked) void __cdecl _Debug_Printf_Service(const char *fmt, ...)
 {
 	VMMJmp(_Debug_Printf_Service)

@@ -159,3 +159,53 @@ any FAT drive: Explorer, programs, long names, reading and writing.
   at what IOS does with a type-0C volume it finds unformatted (the
   "unformatted" state may be held in the logical DCB's flags at 0x20,
   which differed between the CD (d021c004) and the stick volume (6013)).
+
+### Solved (16 Nov): reads, and the mount itself
+
+Found with KEXFATP's capture-and-replay (one good one-sector read VFAT
+sent to C:, copied and sent again with only the target changed) and a
+QEMU exception trace (`-d int` from the mount on, `-no-reboot`):
+
+- **0x1C is IORS_UNFORMATTED_MEDIA** (published DDK value) and it is the
+  volume, not our packet: VFAT's own known-good request, replayed to D:,
+  also gets 0x1C. IOS will not do I/O through the logical DCB of a FAT
+  partition whose boot sector is not FAT.
+- **IOS routes by IOR_vol_designtr (IOR+0x4D), not by the handle in
+  EDI.** 0..25 is a drive letter (the logical DCB), 0x80 + n is the n-th
+  physical disk. With 0x81 the replay read the second IDE disk's MBR and,
+  at sector 0x800, the exFAT boot sector. Physical requests take disk
+  sector numbers and flags 0x409 (version 2, bypass volume tracking, high
+  priority); EDI is set to the physical DCB (logical DCB+0x00).
+- **IOP_physical (packet+0x00) must hold the packet's physical address.**
+  Our packet was zeroed _HeapAllocate memory: the reads returned the right
+  data, then the system reset later (IOS / the port driver works out
+  physical addresses of the packet's parts from it). The packet is now one
+  fixed, contiguous page from _PageAllocate (PAGEFIXED|PAGECONTIG|
+  PAGEUSEALIGN), with its physical address written at +0x00 for every
+  request. IOP_ior is at 0x64, which is the VRP's delta_to_ior.
+- **No IFSMgr_Yield loop while waiting.** Waiting for the callback with
+  IFSMgr_Yield in the mount nested the timer interrupt (IRQ0 at the same
+  address, the stack 0x400 lower each time) until the ring-0 stack ran
+  out. Now: CLI, then IFSMgr_Block(key) until the callback has set done
+  and called IFSMgr_Wakeup(key). (IORF_SYNC_COMMAND does not make
+  IOS_SendCommand wait: it returns at once.)
+- **ir_vfunc is ir_aux1** (the same field as ir_volh, the VRP coming
+  in), not ir_data: the DDK's ifs.h defines both on ir_aux1 (seen through
+  a code search; we do not ship or copy the header). With the table in
+  ir_data, IFSMgr took the VRP for the table and jumped into IOS's memory.
+  Also from ifs.h: ir_mntdrv = ir_aux2, ir_tuna = ir_sfn (0: no
+  tunnelling), volume functions 0..14 in the order we had.
+- **ir_ppath is not always a pointer** (0xFFFFFBBB seen in fileattrib):
+  the stub logger range-checks it.
+
+State: on 98 SE in QEMU, KEXFAT finds the exFAT partition on disk 0x81
+(scanning 0x80..0x87, first one not yet mounted), mounts it with the
+portable core (read-only), returns its volume table, and Windows boots
+to the logon screen with D: claimed. IFSMgr's first calls: delete
+(flags 2), getdiskparms, fileattrib x4; all answered 50 (not supported)
+for now.
+
+Next (stage 2): getdiskinfo, getdiskparms, fileattrib (get), findopen +
+find handle functions, open + read + close; then match the volume to its
+partition exactly (the logical DCB or the VRP should say which partition
+it is, instead of "first exFAT not yet mounted"); _PageFree on unmount.

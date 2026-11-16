@@ -73,31 +73,63 @@ static void dump(const char *what, const void *p, ULONG n)
 /* ---- sectors through IOS --------------------------------------------------------------- */
 #define IOR_READ 0
 #define IOR_WRITE 1
+/* IOR flags (published DDK values) */
+#define IORF_HIGH_PRIORITY 0x00000001
+#define IORF_BYPASS_VOLTRK 0x00000008
+#define IORF_SYNC_CMD_DONE 0x00000080
+#define IORF_SYNC_COMMAND 0x00000100
 #define IORF_VERSION_002 0x00000400
-#define IORF_LOGICAL_START_SECTOR 0x00000008
+#define IORF_LOGICAL_START_SECTOR 0x00080000   /* start_addr counts from the volume, not the disk */
 
 struct kvol
 {
 	ULONG vrp;
 	ULONG dev_handle;   /* the VRP's 0x1C value: what IOS_SendCommand takes in EDI */
-	ULONG phys_handle;  /* the disk's: physical DCB + 0x83 (as IOS's own disk requests) */
+	ULONG phys_handle;  /* the disk's physical DCB */
 	ULONG part_start;   /* the partition's first sector (VRP 0x10) */
 	int physical;       /* read through the disk, not the volume */
+	UCHAR unit;         /* the disk's BIOS-style number (0x80 + n): IOS routes by IOR_vol_designtr */
 	UCHAR drive;
 	USHORT max_req;
 	ULONG delta;
-	UCHAR *iop;          /* one request packet, reused (requests are serialised) */
+	UCHAR *iop;          /* one request packet, reused (requests are serialised): one fixed page */
+	ULONG iop_phys;
 	exfat_vol *ex;
 	volatile int done;
 };
 
 static struct kvol *cur_io;   /* the volume whose request is in flight */
 
+static void ifs_wakeup(ULONG key)
+{
+	__asm__ __volatile__("pushl %0\n\t"
+	                     "int $0x20\n\t"
+	                     ".long 0x00400013\n\t"   /* IFSMgr_Wakeup */
+	                     "addl $4, %%esp"
+	                     :
+	                     : "r"(key)
+	                     : "eax", "ecx", "edx", "memory", "cc");
+}
+
+static void ifs_block(ULONG key)
+{
+	__asm__ __volatile__("pushl %0\n\t"
+	                     "int $0x20\n\t"
+	                     ".long 0x00400012\n\t"   /* IFSMgr_Block */
+	                     "addl $4, %%esp"
+	                     :
+	                     : "r"(key)
+	                     : "eax", "ecx", "edx", "memory", "cc");
+}
+
 __attribute__((used)) void __cdecl io_done_c(ULONG ior)
 {
 	(void) ior;
 	if (cur_io)
+	{
 		cur_io->done = 1;
+		ifs_wakeup((ULONG) cur_io);
+	}
 }
 
 /* IOS calls the callback with ESI = the IOR */
@@ -120,7 +152,7 @@ static void ifs_yield(void)
 	                     : "eax", "ecx", "edx", "memory", "cc");
 }
 
-#define IOR_MEDIA_CHECK_RESET 0x0D
+#define IOR_MEDIA_CHECK_RESET 0x06
 #define IORS_UNCERTAIN_MEDIA 0x1C   /* removable media not checked since it changed */
 
 static int ios_rw1(struct kvol *v, ULONG func, ULONG sector, ULONG count, void *buf, USHORT *st);
@@ -142,22 +174,23 @@ static int ios_rw1(struct kvol *v, ULONG func, ULONG sector, ULONG count, void *
 	UCHAR *ior = v->iop + v->delta;
 	ULONG esi = (ULONG) ior, edi = v->physical ? v->phys_handle : v->dev_handle;
 	USHORT status;
-	memset(v->iop, 0, v->max_req);
+	memset(v->iop, 0, 4096);
+	*(ULONG *) (v->iop + 0x00) = v->iop_phys;   /* IOP_physical */
 	*(USHORT *) (ior + 0x04) = (USHORT) func;
-	/* as VFAT sends them (logged on 98 SE): reads/writes 0x409, the media
-	 * check 0x80519 */
-	*(ULONG *) (ior + 0x08) = func == IOR_MEDIA_CHECK_RESET ? 0x00080519
-	                                                        : v->physical ? IORF_VERSION_002 | 0x1
-	                                                                      : IORF_VERSION_002 | IORF_LOGICAL_START_SECTOR | 0x1;
+	/* reads/writes: volume-relative sectors; the media check as VFAT sends it */
+	*(ULONG *) (ior + 0x08) = func == IOR_MEDIA_CHECK_RESET
+	                              ? 0x00080519
+	                              : IORF_VERSION_002 | IORF_BYPASS_VOLTRK | IORF_HIGH_PRIORITY;
 	/* the media check is synchronous (VFAT sends it without a callback) */
 	*(ULONG *) (ior + 0x0C) = func == IOR_MEDIA_CHECK_RESET ? 0 : (ULONG) io_done;
-	*(ULONG *) (ior + 0x10) = v->physical ? v->part_start + sector : sector;
+	*(ULONG *) (ior + 0x10) = v->part_start + sector;   /* disk sectors, as VFAT's (0x800 for a partition at 2048) */
 	*(ULONG *) (ior + 0x18) = count;
 	*(ULONG *) (ior + 0x1C) = (ULONG) buf;
 	*(ULONG *) (ior + 0x20) = v->delta;
+	*(ULONG *) (ior + 0x24) = (ULONG) v->iop;   /* IOR_private_IOS: the packet, as in IOS's own requests */
 	*(ULONG *) (ior + 0x44) = 0;   /* VFAT puts a per-request pointer here, not the VRP */
 	*(ULONG *) (ior + 0x48) = (ULONG) (ior + 0x58);   /* room for IOS's SGDs, inside the packet as VFAT's */
-	*(UCHAR *) (ior + 0x4D) = v->drive;
+	*(UCHAR *) (ior + 0x4D) = v->physical ? v->unit : v->drive;
 	v->done = 0;
 	cur_io = v;
 	__asm__ __volatile__("pushal\n\t"
@@ -167,9 +200,16 @@ static int ios_rw1(struct kvol *v, ULONG func, ULONG sector, ULONG count, void *
 	                     :
 	                     : "S"(esi), "D"(edi)
 	                     : "memory", "cc");
+	/* the thread sleeps until the callback wakes it. IFSMgr_Yield in a loop
+	 * here nested the timer interrupt over and over until the ring-0 stack
+	 * ran out (seen as a triple fault once the mount read the whole FAT) */
 	if (func != IOR_MEDIA_CHECK_RESET)
+	{
+		__asm__ __volatile__("pushfl\n\tcli" ::: "memory");
 		while (!v->done)
-			ifs_yield();
+			ifs_block((ULONG) v);
+		__asm__ __volatile__("popfl" ::: "memory", "cc");
+	}
 	cur_io = NULL;
 	status = *(USHORT *) (ior + 0x06);
 	*st = status;
@@ -181,6 +221,73 @@ static int ios_rw1(struct kvol *v, ULONG func, ULONG sector, ULONG count, void *
 		dump("  ior", ior, 0x58);
 	}
 	return status < 0x10 ? 0 : -1;   /* IORS_SUCCESS and the "succeeded with ..." codes are below 0x10 */
+}
+
+/* exFAT volumes already mounted, so a second mount finds the next one */
+#define MAX_VOLS 8
+static struct { UCHAR unit; ULONG start; } mounted[MAX_VOLS];
+static int n_mounted;
+
+static int is_mounted(UCHAR unit, ULONG start)
+{
+	int i;
+	for (i = 0; i < n_mounted; i++)
+		if (mounted[i].unit == unit && mounted[i].start == start)
+			return 1;
+	return 0;
+}
+
+static int try_at(struct kvol *v, UCHAR unit, ULONG start, UCHAR *sec)
+{
+	v->unit = unit;
+	v->part_start = start;
+	if (is_mounted(unit, start) || ios_rw(v, IOR_READ, 0, 1, sec))
+		return 0;
+	return !memcmp(sec + 3, "EXFAT   ", 8);
+}
+
+/* TODO: match the volume to its partition exactly (IOS's logical DCB);
+ * for now the first exFAT volume not yet mounted, disk by disk */
+static int find_on_disks(struct kvol *v, UCHAR *sec)
+{
+	UCHAR mbr[64 + 2];
+	int u, i;
+	v->physical = 1;
+	for (u = 0x80; u < 0x88; u++)
+	{
+		v->unit = (UCHAR) u;
+		v->part_start = 0;
+		if (ios_rw(v, IOR_READ, 0, 1, sec))
+			continue;
+		if (!memcmp(sec + 3, "EXFAT   ", 8))
+		{
+			if (!is_mounted((UCHAR) u, 0))
+				goto found;   /* no partition table: the whole disk */
+			continue;
+		}
+		if (*(USHORT *) (sec + 510) != 0xAA55)
+			continue;
+		memcpy(mbr, sec + 0x1BE, sizeof mbr);
+		for (i = 0; i < 4; i++)
+		{
+			UCHAR type = mbr[i * 16 + 4];
+			ULONG start = *(ULONG *) (mbr + i * 16 + 8);
+			/* 07 is what exFAT is given; 0C/0B/0E/06 when a tool kept the old type */
+			if (type != 0x07 && type != 0x0C && type != 0x0B && type != 0x0E && type != 0x06)
+				continue;
+			if (try_at(v, (UCHAR) u, start, sec))
+				goto found;
+		}
+	}
+	v->physical = 0;
+	return -1;
+found:
+	outs("kexfat: exFAT on disk ");
+	outx(v->unit, 2);
+	outs(" at sector ");
+	outx(v->part_start, 8);
+	outs("\r\n");
+	return 0;
 }
 
 /* the core's device: whole sectors, buffers from the locked heap */
@@ -221,7 +328,8 @@ static int log_vfn(int i, UCHAR *pir)
 	outx(IR_FLAGS(pir), 2);
 	outs("\r\n");
 	dump("  ioreq", pir, 0x34);
-	if (IR_PPATH(pir) >= 0xC0000000u)
+	/* ppath is not always a pointer (0xFFFFFBBB was seen) */
+	if (IR_PPATH(pir) >= 0xC0000000u && IR_PPATH(pir) < 0xF0000000u)
 	{
 		USHORT len = *(USHORT *) IR_PPATH(pir);
 		dump("  ppath", (void *) IR_PPATH(pir), len < 0x80 ? len + 4 : 0x80);
@@ -261,6 +369,11 @@ static int __cdecl fsd_mount(UCHAR *pir)
 	struct exfat_dev dev;
 	UCHAR *sec;
 	int r;
+	outs("kexfat: called from ");
+	outx((ULONG) __builtin_return_address(0), 8);
+	outs(", pir ");
+	outx((ULONG) pir, 8);
+	outs("\r\n");
 	outs("kexfat: mount request, flags ");
 	outx(IR_FLAGS(pir), 2);
 	outs(" drive ");
@@ -279,24 +392,35 @@ static int __cdecl fsd_mount(UCHAR *pir)
 	v->max_req = *(USHORT *) (vrp + 0x0A);
 	v->delta = *(ULONG *) (vrp + 0x0C);
 	v->drive = (UCHAR) IR_AUX2(pir);
-	v->iop = (UCHAR *) _HeapAllocate(v->max_req, HEAPZEROINIT);
+	/* the packet from fixed, contiguous memory whose physical address goes in
+	 * IOP_physical (0x00): IOS and the port drivers find the packet's parts
+	 * in physical memory (bus-master DMA lists) from it */
+	{
+		ULONG phys = 0;
+		unsigned long long r2 = _PageAllocate(1, PG_SYS, 0, 0, 0, 0xFFFFF, &phys,
+		                                      PAGEFIXED | PAGECONTIG | PAGEUSEALIGN | PAGEZEROINIT);
+		v->iop = (UCHAR *) (ULONG) (r2 >> 32);
+		v->iop_phys = phys;
+		outs("kexfat: packet at ");
+		outx((ULONG) v->iop, 8);
+		outs(", physical ");
+		outx(phys, 8);
+		outs("\r\n");
+		if (!(ULONG) r2)
+			v->iop = NULL;
+	}
 	sec = (UCHAR *) _HeapAllocate(4096, HEAPZEROINIT);
 	if (!v->iop || !sec)
 		goto free_no;
 	v->part_start = *(ULONG *) (vrp + 0x10);
 	{
 		ULONG ldcb = *(ULONG *) (vrp + 0x28);
-		v->phys_handle = (ldcb >= 0xC0000000u && *(ULONG *) ldcb >= 0xC0000000u) ? *(ULONG *) ldcb + 0x83 : 0;
+		v->phys_handle = (ldcb >= 0xC0000000u && *(ULONG *) ldcb >= 0xC0000000u) ? *(ULONG *) ldcb : 0;   /* the physical DCB (IOS routes by vol_designtr anyway) */
 	}
-	r = ios_rw(v, IOR_READ, 0, 1, sec);
-	if (r && v->phys_handle)
-	{
-		outs("kexfat: volume refused the read; through the disk, partition at ");
-		outx(v->part_start, 8);
-		outs("\r\n");
-		v->physical = 1;
-		r = ios_rw(v, IOR_READ, 0, 1, sec);
-	}
+	/* IOS refuses every request to the volume itself (IORS_UNFORMATTED_MEDIA):
+	 * its logical layer found no FAT BPB. The disk underneath takes them, so
+	 * the volume is found on the disks and read through them. */
+	r = find_on_disks(v, sec);
 	outs("kexfat: boot sector read ");
 	outx((ULONG) r, 8);
 	outs(": ");
@@ -327,6 +451,12 @@ static int __cdecl fsd_mount(UCHAR *pir)
 	{
 		struct exfat_info info;
 		exfat_info(v->ex, &info);
+		if (n_mounted < MAX_VOLS)
+		{
+			mounted[n_mounted].unit = v->unit;
+			mounted[n_mounted].start = v->part_start;
+			n_mounted++;
+		}
 		outs("kexfat: mounted, ");
 		outx(info.clusters, 8);
 		outs(" clusters of ");
@@ -335,13 +465,19 @@ static int __cdecl fsd_mount(UCHAR *pir)
 		outx(info.free_clusters, 8);
 		outs(" free\r\n");
 	}
+#ifdef KEXFAT_DECLINE_TEST
+	goto free_no;
+#endif
 	IR_RH(pir) = (ULONG) v;
-	IR_DATA(pir) = (ULONG) &vfuncs;   /* ir_vfunc */
+	/* ir_vfunc shares ir_aux1 with ir_volh (the VRP coming in): the DDK's ifs.h
+	 * defines both on ir_aux1. Put in ir_data, IFSMgr took the VRP for the
+	 * table and called into it (a fault in IOS's memory, then a triple fault) */
+	IR_AUX1(pir) = (ULONG) &vfuncs;
 	IR_ERROR(pir) = 0;
+	outs("kexfat: mount done\r\n");
 	return 0;
 free_no:
-	if (v->iop)
-		_HeapFree(v->iop, 0);
+	/* TODO: _PageFree the packet */
 	_HeapFree(v, 0);
 no:
 	IR_ERROR(pir) = ERROR_UNRECOGNIZED_VOLUME_;

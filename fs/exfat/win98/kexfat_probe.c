@@ -77,8 +77,114 @@ __attribute__((used)) ULONG cb_orig;   /* the callback the logged requests carry
 static ULONG n_cb;
 void cb_hook(void);
 
+/* one good read as VFAT sent it, replayed at the exFAT mount (does a known-good
+ * request succeed when we send it, and when we send it to the exFAT volume?) */
+static UCHAR saved[1024], replay_pkt[1024], replay_buf[4096];
+static ULONG saved_len, saved_delta, saved_edi, saved_iop;
+static volatile int replay_done;
+static int zero_hdr;
+
+__attribute__((used)) void __cdecl replay_cb_c(void)
+{
+	replay_done = 1;
+}
+
+__attribute__((naked)) void replay_cb(void)
+{
+	__asm__("pushal\n\t"
+	        "call _replay_cb_c\n\t"
+	        "popal\n\t"
+	        "ret");
+}
+
+static void capture(ULONG ior, ULONG edi)
+{
+	ULONG delta;
+	if (saved_len || !sys_ptr(ior) || *(USHORT *) (ior + 4) != 0 || !sys_ptr(*(ULONG *) (ior + 0x0C)) ||
+	    *(ULONG *) (ior + 0x18) != 1)
+		return;
+	delta = *(ULONG *) (ior + 0x20);
+	if (!delta || delta > 0x200)
+		return;
+	saved_delta = delta;
+	saved_len = delta + 0x100;
+	saved_edi = edi;
+	saved_iop = ior - delta;
+	memcpy(saved, (void *) saved_iop, saved_len);
+	outs("kexfatp: captured a one-sector read, drive ");
+	outx(*(UCHAR *) (ior + 0x4D), 2);
+	outs(" handle ");
+	outx(edi, 8);
+	outs("\r\n");
+}
+
+static void ifs_yield(void)
+{
+	__asm__ __volatile__("int $0x20\n\t"
+	                     ".long 0x00400014"
+	                     :
+	                     :
+	                     : "eax", "ecx", "edx", "memory", "cc");
+}
+
+static void replay(ULONG edi, ULONG start, UCHAR drive, const char *what)
+{
+	UCHAR *ior = replay_pkt + saved_delta;
+	ULONG i, n = 0;
+	memcpy(replay_pkt, saved, saved_len);
+	/* pointers into the old packet move with it */
+	for (i = 0; i + 4 <= saved_len; i += 4)
+	{
+		ULONG v = *(ULONG *) (replay_pkt + i);
+		if (v >= saved_iop && v < saved_iop + saved_len)
+		{
+			*(ULONG *) (replay_pkt + i) = v - saved_iop + (ULONG) replay_pkt;
+			n++;
+		}
+	}
+	if (zero_hdr)
+		memset(replay_pkt, 0, saved_delta);
+	*(USHORT *) (ior + 6) = 0;
+	*(ULONG *) (ior + 0x0C) = (ULONG) replay_cb;
+	*(ULONG *) (ior + 0x10) = start;
+	*(ULONG *) (ior + 0x1C) = (ULONG) replay_buf;
+	if (drive != 0xFF)
+		*(UCHAR *) (ior + 0x4D) = drive;
+	memset(replay_buf, 0, sizeof replay_buf);
+	replay_done = 0;
+	__asm__ __volatile__("pushal\n\t"
+	                     "int $0x20\n\t"
+	                     ".long 0x00100004\n\t"
+	                     "popal"
+	                     :
+	                     : "S"(ior), "D"(edi)
+	                     : "memory", "cc");
+	for (i = 0; !replay_done && i < 2000; i++)
+		ifs_yield();
+	outs("kexfatp: replay ");
+	outs(what);
+	outs(" (");
+	outx(n, 2);
+	outs(" pointers moved): done ");
+	outx(replay_done, 1);
+	outs(" status ");
+	outx(*(USHORT *) (ior + 6), 4);
+	outs(", bytes 3..10 ");
+	for (i = 3; i < 11; i++)
+		outc(replay_buf[i] >= 32 && replay_buf[i] < 127 ? (char) replay_buf[i] : '.');
+	outs(" sig ");
+	outx(*(USHORT *) (replay_buf + 510), 4);
+	outs(" part0 ");
+	for (i = 0x1BE; i < 0x1CE; i++)
+		outx(replay_buf[i], 2);
+	outs(" flags ");
+	outx(*(ULONG *) (ior + 8), 8);
+	outs("\r\n");
+}
+
 __attribute__((used)) void __cdecl log_send(ULONG ior, ULONG dcb)
 {
+	capture(ior, dcb);
 	/* everything except C: (drive 2), from boot on: how VFAT mounts removable media */
 	if (!sys_ptr(ior) || *(UCHAR *) (ior + 0x4D) == 2 || ++n_send > 40)
 		return;
@@ -102,7 +208,12 @@ __attribute__((used)) void __cdecl log_send(ULONG ior, ULONG dcb)
 	}
 	outs("\r\n");
 	if (sys_ptr(ior))
+	{
+		ULONG delta = *(ULONG *) (ior + 0x20);
+		if (delta && delta < 0x200)
+			dump("  iop header", (void *) (ior - delta), delta);
 		dump("  ior", (void *) ior, 0x58);
+	}
 }
 
 /* the registers as pushal left them, then the caller's return address and arguments */
@@ -238,6 +349,41 @@ static int __cdecl probe_mount(UCHAR *pir)
 			orig_fsd_entry = *fe;
 			*fe = (ULONG) fsd_entry_hook;
 			outs("kexfatp: fsd_entry wrapped\r\n");
+		}
+	}
+	if (saved_len && sys_ptr(vrp) && *(ULONG *) (pir + 0x28) == 3)
+	{
+		ULONG h = *(ULONG *) (vrp + 0x1C);
+		replay(saved_edi, *(ULONG *) (saved + saved_delta + 0x10), 0xFF, "as captured");
+		replay(saved_edi, 0, 0xFF, "captured target, sector 0");
+		replay(h, 0x800, 3, "to D:, sector 0x800");
+		replay(h, 0, 3, "to D:, sector 0");
+		{
+			ULONG ldcb = *(ULONG *) (vrp + 0x28), pdcb = *(ULONG *) ldcb;
+			outs("kexfatp: D: logical dcb ");
+			outx(ldcb, 8);
+			outs(" handle ");
+			outx(h, 8);
+			outs(" physical dcb ");
+			outx(pdcb, 8);
+			outs("\r\n");
+			{
+				ULONG cl = saved_edi & ~0xFFu;
+				outs("kexfatp: C: logical dcb ");
+				outx(cl, 8);
+				outs(" -> ");
+				outx(*(ULONG *) cl, 8);
+				outs("\r\n");
+				dump("D: ldcb", (void *) ldcb, 0x100);
+				dump("D: pdcb", (void *) pdcb, 0x100);
+				dump("C: ldcb", (void *) cl, 0x40);
+			}
+			if (sys_ptr(pdcb) && pdcb != ldcb)
+			{
+				replay(pdcb, 0x800, 0x81, "EDI = physical dcb, drive 81, 0x800");
+				replay(pdcb, 0, 0x81, "EDI = physical dcb, drive 81, 0");
+				replay(pdcb, 0x800, 0x80, "EDI = physical dcb, drive 80, 0x800");
+			}
 		}
 	}
 	/* not ours: ERROR_UNRECOGNIZED_VOLUME, so IFSMgr asks the next FSD */
