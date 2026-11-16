@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 14 | [KernelExEx-1.0.0-testbuild14.zip](KernelExEx-1.0.0-testbuild14.zip) | [450bd39](https://github.com/Techniix/KernelExEx/commit/450bd399fbf651a2a3b1f9e181e263e185af9e3a) | Realtek LAN: silence the chip before Windows connects its interrupt (suspected boot hang on the RTL8100C) |
 | 13 | [KernelExEx-1.0.0-testbuild13.zip](KernelExEx-1.0.0-testbuild13.zip) | [7ff864c](https://github.com/Techniix/KernelExEx/commit/7ff864c9fdcefd0c0bc1257ada68a90fca066627) | Updating over a running install, Xbox 360-style controllers (8BitDo Ultimate 2C) start and read correctly, AC'97 brings Windows' sound files from the CD, Recommended ticks decided |
 | 12 | [KernelExEx-1.0.0-testbuild12.zip](KernelExEx-1.0.0-testbuild12.zip) | [c9e69d0](https://github.com/Techniix/KernelExEx/commit/c9e69d0e4bf8c762084a2b8271c14949f92ef887) | Wi-Fi program, new setup, virtio and mouse integration for VMs; USB network driver freeze fixes (steps 16-18) |
 | 11 | [KernelExEx-1.0.0-testbuild11.zip](KernelExEx-1.0.0-testbuild11.zip) | [a9d243b](https://github.com/Techniix/KernelExEx/commit/a9d243b2bb32627071b92f8abf5b2d2599ac833c) | USB flash drives, USB hard disks, card readers and USB CD/DVD drives (step 15) |
