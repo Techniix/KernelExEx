@@ -264,11 +264,11 @@ list.
     Device Manager names every device; USB 2 (EHCI); SD card readers
     (`sdhci`); PCI serial and parallel cards (`puc`); SMBus and temperature
     sensors (`ichsmb`, `coretemp`, `amdtemp`) with a small hardware monitor.
-    Laptop batteries (planned, asked for): modern laptops report their
-    battery through ACPI control-method batteries (`_BIF`/`_BIX`, `_BST`),
-    which Windows 98's APM-era power meter does not read accurately; a
-    driver that reads them so the charge, time left and charging state are
-    right.
+    Laptop batteries (first version done, `drivers/acpi`): modern laptops
+    report their battery through ACPI control-method batteries
+    (`_BIF`/`_BIX`, `_BST`), which Windows 98's APM-era power meter cannot
+    read; KEXACPI.VXD reads them and kexpower shows the charge, time left
+    and charging state.
 41. **Graphics** (decided): a universal framebuffer display driver (VESA
     VBE, and a UEFI GOP handover for machines without legacy BIOS) for any
     modern card at native resolution in 32-bit colour. Then accelerated 2D
@@ -387,6 +387,7 @@ drivers for USB devices and the drivers for hardware found (decision 19).
 | NVMe SSDs | `kexnvme.mpd`: own GPLv2 NVMe driver (NT SCSI miniport for SCSIPORT): namespace 1 as a SCSI disk, PRP lists, interrupt-driven with up to 8 commands at once; registers mapped with `MmMapIoSpace`. 512-byte blocks only | QEMU NVMe: installed by the hardware wizard, the SSD is D:; 406 files written and compared with interrupts and queuing and again polled, `fsck.fat` clean. An SSD the BIOS switched on (e.g. the startup disk) is left to the BIOS (compatibility mode; `TAKEOVER` for data-only SSDs). Untested on hardware; not yet: 4 KB-sector SSDs, starting Windows from NVMe at full speed | when found |
 | USB storage | `kexumass.sys`: own GPLv2 USB mass storage driver (Bulk-Only Transport, SCSI), children with Windows 98's `USBSTOR\GenDisk`/`GenCdRom` IDs; Windows' own NTMAP (upper filter, as for 1394 disks) connects them to the disk layer. On Windows' USB 1.1 stack and on kexehci | QEMU: stick installed on the first plug-in, no restart; 76 MB written and compared on USB 1.1 and on USB 2.0 (host check too); unplug and replug while running. Not yet: CBI floppy drives | yes |
 | exFAT drives | `KEXFAT.VXD`: file system driver on the portable exFAT core (`fs/exfat`), registered with IFSMgr and, as a layer driver, with IOS; gives type-07 exFAT partitions and partitionless exFAT disks a drive letter (Windows 98 gives them none) | QEMU, 98 SE: an exFAT partition on a second IDE disk and a USB stick plugged in at the desktop get letters; DIR, TYPE, COPY to C: byte for byte, long names, Explorer; pulling the stick releases its letter. **Read-only**: writing is written but not stable yet (branch `exfat-write-wip`). Windows 98 time-stamps sector 0 of hard disks, which on a partitionless exFAT disk breaks the boot checksum; the driver tolerates it (`fs/exfat/DESIGN.md`) | no |
+| Laptop battery (ACPI) | `KEXACPI.VXD`: ACPICA (BSD-3/GPLv2) inside Windows 98 with our own ring-0 host layer and embedded-controller handler; reads `_BIX`/`_BIF`, `_BST`, `_PSR`, `_LID` with the machine left in legacy mode (stays out if Windows' own ACPI driver runs it). `kexpower.exe`/`.cpl`: taskbar icon filled to the charge, window with each battery's details and health, low-battery warning, shut down when nearly empty, lid action | QEMU with simulated batteries as extra ACPI tables (`tests/acpi`): `_BIX` and `_BIF` batteries read right, warning, critical notice and shutdown; a silent embedded controller is given up on. Untested on a real laptop; power and sleep buttons and standby are not possible in legacy mode (`drivers/acpi/README.md`) | no |
 | Intel chipset INFs | `kexchip.inf`, `kexide.inf`, `kexuhci.inf` from pci.ids: ICH2 to ICH10, 845 to P45 | QEMU: ICH9 UHCI installs and runs; untested on hardware | if found (Intel ISA bridge) |
 | Realtek RTL8139/810x Ethernet | `kexrl.sys`: own GPLv2 driver; RTL8139/C/C+/D, RTL8100/8100C (MSI 848P Neo2-V onboard), RTL8101L and 19 OEM cards | DHCP, ping 4/4 and 30/30 at 1450 bytes in QEMU (rtl8139); untested on hardware | if found |
 | USB RNDIS / phone tethering | `kexrndis.sys`: OpenBSD urndis(4) through kexbsd's USB layer | DHCP + ping in QEMU (usb-net on UHCI); untested on hardware | yes |
@@ -416,7 +417,7 @@ drivers for USB devices and the drivers for hardware found (decision 19).
 | Network cards | FreeBSD re, em, igb | planned | to be decided |
 | SATA/AHCI, NVMe | FreeBSD ahci, nvme | planned | to be decided |
 | Bluetooth stack | NetBSD bluetooth | planned | to be decided |
-| ACPI power | ACPICA | planned | to be decided |
+| ACPI batteries, AC adapter, lid | ACPICA (BSD-3-Clause OR GPL-2.0-only, used as GPLv2) | first version in KEXACPI.VXD | optional, unticked |
 | NTFS / ext2 read | NetBSD ntfs, FreeBSD ext2fs | planned | to be decided |
 | libarchive, zstd | archive formats | planned | to be decided |
 | Command-line tools | BusyBox, curl, 7z, zstd, ssh, zip, Lua, editors | planned | to be decided |

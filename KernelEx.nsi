@@ -650,6 +650,7 @@ LangString DESC_GRPVM ${LANG_ENGLISH} "For running Windows 98 in a virtual machi
 LangString DESC_KEXVIO ${LANG_ENGLISH} "The virtio network adapter of QEMU/KVM, Proxmox and VirtualBox (virtio-net): faster than an emulated network card. OpenBSD's vio driver."
 LangString DESC_KEXAHCI ${LANG_ENGLISH} "SATA hard disks, SSDs and DVD drives on boards whose SATA controller is in AHCI mode (most boards since 2008; Windows 98 does not see those disks at all). Not needed when the BIOS has the controller in IDE mode."
 LangString DESC_KEXNVME ${LANG_ENGLISH} "NVMe SSDs: M.2 NVMe drives and PCIe SSD cards (Windows 98 does not see them at all). For a second drive: booting Windows 98 from an NVMe SSD needs a BIOS that can boot from it."
+LangString DESC_KEXACPI ${LANG_ENGLISH} "For laptops: shows the battery's charge and time left on the taskbar, warns when it runs low, and can shut down when it is nearly empty or turn the screen off when the lid closes. For laptops whose battery Windows 98 cannot read (most from 2005 on). Not needed on a desktop."
 LangString DESC_KEXFAT ${LANG_ENGLISH} "Reads SD cards, USB sticks and disks formatted exFAT (cards over 32 GB come that way): they get a drive letter and open in Explorer and in programs. Read-only for now: copying files onto them is not possible yet. Experimental."
 LangString DESC_KEXVMM ${LANG_ENGLISH} "The mouse pointer moves in and out of the virtual machine's window freely, with no need to click into it or press keys to release it. For QEMU (the default PC machine) and VMware. Does nothing on a real PC."
 LangString DESC_GRPINET ${LANG_ENGLISH} "Internet helpers."
@@ -872,6 +873,24 @@ Function KexAc97Repair
   Pop $R1
   Pop $R0
 FunctionEnd
+
+Section /o "Laptop battery (ACPI)" SECKEXACPI
+  ;KEXACPI.VXD reads the battery, the AC adapter and the lid from the
+  ;firmware's ACPI methods (ACPICA inside); Windows loads it from SYSTEM when
+  ;kexpower.exe first asks. kexpower.exe: the taskbar icon and window;
+  ;kexpower.cpl: the Control Panel icon (it finds kexpower.exe beside itself)
+  !insertmacro KexUpd "drivers\acpi\KEXACPI.VXD" "$SYSDIR" "KEXACPI.VXD"
+  !insertmacro KexUpd "kexpower\kexpower.exe" "$SYSDIR" "kexpower.exe"
+  !insertmacro KexUpd "kexpower\kexpower.cpl" "$SYSDIR" "kexpower.cpl"
+  SetOutPath "$INSTDIR"
+  ;on a machine without a battery or lid it exits at once
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexPower" '"$SYSDIR\kexpower.exe" /tray'
+  !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
+    CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
+    CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Battery.lnk" "$SYSDIR\kexpower.exe"
+  !insertmacro MUI_STARTMENU_WRITE_END
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexAcpi" "1"
+SectionEnd
 
 SectionGroupEnd
 
@@ -1097,6 +1116,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEHCI} $(DESC_KEXEHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXUMASS} $(DESC_KEXUMASS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXFAT} $(DESC_KEXFAT)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXACPI} $(DESC_KEXACPI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAHCI} $(DESC_KEXAHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXNVME} $(DESC_KEXNVME)
@@ -1311,6 +1331,16 @@ Section "Uninstall"
     Delete /REBOOTOK "$INSTDIR\kexvmm.exe"
     Delete /REBOOTOK "$INSTDIR\KEXVMM.VXD"
   un_kexvmm_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexAcpi"
+  StrCmp $0 "1" 0 un_kexacpi_done
+    ;a running kexpower.exe and a loaded KEXACPI.VXD go at the restart
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexPower"
+    Delete /REBOOTOK "$SYSDIR\kexpower.exe"
+    Delete /REBOOTOK "$SYSDIR\kexpower.cpl"
+    Delete /REBOOTOK "$SYSDIR\KEXACPI.VXD"
+    Delete "$SMPROGRAMS\$StartMenuFolder\Battery.lnk"
+    DeleteRegKey HKCU "Software\KernelExEx\Power"
+  un_kexacpi_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexFat"
   StrCmp $0 "1" 0 un_kexfat_done
     DeleteRegKey HKLM "System\CurrentControlSet\Services\VxD\KEXFAT"
