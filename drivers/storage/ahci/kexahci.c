@@ -156,6 +156,9 @@ static void logf(const char *f, ...)
 #define CMD_FLUSH 0xE7
 #define CMD_FLUSH_EXT 0xEA
 #define CMD_IDENTIFY 0xEC
+#define CMD_READ_FPDMA 0x60
+#define CMD_WRITE_FPDMA 0x61
+#define CAP_SNCQ (1u << 30)
 
 #define ER_ABRT 0x04
 #define ER_IDNF 0x10
@@ -171,7 +174,9 @@ static void logf(const char *f, ...)
 #define CL_SIZE 0x400
 #define FIS_SIZE 0x100
 #define CT_SIZE (0x80 + NPRD * 16)
-#define PORT_MEM 0xA00          /* CL + FIS + CT, rounded so every part stays aligned */
+#define NSLOT 8                 /* queued (NCQ) commands per disk */
+#define CT_STRIDE 0x300         /* CT_SIZE rounded to the 128-byte alignment */
+#define PORT_MEM 0x2000         /* CL + FIS + NSLOT command tables, so every part stays aligned */
 #define IDBUF_SIZE 512
 
 typedef struct
@@ -182,6 +187,24 @@ typedef struct
 	UCHAR sense_key, asc, ascq;
 	UCHAR cdb_len;
 	int port;
+	int tid;
+	/* the command in flight (interrupt mode), not queued */
+	PSCSI_REQUEST_BLOCK srb;
+	int kind;
+	ULONG bytes;
+	/* queued (NCQ) reads and writes in flight, by tag */
+	int ncq, qdepth;
+	ULONG qactive;
+	struct
+	{
+		PSCSI_REQUEST_BLOCK srb;
+		ULONGLONG lba;
+		ULONG count;
+		int write;
+	} q[NSLOT];
+	/* requests waiting for the drive (Windows sends several at once) */
+	PSCSI_REQUEST_BLOCK wait[NSLOT + 4];
+	int nwait;
 	/* the port's memory */
 	PULONG cl;
 	PUCHAR fis, ct;
@@ -197,6 +220,10 @@ typedef struct
 	PUCHAR idbuf;
 	ULONG idbuf_pa;
 	int depth, want_next;
+	ULONG want_lu;   /* targets to ask Windows for another request (NextLuRequest) */
+	int irq_mode;   /* commands complete in the interrupt (after HwInitialize) */
+	int no_irq;     /* no IRQ from Windows, or AdapterSettings "POLL" */
+	int no_ncq;     /* AdapterSettings "NONCQ" */
 } HBA;
 
 static ULONG r32(HBA *h, ULONG off)
@@ -243,10 +270,18 @@ static void enter(HBA *h)
 static void leave(HBA *h)
 {
 	if (h->depth == 1)
-		while (h->want_next)
+		while (h->want_next || h->want_lu)
 		{
-			h->want_next = 0;
-			ScsiPortNotification(NextRequest, h, NULL);
+			ULONG lu = h->want_lu, t;
+			h->want_lu = 0;
+			for (t = 0; t < MAX_PORTS; t++)
+				if (lu & (1u << t))
+					ScsiPortNotification(NextLuRequest, h, 0, (UCHAR) t, 0);
+			if (h->want_next)
+			{
+				h->want_next = 0;
+				ScsiPortNotification(NextRequest, h, NULL);
+			}
 		}
 	h->depth--;
 }
@@ -325,9 +360,9 @@ static void port_reset(HBA *h, DRIVE *d)
 }
 
 /* scatter/gather: the PRDs of the command table; 0 when the buffer will not fit */
-static int build_prdt(HBA *h, DRIVE *d, PSCSI_REQUEST_BLOCK srb, PUCHAR va, ULONG len, ULONG *n)
+static int build_prdt(HBA *h, PUCHAR ct, PSCSI_REQUEST_BLOCK srb, PUCHAR va, ULONG len, ULONG *n)
 {
-	PULONG prd = (PULONG) (d->ct + 0x80);
+	PULONG prd = (PULONG) (ct + 0x80);
 	ULONG i = 0;
 	while (len)
 	{
@@ -458,15 +493,128 @@ static void identify(HBA *h, DRIVE *d)
 	else
 		d->sectors = (ULONG) id[60] | ((ULONG) id[61] << 16);
 	d->present = d->sectors != 0;
-	logf("kexahci: port %u: disk %s, %u MB, %s\n", d->port, d->model, (ULONG) (d->sectors >> 11),
-	     d->lba48 ? "48-bit" : "28-bit");
+	if ((id[76] & 0x100) && (h->cap & CAP_SNCQ) && d->lba48 && !h->no_ncq)
+	{
+		int dq = (id[75] & 0x1F) + 1, hq = (int) ((h->cap >> 8) & 0x1F) + 1;
+		d->qdepth = dq < hq ? dq : hq;
+		if (d->qdepth > NSLOT)
+			d->qdepth = NSLOT;
+		d->ncq = d->qdepth > 1;
+	}
+	logf("kexahci: port %u: disk %s, %u MB, %s, NCQ %d\n", d->port, d->model, (ULONG) (d->sectors >> 11),
+	     d->lba48 ? "48-bit" : "28-bit", d->ncq ? d->qdepth : 0);
 }
 
+/* ---- issuing: at once and completed in the interrupt, or (before Windows turns
+ * interrupts on, and as a fallback) waited for here ------------------------------- */
+enum { K_DISK = 1, K_FLUSH, K_ATAPI };
+
+static void done_disk(HBA *h, DRIVE *d, PSCSI_REQUEST_BLOCK srb, ULONG t);
+static void done_atapi(HBA *h, DRIVE *d, PSCSI_REQUEST_BLOCK srb, ULONG t);
+
+static void complete(HBA *h, DRIVE *d, ULONG t)
+{
+	PSCSI_REQUEST_BLOCK srb = d->srb;
+	int kind = d->kind;
+	d->srb = NULL;
+	if (!srb)
+		return;
+	if (kind == K_DISK)
+		done_disk(h, d, srb, t);
+	else if (kind == K_ATAPI)
+		done_atapi(h, d, srb, t);
+	else
+	{
+		srb->DataTransferLength = 0;
+		finish(h, srb, SRB_STATUS_SUCCESS);
+	}
+}
+
+#define PIE_ALL 0x7DC0007Fu   /* every completion and error interrupt of a port */
+
+static void start_cmd(HBA *h, DRIVE *d, PSCSI_REQUEST_BLOCK srb, const UCHAR *fis, const UCHAR *acmd, int write,
+                      ULONG nprd, int kind, ULONG bytes, ULONG ms)
+{
+	d->srb = srb;
+	d->kind = kind;
+	d->bytes = bytes;
+	if (!h->irq_mode)
+	{
+		complete(h, d, run_cmd(h, d, fis, acmd, write, nprd, ms));
+		return;
+	}
+	memset(d->ct, 0, 0x80);
+	memcpy(d->ct, fis, 20);
+	if (acmd)
+		memcpy(d->ct + 0x40, acmd, 16);
+	d->cl[0] = 5 | (acmd ? 0x20 : 0) | (write ? 0x40 : 0) | (nprd << 16);
+	d->cl[1] = 0;
+	d->cl[2] = d->ct_pa;
+	d->cl[3] = 0;
+	pw(h, d, P_IS, 0xFFFFFFFFu);
+	pw(h, d, P_CI, 1);
+	/* this port is busy; the others can take requests meanwhile */
+	h->want_next = 1;
+}
+
+static int popcount(ULONG v);
+
 /* ---- disks ------------------------------------------------------------------------------ */
+/* a read or write as a queued (NCQ) command, in a free tag; pump() has made
+ * sure there is one and that it does not overlap a write in flight */
+static void rw_queued(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d, ULONGLONG lba, ULONG count, int write)
+{
+	ULONG tag, nprd, bytes = count * 512, bit;
+	PUCHAR ct;
+	PULONG cl;
+	for (tag = 0; tag < (ULONG) d->qdepth && (d->qactive & (1u << tag)); tag++)
+		;
+	ct = d->ct + tag * CT_STRIDE;
+	if (tag >= (ULONG) d->qdepth || bytes > srb->DataTransferLength || bytes > MAX_XFER ||
+	    !build_prdt(h, ct, srb, (PUCHAR) srb->DataBuffer, bytes, &nprd))
+	{
+		fail_sense(h, srb, d, SCSI_SENSE_ILLEGAL_REQUEST, 0x24);
+		return;
+	}
+	memset(ct, 0, 0x80);
+	ct[0] = 0x27;
+	ct[1] = 0x80;
+	ct[2] = write ? CMD_WRITE_FPDMA : CMD_READ_FPDMA;
+	ct[3] = (UCHAR) count;   /* the count goes in the features */
+	ct[11] = (UCHAR) (count >> 8);
+	ct[4] = (UCHAR) lba;
+	ct[5] = (UCHAR) (lba >> 8);
+	ct[6] = (UCHAR) (lba >> 16);
+	ct[7] = 0x40;
+	ct[8] = (UCHAR) (lba >> 24);
+	ct[9] = (UCHAR) (lba >> 32);
+	ct[10] = (UCHAR) (lba >> 40);
+	ct[12] = (UCHAR) (tag << 3);
+	cl = d->cl + tag * 8;
+	cl[0] = 5 | (write ? 0x40 : 0) | (nprd << 16);
+	cl[1] = 0;
+	cl[2] = d->ct_pa + tag * CT_STRIDE;
+	cl[3] = 0;
+	d->q[tag].srb = srb;
+	d->q[tag].lba = lba;
+	d->q[tag].count = count;
+	d->q[tag].write = write;
+	bit = 1u << tag;
+	d->qactive |= bit;
+	{
+		static int most;
+		if (popcount(d->qactive) > most)
+			most = popcount(d->qactive), logf("kexahci: port %u: %d queued\n", d->port, most);
+	}
+	pw(h, d, P_SACT, bit);
+	pw(h, d, P_CI, bit);
+	h->want_next = 1;
+}
+
 static void rw(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d, ULONGLONG lba, ULONG count, int write)
 {
 	UCHAR f[20];
-	ULONG nprd, t, bytes = count * 512;
+	ULONG nprd, bytes = count * 512;
 	if (!count)
 	{
 		srb->DataTransferLength = 0;
@@ -478,8 +626,13 @@ static void rw(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d, ULONGLONG lba, ULONG c
 		fail_sense(h, srb, d, SCSI_SENSE_ILLEGAL_REQUEST, 0x21);
 		return;
 	}
+	if (h->irq_mode && d->ncq)
+	{
+		rw_queued(h, srb, d, lba, count, write);
+		return;
+	}
 	if (bytes > srb->DataTransferLength || bytes > MAX_XFER ||
-	    !build_prdt(h, d, srb, (PUCHAR) srb->DataBuffer, bytes, &nprd))
+	    !build_prdt(h, d->ct, srb, (PUCHAR) srb->DataBuffer, bytes, &nprd))
 	{
 		fail_sense(h, srb, d, SCSI_SENSE_ILLEGAL_REQUEST, 0x24);
 		return;
@@ -492,7 +645,11 @@ static void rw(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d, ULONGLONG lba, ULONG c
 		f[7] = (UCHAR) (0x40 | ((lba >> 24) & 0x0F));
 		f[8] = f[9] = f[10] = 0;
 	}
-	t = run_cmd(h, d, f, NULL, write, nprd, 10000);
+	start_cmd(h, d, srb, f, NULL, write, nprd, K_DISK, bytes, 10000);
+}
+
+static void done_disk(HBA *h, DRIVE *d, PSCSI_REQUEST_BLOCK srb, ULONG t)
+{
 	if (t & TFD_ERR)
 	{
 		UCHAR er = (UCHAR) (t >> 8);
@@ -510,7 +667,7 @@ static void rw(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d, ULONGLONG lba, ULONG c
 		finish(h, srb, SRB_STATUS_ERROR);
 		return;
 	}
-	srb->DataTransferLength = bytes;
+	srb->DataTransferLength = d->bytes;
 	finish(h, srb, SRB_STATUS_SUCCESS);
 }
 
@@ -519,9 +676,7 @@ static void flush(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d)
 	UCHAR f[20];
 	h2d(f, d->lba48 ? CMD_FLUSH_EXT : CMD_FLUSH, 0, 0, 0);
 	f[7] = 0;
-	run_cmd(h, d, f, NULL, 0, 0, 30000);
-	srb->DataTransferLength = 0;
-	finish(h, srb, SRB_STATUS_SUCCESS);
+	start_cmd(h, d, srb, f, NULL, 0, 0, K_FLUSH, 0, 30000);
 }
 
 static void ata_scsi(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d)
@@ -627,7 +782,7 @@ static void ata_scsi(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d)
 static void atapi_scsi(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d)
 {
 	UCHAR f[20], cdb[16];
-	ULONG nprd = 0, t, len = srb->DataTransferLength;
+	ULONG nprd = 0, len = srb->DataTransferLength;
 	int write = (srb->SrbFlags & SRB_FLAGS_DATA_OUT) != 0;
 	memset(cdb, 0, sizeof(cdb));
 	memcpy(cdb, srb->Cdb, srb->CdbLength > 16 ? 16 : srb->CdbLength);
@@ -639,7 +794,7 @@ static void atapi_scsi(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d)
 	}
 	if (!(srb->SrbFlags & (SRB_FLAGS_DATA_IN | SRB_FLAGS_DATA_OUT)))
 		len = 0;
-	if (len && (len > MAX_XFER || !build_prdt(h, d, srb, (PUCHAR) srb->DataBuffer, len, &nprd)))
+	if (len && (len > MAX_XFER || !build_prdt(h, d->ct, srb, (PUCHAR) srb->DataBuffer, len, &nprd)))
 	{
 		fail_sense(h, srb, d, SCSI_SENSE_ILLEGAL_REQUEST, 0x24);
 		return;
@@ -648,7 +803,12 @@ static void atapi_scsi(HBA *h, PSCSI_REQUEST_BLOCK srb, DRIVE *d)
 	f[7] = 0;
 	f[5] = (UCHAR) (len > 0xfffe ? 0xfe : len);
 	f[6] = (UCHAR) ((len > 0xfffe ? 0xfffe : len) >> 8);
-	t = run_cmd(h, d, f, cdb, write, nprd, 20000);
+	start_cmd(h, d, srb, f, cdb, write, nprd, K_ATAPI, len, 20000);
+}
+
+static void done_atapi(HBA *h, DRIVE *d, PSCSI_REQUEST_BLOCK srb, ULONG t)
+{
+	ULONG len = d->bytes;
 	if (t & TFD_ERR)
 	{
 		/* the drive keeps its sense data: Windows asks for it with REQUEST SENSE */
@@ -704,24 +864,202 @@ static void startio_body(HBA *h, PSCSI_REQUEST_BLOCK srb)
 		ata_scsi(h, srb, d);
 }
 
+static ULONG be32(const UCHAR *b)
+{
+	return ((ULONG) b[0] << 24) | ((ULONG) b[1] << 16) | ((ULONG) b[2] << 8) | b[3];
+}
+
+/* the sectors a read or write covers; 0 for anything else */
+static int rw_range(PSCSI_REQUEST_BLOCK srb, ULONGLONG *lba, ULONG *count, int *write)
+{
+	UCHAR *c = srb->Cdb;
+	if (srb->Function != SRB_FUNCTION_EXECUTE_SCSI)
+		return 0;
+	switch (c[0])
+	{
+	case SCSIOP_READ6:
+	case SCSIOP_WRITE6:
+		*lba = ((ULONG) (c[1] & 0x1F) << 16) | ((ULONG) c[2] << 8) | c[3];
+		*count = c[4] ? c[4] : 256;
+		*write = c[0] == SCSIOP_WRITE6;
+		return 1;
+	case SCSIOP_READ:
+	case SCSIOP_WRITE:
+		*lba = be32(c + 2);
+		*count = ((ULONG) c[7] << 8) | c[8];
+		*write = c[0] == SCSIOP_WRITE;
+		return 1;
+	case SCSIOP_READ12:
+	case SCSIOP_WRITE12:
+		*lba = be32(c + 2);
+		*count = be32(c + 6);
+		*write = c[0] == SCSIOP_WRITE12;
+		return 1;
+	}
+	return 0;
+}
+
+static int popcount(ULONG v)
+{
+	int n = 0;
+	for (; v; v &= v - 1)
+		n++;
+	return n;
+}
+
+/* can this request go to the drive now? Anything when it is idle; with commands
+ * queued, only more reads and writes that keep the order of overlapping writes */
+static int can_start(HBA *h, DRIVE *d, PSCSI_REQUEST_BLOCK srb)
+{
+	ULONGLONG lba;
+	ULONG count, t;
+	int write;
+	if (!h->irq_mode)
+		return 1;
+	if (d->srb)
+		return 0;
+	if (!d->qactive)
+		return 1;
+	if (!d->ncq || !rw_range(srb, &lba, &count, &write) || !count || popcount(d->qactive) >= d->qdepth)
+		return 0;
+	for (t = 0; t < NSLOT; t++)
+		if ((d->qactive & (1u << t)) && (write || d->q[t].write) && lba < d->q[t].lba + d->q[t].count &&
+		    d->q[t].lba < lba + count)
+			return 0;
+	return 1;
+}
+
+static void pump(HBA *h, DRIVE *d)
+{
+	while (d->nwait && can_start(h, d, d->wait[0]))
+	{
+		PSCSI_REQUEST_BLOCK srb = d->wait[0];
+		int i;
+		d->nwait--;
+		for (i = 0; i < d->nwait; i++)
+			d->wait[i] = d->wait[i + 1];
+		startio_body(h, srb);
+	}
+	/* room for another: ask Windows for the next request to this disk */
+	if (h->irq_mode && d->ncq && d->qactive && !d->nwait && !d->srb && popcount(d->qactive) < d->qdepth)
+		h->want_lu |= 1u << d->tid;
+}
+
 static BOOLEAN NTAPI hw_startio(PVOID ext, PSCSI_REQUEST_BLOCK srb)
 {
 	HBA *h = (HBA *) ext;
 	enter(h);
-	startio_body(h, srb);
+	if (srb->PathId == 0 && srb->Lun == 0 && srb->TargetId < h->ntargets && h->d[srb->TargetId].present &&
+	    srb->Function != SRB_FUNCTION_ABORT_COMMAND)
+	{
+		DRIVE *d = &h->d[srb->TargetId];
+		if (d->nwait >= (int) (sizeof(d->wait) / sizeof(d->wait[0])))
+			finish(h, srb, SRB_STATUS_BUSY);
+		else
+		{
+			d->wait[d->nwait++] = srb;
+			pump(h, d);
+		}
+	}
+	else
+		startio_body(h, srb);
 	leave(h);
 	return TRUE;
 }
 
 static BOOLEAN NTAPI hw_interrupt(PVOID ext)
 {
-	(void) ext;
-	return FALSE;   /* polled: the controller's interrupt stays off */
+	HBA *h = (HBA *) ext;
+	ULONG is = r32(h, HBA_IS), i;
+	if (!is || is == 0xFFFFFFFFu)
+		return FALSE;
+	enter(h);
+	for (i = 0; i < (ULONG) h->ntargets; i++)
+	{
+		DRIVE *d = &h->d[i];
+		ULONG pis;
+		if (!(is & (1u << d->port)))
+			continue;
+		pis = pr(h, d, P_IS);
+		pw(h, d, P_IS, pis);
+		if (d->qactive)
+		{
+			if (pis & (PIS_TFES | PIS_FATAL))
+			{
+				/* a queued command failed: the drive dropped the whole queue. Put the
+				 * requests back in line and go on without queuing on this disk */
+				ULONG t;
+				logf("kexahci: port %u: queued command failed, IS %x TFD %x SERR %x SACT %x; NCQ off\n",
+				     d->port, pis, pr(h, d, P_TFD) & 0xFFFF, pr(h, d, P_SERR), pr(h, d, P_SACT));
+				port_stop(h, d);
+				port_reset(h, d);
+				pw(h, d, P_IS, 0xFFFFFFFFu);
+				pw(h, d, P_IE, PIE_ALL);
+				d->ncq = 0;
+				for (t = 0; t < NSLOT; t++)
+					if (d->qactive & (1u << t))
+					{
+						int k;
+						for (k = d->nwait; k > 0; k--)
+							d->wait[k] = d->wait[k - 1];
+						d->wait[0] = d->q[t].srb;
+						d->nwait++;
+					}
+				d->qactive = 0;
+			}
+			else
+			{
+				ULONG doneq = d->qactive & ~pr(h, d, P_SACT), t;
+				for (t = 0; t < NSLOT; t++)
+					if (doneq & (1u << t))
+					{
+						d->qactive &= ~(1u << t);
+						d->q[t].srb->DataTransferLength = d->q[t].count * 512;
+						finish(h, d->q[t].srb, SRB_STATUS_SUCCESS);
+					}
+			}
+			pump(h, d);
+			continue;
+		}
+		if (!d->srb)
+			continue;
+		if (pis & (PIS_TFES | PIS_FATAL))
+		{
+			ULONG tfd = pr(h, d, P_TFD) & 0xFFFF;
+			logf("kexahci: port %u: command %x failed, IS %x TFD %x SERR %x\n", d->port, d->ct[2], pis, tfd,
+			     pr(h, d, P_SERR));
+			port_stop(h, d);
+			if (pr(h, d, P_TFD) & (TFD_BSY | TFD_DRQ))
+				port_reset(h, d);
+			else
+				port_start(h, d);
+			complete(h, d, tfd | TFD_ERR);
+		}
+		else if (!(pr(h, d, P_CI) & 1))
+			complete(h, d, pr(h, d, P_TFD) & 0xFFFF);
+		pump(h, d);
+	}
+	w32(h, HBA_IS, is);
+	leave(h);
+	return TRUE;
 }
 
 static BOOLEAN NTAPI hw_reset(PVOID ext, ULONG path)
 {
 	HBA *h = (HBA *) ext;
+	int i;
+	logf("kexahci: bus reset\n");
+	for (i = 0; i < h->ntargets; i++)
+		if (h->d[i].srb || h->d[i].qactive)
+		{
+			h->d[i].srb = NULL;
+			h->d[i].qactive = 0;
+			port_stop(h, &h->d[i]);
+			port_reset(h, &h->d[i]);
+			pw(h, &h->d[i], P_IE, PIE_ALL);
+		}
+	for (i = 0; i < h->ntargets; i++)
+		h->d[i].nwait = 0;
 	ScsiPortCompleteRequest(h, (UCHAR) path, SP_UNTAGGED, SP_UNTAGGED, SRB_STATUS_BUS_RESET);
 	ScsiPortNotification(NextRequest, h, NULL);
 	return TRUE;
@@ -729,7 +1067,22 @@ static BOOLEAN NTAPI hw_reset(PVOID ext, ULONG path)
 
 static BOOLEAN NTAPI hw_initialize(PVOID ext)
 {
-	(void) ext;
+	HBA *h = (HBA *) ext;
+	int i;
+	/* from here on Windows takes the controller's interrupt: commands complete there */
+	for (i = 0; i < h->ntargets; i++)
+		if (h->d[i].present)
+		{
+			pw(h, &h->d[i], P_IS, 0xFFFFFFFFu);
+			pw(h, &h->d[i], P_IE, PIE_ALL);
+		}
+	w32(h, HBA_IS, 0xFFFFFFFFu);
+	if (!h->no_irq)
+	{
+		w32(h, HBA_GHC, r32(h, HBA_GHC) | GHC_IE);
+		h->irq_mode = 1;
+	}
+	logf("kexahci: %s\n", h->irq_mode ? "interrupts on" : "polled");
 	return TRUE;
 }
 
@@ -782,9 +1135,20 @@ static ULONG NTAPI hw_find(PVOID ext, PVOID ctx, PVOID bus, PCHAR args, PPORT_CO
 	PUCHAR mem;
 	(void) ctx;
 	(void) bus;
-	(void) args;
 	*again = FALSE;
 	memset(h, 0, sizeof(*h));
+	{
+		/* AdapterSettings "POLL": no interrupts */
+		PCHAR a = args;
+		for (; a && *a; a++)
+		{
+			if ((a[0] | 0x20) == 'p' && (a[1] | 0x20) == 'o' && (a[2] | 0x20) == 'l' && (a[3] | 0x20) == 'l')
+				h->no_irq = 1;
+			if ((a[0] | 0x20) == 'n' && (a[1] | 0x20) == 'o' && (a[2] | 0x20) == 'n' && (a[3] | 0x20) == 'c' &&
+			    (a[4] | 0x20) == 'q')
+				h->no_ncq = 1;
+		}
+	}
 	for (i = 0; i < ci->NumberOfAccessRanges; i++)
 	{
 		ACCESS_RANGE *r = &(*ci->AccessRanges)[i];
@@ -813,6 +1177,8 @@ static ULONG NTAPI hw_find(PVOID ext, PVOID ctx, PVOID bus, PCHAR args, PPORT_CO
 		h->abar = (PUCHAR) MmMapIoSpace(pa, 0x1100, MmNonCached);
 		logf("kexahci: ABAR mapped by MmMapIoSpace\n");
 	}
+	logf("kexahci: irq level %u vector %u mode %u\n", ci->BusInterruptLevel, ci->BusInterruptVector,
+	     ci->InterruptMode);
 	logf("kexahci: %u ranges, interface %u, ABAR mapped at %x\n", ci->NumberOfAccessRanges, ci->AdapterInterfaceType,
 	     (ULONG) h->abar);
 	if (!h->abar)
@@ -850,6 +1216,7 @@ static ULONG NTAPI hw_find(PVOID ext, PVOID ctx, PVOID bus, PCHAR args, PPORT_CO
 		if (!(h->pi & (1u << i)))
 			continue;
 		d->port = (int) i;
+		d->tid = h->ntargets;
 		d->cl = (PULONG) (mem + o);
 		d->cl_pa = base_pa + o;
 		d->fis = mem + o + CL_SIZE;
@@ -900,6 +1267,8 @@ static ULONG NTAPI hw_find(PVOID ext, PVOID ctx, PVOID bus, PCHAR args, PPORT_CO
 	ci->MaximumNumberOfTargets = (UCHAR) (h->ntargets > 7 ? 7 : h->ntargets);
 	ci->CachesData = FALSE;
 	ci->InterruptMode = LevelSensitive;
+	if (!ci->BusInterruptLevel)
+		h->no_irq = 1;
 	if (h->ntargets > 7)
 		h->ntargets = 7;   /* the initiator is id 7 */
 	return SP_RETURN_FOUND;
@@ -922,6 +1291,9 @@ ULONG NTAPI DriverEntry(PVOID drv, PVOID arg2)
 	hi.NumberOfAccessRanges = 6;
 	hi.MapBuffers = TRUE;
 	hi.NeedPhysicalAddresses = TRUE;
+	/* Windows 98 sends overlapping writes to a disk once asked (NextLuRequest) */
+	hi.TaggedQueuing = TRUE;
+	hi.MultipleRequestPerLu = TRUE;
 	logf("kexahci: KernelExEx AHCI driver\n");
 	r = ScsiPortInitialize(drv, arg2, &hi, NULL);
 	logf("kexahci: ScsiPortInitialize %x\n", r);
