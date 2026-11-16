@@ -13,7 +13,14 @@ SYNCHRONIZE CACHE and shutdown.
   queue 1 is full.
 - A time-out resets the controller and sets it up again.
 - `AdapterSettings`: `POLL` (no interrupts), `NOQUEUE` (one command at a
-  time).
+  time), `TAKEOVER` (see below).
+- An SSD the BIOS has already switched on (it serves it through int 13h,
+  perhaps as the disk Windows starts from) is left to the BIOS: Windows
+  reaches it through int 13h in compatibility mode, slower but safe. Taking
+  such a controller over resets it under the BIOS, and Windows still calls
+  the BIOS for its startup disk while it starts: in testing that gave a
+  protection error and then a damaged FAT. `TAKEOVER` uses the SSD anyway;
+  only for an SSD that holds data, never for the one Windows starts from.
 - 512-byte blocks only: Windows 98's disk stack knows no other sector size.
   On an SSD formatted with 4 KB blocks the driver writes to the log whether
   the drive also offers a 512-byte format (switching formats erases the
@@ -31,6 +38,14 @@ there unless it is told to map PCI above 4 GB).
 
 Installed by the hardware wizard from `INF\OTHER`; the FAT32 SSD is D:; 406
 DLLs (filling it) written and compared on the host, `fsck.fat` clean.
+
+Booting from the SSD (SeaBIOS): the driver leaves it to the BIOS, Windows
+starts in compatibility mode, 16 files written to C: identical, `fsck.fat`
+clean. (Before this rule: a protection error during startup and a damaged
+FAT.) A data SSD the BIOS also switched on, with `TAKEOVER`: 406 files
+identical, up to 4 commands in flight. (Without `TAKEOVER` SeaBIOS's own
+NVMe code fails Windows 98's real-mode transfers: it refuses buffers that
+are not 4-byte aligned; real BIOSes should not.)
 
 With interrupts and queuing: the same test, 406 files identical, up to 3
 commands in flight; again with the waited-on path forced (`KEX_TEST_POLL`
@@ -70,5 +85,8 @@ and from a RAM-sized source onto the drive (writing).
 
 ## Not yet
 
-4 KB-sector namespaces, more than one namespace, booting from it (the BIOS's int 13h
+4 KB-sector namespaces, more than one namespace, starting Windows from an
+NVMe SSD at full speed (sharing the controller with the BIOS during startup:
+our own I/O queues beside the BIOS's), telling a data SSD from the startup
+SSD without `TAKEOVER` (the BIOS's int 13h
 until Windows loads; many older BIOSes cannot boot NVMe at all).

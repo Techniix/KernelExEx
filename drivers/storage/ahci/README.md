@@ -45,6 +45,22 @@ CAB files from the DVD and the IDE CD copied to one disk while system DLLs
 fill the other: 425 files compared byte for byte with the originals, no
 differences, up to 4 commands in flight per disk.
 
+## Starting Windows from an AHCI disk
+
+Works where the BIOS can boot from the disk in AHCI mode (it handles the
+start until Windows loads; then kexahci takes over and the disk runs in
+protected mode, not compatibility mode). Tested in QEMU (SeaBIOS) with the
+Windows disk itself on the AHCI controller: starts, C: through kexahci with
+queued commands, no `IOS.LOG`, no second letter for the same disk.
+
+Switching an installed Windows from IDE mode to AHCI mode in the BIOS:
+install KernelExEx with this component first (or let the installer find
+the controller). If AHCI mode is switched on before that, Windows still
+starts, from the BIOS in compatibility mode; the hardware wizard then
+finds the controller, installs kexahci and asks to restart (it does not
+load it while the startup disk is on the BIOS); after the restart C: runs
+through kexahci. Tested in QEMU both ways.
+
 ## What speed to expect
 
 Estimates, not measurements yet: the test machine here emulates a Pentium II
@@ -77,6 +93,4 @@ and from a RAM-sized source onto the drive (writing).
 
 ## Not yet
 
-Port multipliers, hot plug,
-ATAPI tested on hardware, booting from an AHCI disk (the BIOS's own int 13h
-handles that until Windows loads; then this driver takes over).
+Port multipliers, hot plug, ATAPI tested on hardware.

@@ -152,7 +152,7 @@ typedef struct
 	char model[41], fw[9];
 	UCHAR sense_key, asc, ascq;
 	int depth, want_next, want_lu;
-	int irq_mode, no_irq, no_queue;
+	int irq_mode, no_irq, no_queue, takeover;
 	/* commands in flight on queue 1, by command id */
 	ULONG active;
 	int barrier;           /* a flush in flight: nothing else starts */
@@ -946,6 +946,8 @@ static ULONG NTAPI hw_find(PVOID ext, PVOID ctx, PVOID bus, PCHAR args, PPORT_CO
 				n->no_irq = 1;
 			if ((a[0] | 0x20) == 'n' && (a[1] | 0x20) == 'o' && (a[2] | 0x20) == 'q' && (a[3] | 0x20) == 'u')
 				n->no_queue = 1;
+			if ((a[0] | 0x20) == 't' && (a[1] | 0x20) == 'a' && (a[2] | 0x20) == 'k' && (a[3] | 0x20) == 'e')
+				n->takeover = 1;
 		}
 	}
 	bar_pa = find_controller(n);
@@ -956,6 +958,20 @@ static ULONG NTAPI hw_find(PVOID ext, PVOID ctx, PVOID bus, PCHAR args, PPORT_CO
 	n->bar = (PUCHAR) MmMapIoSpace(p, 0x2000, MmNonCached);
 	if (!n->bar)
 		return SP_RETURN_ERROR;
+	/* a controller the BIOS has switched on is serving int 13h (perhaps as the
+	 * disk Windows starts from): resetting it would pull it from under the
+	 * BIOS, and Windows still calls the BIOS for that disk while it starts
+	 * (seen: a protection error, then a damaged FAT). Leave it to the BIOS;
+	 * Windows reaches it through int 13h (compatibility mode). TAKEOVER: use
+	 * it anyway (for an SSD that holds data only) */
+#ifdef KEX_TEST_TAKEOVER
+	n->takeover = 1;
+#endif
+	if ((r32(n, R_CC) & CC_EN) && !n->takeover)
+	{
+		logf("kexnvme: the BIOS is using this SSD; left to it (AdapterSettings TAKEOVER for a data-only SSD)\n");
+		return SP_RETURN_NOT_FOUND;
+	}
 	/* nine pages: three queue pairs, identify, PRP lists (two pages) */
 	mem = (PUCHAR) ScsiPortGetUncachedExtension(n, ci, 10 * PAGE);
 	if (!mem)
