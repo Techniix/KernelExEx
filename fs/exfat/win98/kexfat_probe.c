@@ -89,8 +89,8 @@ static int __cdecl probe_mount(UCHAR *pir)
 	if (sys_ptr(vrp))
 	{
 		dump("vrp", (void *) vrp, 0x30);
-		/* VRP_device_handle (0x1C, if the DDK layout holds): the volume's DCB */
-		maybe_dump("dcb(vrp+1c)", *(ULONG *) (vrp + 0x1C), 0xA0);
+		/* 0x28 is aligned and 0x1C = it + 0xC3 (seen twice): 0x28 is the DCB */
+		maybe_dump("dcb(vrp+28)", *(ULONG *) (vrp + 0x28), 0x100);
 	}
 	maybe_dump("rh", *(ULONG *) (pir + 0x1C), 0x40);
 	/* not ours: ERROR_UNRECOGNIZED_VOLUME, so IFSMgr asks the next FSD */

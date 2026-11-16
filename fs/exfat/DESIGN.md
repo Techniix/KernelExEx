@@ -93,3 +93,12 @@ any FAT drive: Explorer, programs, long names, reading and writing.
 - The probe was asked about D: three times (it declined each time) and
   never about a FAT USB stick's drive, which VFAT took first: the order
   in which IFSMgr asks FSDs is still to be pinned down.
+- **Test path for steps 2-3**: an exFAT volume inside an MBR partition
+  of type 0C (test images only; `stick-exp.img` in the VM folder, filled
+  by the host test) gets a drive letter (E:), VFAT declines it, and
+  IFSMgr asks KEXFAT (mount request, drive 04). So mounting and reading
+  can be developed before the drive-letter layer exists.
+- Its VRP: demand 0x00054000, event 0x40, max_sgd 0x11, max_req_size
+  0x18C, delta_to_ior 0x134, 0x10 = 0x800, 0x14 = 0x20AEB, fsd_entry
+  c0049468, 0x1C = d2ea5893, 0x28 = d2ea57d0. Again 0x1C = 0x28 + 0xC3:
+  0x28 is the volume's DCB. The probe now dumps it.
