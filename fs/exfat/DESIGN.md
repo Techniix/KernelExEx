@@ -150,3 +150,12 @@ any FAT drive: Explorer, programs, long names, reading and writing.
      to the disk use DCB + 0x83, to a volume DCB + 0xC3);
   2. or go straight to step 4, our own logical DCB for exFAT partitions,
      whose state we control.
+- Tried: the same read through the physical DCB (+0x83 handle, physical
+  sector numbers): also 0x1C. VRP+0x10 is not the partition start (0x200
+  on the IDE disk, 0x800 on the stick): probably a block size or a
+  geometry value. Next session: hook IOS_SendCommand from boot and log
+  VFAT's mount of a FAT volume on the *IDE* disk (fixed), whose first
+  read must succeed, and diff it field by field against ours; and look
+  at what IOS does with a type-0C volume it finds unformatted (the
+  "unformatted" state may be held in the logical DCB's flags at 0x20,
+  which differed between the CD (d021c004) and the stick volume (6013)).

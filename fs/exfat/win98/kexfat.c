@@ -80,6 +80,9 @@ struct kvol
 {
 	ULONG vrp;
 	ULONG dev_handle;   /* the VRP's 0x1C value: what IOS_SendCommand takes in EDI */
+	ULONG phys_handle;  /* the disk's: physical DCB + 0x83 (as IOS's own disk requests) */
+	ULONG part_start;   /* the partition's first sector (VRP 0x10) */
+	int physical;       /* read through the disk, not the volume */
 	UCHAR drive;
 	USHORT max_req;
 	ULONG delta;
@@ -137,17 +140,18 @@ static int ios_rw(struct kvol *v, ULONG func, ULONG sector, ULONG count, void *b
 static int ios_rw1(struct kvol *v, ULONG func, ULONG sector, ULONG count, void *buf, USHORT *st)
 {
 	UCHAR *ior = v->iop + v->delta;
-	ULONG esi = (ULONG) ior, edi = v->dev_handle;
+	ULONG esi = (ULONG) ior, edi = v->physical ? v->phys_handle : v->dev_handle;
 	USHORT status;
 	memset(v->iop, 0, v->max_req);
 	*(USHORT *) (ior + 0x04) = (USHORT) func;
 	/* as VFAT sends them (logged on 98 SE): reads/writes 0x409, the media
 	 * check 0x80519 */
 	*(ULONG *) (ior + 0x08) = func == IOR_MEDIA_CHECK_RESET ? 0x00080519
-	                                                        : IORF_VERSION_002 | IORF_LOGICAL_START_SECTOR | 0x1;
+	                                                        : v->physical ? IORF_VERSION_002 | 0x1
+	                                                                      : IORF_VERSION_002 | IORF_LOGICAL_START_SECTOR | 0x1;
 	/* the media check is synchronous (VFAT sends it without a callback) */
 	*(ULONG *) (ior + 0x0C) = func == IOR_MEDIA_CHECK_RESET ? 0 : (ULONG) io_done;
-	*(ULONG *) (ior + 0x10) = sector;
+	*(ULONG *) (ior + 0x10) = v->physical ? v->part_start + sector : sector;
 	*(ULONG *) (ior + 0x18) = count;
 	*(ULONG *) (ior + 0x1C) = (ULONG) buf;
 	*(ULONG *) (ior + 0x20) = v->delta;
@@ -279,7 +283,20 @@ static int __cdecl fsd_mount(UCHAR *pir)
 	sec = (UCHAR *) _HeapAllocate(4096, HEAPZEROINIT);
 	if (!v->iop || !sec)
 		goto free_no;
+	v->part_start = *(ULONG *) (vrp + 0x10);
+	{
+		ULONG ldcb = *(ULONG *) (vrp + 0x28);
+		v->phys_handle = (ldcb >= 0xC0000000u && *(ULONG *) ldcb >= 0xC0000000u) ? *(ULONG *) ldcb + 0x83 : 0;
+	}
 	r = ios_rw(v, IOR_READ, 0, 1, sec);
+	if (r && v->phys_handle)
+	{
+		outs("kexfat: volume refused the read; through the disk, partition at ");
+		outx(v->part_start, 8);
+		outs("\r\n");
+		v->physical = 1;
+		r = ios_rw(v, IOR_READ, 0, 1, sec);
+	}
 	outs("kexfat: boot sector read ");
 	outx((ULONG) r, 8);
 	outs(": ");
