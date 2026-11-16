@@ -1480,6 +1480,10 @@ fail_attached:
 	if (a->intr_registered)
 		NdisMDeregisterInterrupt(&a->intr);
 fail:
+	/* the log is otherwise written only by a running adapter: an adapter
+	 * that fails to start (Code 10) must still leave KEXNET.LOG behind */
+	if (kex_files_ready())
+		log_flush(NULL);
 	if (res)
 		NdisFreeMemory(res, rsize, 0);
 	if (a)
