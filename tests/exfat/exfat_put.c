@@ -6,6 +6,7 @@
  *  exfat_put IMAGE START_SECTOR mkdir PATH
  *  exfat_put IMAGE START_SECTOR put HOSTFILE PATH
  *  exfat_put IMAGE START_SECTOR ls PATH
+ *  exfat_put IMAGE START_SECTOR get PATH HOSTFILE
  *
  *  PATH uses '\' or '/'; names are UTF-8 (BMP only). START_SECTOR is where
  *  the volume begins (2048 for a partition at 1 MiB, 0 for a bare volume).
@@ -117,6 +118,22 @@ int main(int argc, char **argv)
 			putchar('\n');
 		}
 		r = r == EXFAT_END ? 0 : r;
+	}
+	else if (!strcmp(argv[3], "get") && argc >= 6)
+	{
+		FILE *dst = fopen(argv[5], "wb");
+		static unsigned char buf[65536];
+		uint64_t off = 0;
+		uint32_t got;
+		l = u16(w, argv[4]);
+		r = dst ? exfat_lookup(v, w, l, &n) : EXFAT_EIO;
+		while (!r && (r = exfat_read(v, &n, off, buf, sizeof buf, &got)) == EXFAT_OK && got)
+		{
+			fwrite(buf, 1, got, dst);
+			off += got;
+		}
+		if (dst)
+			fclose(dst);
 	}
 	else if (!strcmp(argv[3], "mkdir"))
 	{

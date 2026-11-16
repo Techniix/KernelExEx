@@ -5,7 +5,7 @@ set -e
 out=${1:-/tmp/exfat-test}
 mkdir -p "$out"
 here=$(dirname "$0")
-cc -O2 -std=gnu99 -Wall -Wextra -D_FILE_OFFSET_BITS=64 -o "$out/test_exfat" "$here/test_exfat.c" "$here/../../fs/exfat/exfat.c"
+cc ${CFLAGS_EXTRA} -O2 -std=gnu99 -Wall -Wextra -D_FILE_OFFSET_BITS=64 -o "$out/test_exfat" "$here/test_exfat.c" "$here/../../fs/exfat/exfat.c"
 for cl in 4K 32K 128K; do
 	img="$out/t-$cl.img"
 	rm -f "$img"; truncate -s 96M "$img"

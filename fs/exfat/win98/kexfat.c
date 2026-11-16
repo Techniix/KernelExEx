@@ -128,13 +128,13 @@ static void ifs_block(ULONG key)
 	                     : "eax", "ecx", "edx", "memory", "cc");
 }
 
-static struct kvol *cur_io;
+static struct kvol *cur_io;   /* the request in flight: one at a time (see call_big) */
 #define PACKET_OWNER 0xBF0   /* where in the packet's page the volume pointer is */
 
 __attribute__((used)) void __cdecl io_done_c(ULONG ior)
 {
 	/* the packet's own page says whose it is (never a shared "current" one) */
-	struct kvol *v = cur_io;   /* BISECT */
+	struct kvol *v = cur_io;
 	(void) ior;
 	if ((ULONG) v >= 0xC0000000u)
 	{
@@ -358,8 +358,8 @@ static void *page_packet(ULONG *phys)
 	return (void *) ((ULONG) (r >> 32) + PACKET_AT);
 }
 
-/* writing is still being tested: volumes mount read-only unless this is set */
-static int kexfat_write = 0;
+/* volumes mount read-write; 0 here makes them read-only */
+static int kexfat_write = 1;
 
 /* the time for new and written files: IFSMgr's DOS time (local) */
 static void clock_now(void *ctx, struct exfat_time *t)
@@ -397,6 +397,51 @@ static void dev_free(void *ctx, void *p)
 {
 	(void) ctx;
 	_HeapFree(p, 0);
+}
+
+/* ---- a stack of our own ---------------------------------------------------------------
+ * Every call IFSMgr makes into KEXFAT runs on a private 48 KB stack: the
+ * core keeps directory entry sets and nodes on the stack (a rename holds
+ * three nodes, ~1.7 KB, before it reads anything), and the ring-0 stack a
+ * Windows 98 thread arrives with is small and already part used. One call
+ * at a time, for all exFAT volumes together. */
+#define BIG_STACK (48 * 1024)
+static UCHAR *big_stack;
+static volatile int big_busy;
+static volatile ULONG big_who, big_waiter, open_step;
+
+static void ifs_block(ULONG key);
+static void ifs_wakeup(ULONG key);
+
+static int call_big(int(__cdecl *fn)(UCHAR *), UCHAR *pir)
+{
+	int r;
+	ULONG top;
+	if (!big_stack)
+		return fn(pir);
+	__asm__ __volatile__("pushfl\n\tcli" ::: "memory");
+	while (big_busy)
+	{
+		big_waiter = (ULONG) fn;
+		ifs_block((ULONG) &big_busy);
+	}
+	big_busy = 1;
+	big_who = (ULONG) fn;
+	__asm__ __volatile__("popfl" ::: "memory", "cc");
+	top = (ULONG) big_stack + BIG_STACK - 16;
+	__asm__ __volatile__("movl %%esp, %%ebx\n\t"
+	                     "movl %%ecx, %%esp\n\t"
+	                     "pushl %%ebx\n\t"
+	                     "pushl %%edi\n\t"
+	                     "call *%%esi\n\t"
+	                     "addl $4, %%esp\n\t"
+	                     "popl %%esp"
+	                     : "=a"(r), "+c"(top)
+	                     : "S"(fn), "D"(pir)
+	                     : "ebx", "edx", "memory", "cc");
+	big_busy = 0;
+	ifs_wakeup((ULONG) &big_busy);
+	return r;
 }
 
 /* ---- volume functions ---------------------------------------------------------------- */
@@ -449,22 +494,19 @@ struct hndlfunc
 
 /* one request at a time per volume: the packet is shared, and the core is
  * not re-entrant. Threads that find it busy sleep on IFSMgr_Block. */
+/* one call at a time is call_big's job (all volumes together); these only
+ * mark the volume in use for the debugger */
 static void vol_lock(struct kvol *v)
 {
-	__asm__ __volatile__("pushfl\n\tcli" ::: "memory");
-	while (v->busy)
-		ifs_block((ULONG) &v->busy);
 	v->busy = 1;
-	__asm__ __volatile__("popfl" ::: "memory", "cc");
 }
 
 static void vol_unlock(struct kvol *v)
 {
 	v->busy = 0;
-	ifs_wakeup((ULONG) &v->busy);
 }
 
-__attribute__((noinline)) static int set_err(UCHAR *pir, int e)
+static int set_err(UCHAR *pir, int e)
 {
 	if (e && e != ERROR_NO_MORE_FILES_ && e != ERROR_FILE_NOT_FOUND_)
 	{
@@ -627,9 +669,14 @@ static int name_matches(struct kvol *v, const USHORT *p, int pl, const USHORT *n
 }
 
 /* ---- disk information, attributes, directories --------------------------------------- */
+static int __cdecl vfn_getdiskinfo_r(UCHAR *pir);
 static int __cdecl vfn_getdiskinfo(UCHAR *pir)
 {
-	outs("[vfn_genfo]");
+	return call_big(vfn_getdiskinfo_r, pir);
+}
+
+static int __cdecl vfn_getdiskinfo_r(UCHAR *pir)
+{
 	struct kvol *v = (struct kvol *) IR_RH(pir);
 	struct exfat_info info;
 	ULONG spc, clusters, free_cl;
@@ -736,9 +783,14 @@ static void new_name(UCHAR *pir, const USHORT *last, int last_len, const USHORT 
 	}
 }
 
+static int __cdecl vfn_fileattrib_r(UCHAR *pir);
 static int __cdecl vfn_fileattrib(UCHAR *pir)
 {
-	outs("[vfn_firib]");
+	return call_big(vfn_fileattrib_r, pir);
+}
+
+static int __cdecl vfn_fileattrib_r(UCHAR *pir)
+{
 	struct kvol *v = (struct kvol *) IR_RH(pir);
 	exfat_node *n;
 	struct kopen *o;
@@ -826,9 +878,14 @@ static int __cdecl vfn_fileattrib(UCHAR *pir)
 #define QUERY83_DIR 3
 #define QUERYLONG_DIR 4
 
+static int __cdecl vfn_dir_r(UCHAR *pir);
 static int __cdecl vfn_dir(UCHAR *pir)
 {
-	outs("[vfn_didir]");
+	return call_big(vfn_dir_r, pir);
+}
+
+static int __cdecl vfn_dir_r(UCHAR *pir)
+{
 	struct kvol *v = (struct kvol *) IR_RH(pir);
 	exfat_node *n, *d;
 	const USHORT *last, *name;
@@ -836,7 +893,7 @@ static int __cdecl vfn_dir(UCHAR *pir)
 	UCHAR f = IR_FLAGS(pir);
 	if (!path_ok(IR_PPATH(pir)))
 		return set_err(pir, ERROR_PATH_NOT_FOUND_);
-	n = (exfat_node *) _HeapAllocate(2 * sizeof(*n), 0);
+	n = (exfat_node *) _HeapAllocate(2 * sizeof(*n), HEAPZEROINIT);
 	if (!n)
 		return set_err(pir, ERROR_NOT_ENOUGH_MEMORY_);
 	d = n + 1;
@@ -889,7 +946,13 @@ static int __cdecl vfn_dir(UCHAR *pir)
 	return set_err(pir, r);
 }
 
+static int __cdecl vfn_flush_r(UCHAR *pir);
 static int __cdecl vfn_flush(UCHAR *pir)
+{
+	return call_big(vfn_flush_r, pir);
+}
+
+static int __cdecl vfn_flush_r(UCHAR *pir)
 {
 	struct kvol *v = (struct kvol *) IR_RH(pir);
 	int r;
@@ -919,7 +982,13 @@ static int deletable(struct kvol *v, exfat_node *n)
 	return 0;
 }
 
+static int __cdecl vfn_delete_r(UCHAR *pir);
 static int __cdecl vfn_delete(UCHAR *pir)
+{
+	return call_big(vfn_delete_r, pir);
+}
+
+static int __cdecl vfn_delete_r(UCHAR *pir)
 {
 	struct kvol *v = (struct kvol *) IR_RH(pir);
 	exfat_node *n, *d;
@@ -927,7 +996,7 @@ static int __cdecl vfn_delete(UCHAR *pir)
 	int last_len, r, e, found = 0;
 	if (!path_ok(IR_PPATH(pir)))
 		return set_err(pir, ERROR_FILE_NOT_FOUND_);
-	n = (exfat_node *) _HeapAllocate(2 * sizeof(*n), 0);
+	n = (exfat_node *) _HeapAllocate(2 * sizeof(*n), HEAPZEROINIT);
 	if (!n)
 		return set_err(pir, ERROR_NOT_ENOUGH_MEMORY_);
 	d = n + 1;
@@ -978,7 +1047,13 @@ static int __cdecl vfn_delete(UCHAR *pir)
 	return set_err(pir, e);
 }
 
+static int __cdecl vfn_rename_r(UCHAR *pir);
 static int __cdecl vfn_rename(UCHAR *pir)
+{
+	return call_big(vfn_rename_r, pir);
+}
+
+static int __cdecl vfn_rename_r(UCHAR *pir)
 {
 	struct kvol *v = (struct kvol *) IR_RH(pir);
 	exfat_node *n, *d;
@@ -987,7 +1062,7 @@ static int __cdecl vfn_rename(UCHAR *pir)
 	ULONG pp2 = IR_PPATH2(pir);
 	if (!path_ok(IR_PPATH(pir)) || !path_ok(pp2))
 		return set_err(pir, ERROR_FILE_NOT_FOUND_);
-	n = (exfat_node *) _HeapAllocate(2 * sizeof(*n), 0);
+	n = (exfat_node *) _HeapAllocate(2 * sizeof(*n), HEAPZEROINIT);
 	if (!n)
 		return set_err(pir, ERROR_NOT_ENOUGH_MEMORY_);
 	d = n + 1;
@@ -996,6 +1071,7 @@ static int __cdecl vfn_rename(UCHAR *pir)
 	if (!r && (n->is_root || name_has_wild(last, last_len)))
 		r = EXFAT_EINVAL;
 	e = r ? win_err(r, 1) : open_find(v, n) ? ERROR_SHARING_VIOLATION_ : 0;
+
 	if (!e)
 	{
 		r = walk(v, pp2, 1, d, &last, &last_len);
@@ -1017,15 +1093,25 @@ static int __cdecl vfn_rename(UCHAR *pir)
 	return set_err(pir, e);
 }
 
+static int __cdecl vfn_bad_r(UCHAR *pir);
 static int __cdecl vfn_bad(UCHAR *pir)
 {
-	outs("[vfn_babad]");
+	return call_big(vfn_bad_r, pir);
+}
+
+static int __cdecl vfn_bad_r(UCHAR *pir)
+{
 	return set_err(pir, ERROR_INVALID_FUNCTION_);
 }
 
+static int __cdecl vfn_search_r(UCHAR *pir);
 static int __cdecl vfn_search(UCHAR *pir)
 {
-	outs("[vfn_serch]");
+	return call_big(vfn_search_r, pir);
+}
+
+static int __cdecl vfn_search_r(UCHAR *pir)
+{
 	/* TODO: DOS searches (INT 21h 4Eh/4Fh) need 8.3 names */
 	return set_err(pir, ERROR_NO_MORE_FILES_);
 }
@@ -1034,9 +1120,14 @@ static int __cdecl vfn_search(UCHAR *pir)
 #define FS_UNICODE_STORED_ON_DISK 0x00000004
 #define FS_VOL_SUPPORTS_LONG_NAMES 0x00004000
 
+static int __cdecl vfn_query_r(UCHAR *pir);
 static int __cdecl vfn_query(UCHAR *pir)
 {
-	outs("[vfn_query]");
+	return call_big(vfn_query_r, pir);
+}
+
+static int __cdecl vfn_query_r(UCHAR *pir)
+{
 	/* ir_options 2: GetVolumeInformation's file system name and flags */
 	if (IR_OPTIONS(pir) == 2)
 	{
@@ -1131,9 +1222,14 @@ static int find_step(struct kfind *k, struct find_data *fd)
 	return 0;
 }
 
+static int __cdecl find_next_r(UCHAR *pir);
 static int __cdecl find_next(UCHAR *pir)
 {
-	outs("[find_next]");
+	return call_big(find_next_r, pir);
+}
+
+static int __cdecl find_next_r(UCHAR *pir)
+{
 	struct kfind *k = (struct kfind *) IR_FH(pir);
 	IR_POS(pir) = 0;
 	return set_err(pir, find_step(k, (struct find_data *) IR_DATA(pir)));
@@ -1141,9 +1237,14 @@ static int __cdecl find_next(UCHAR *pir)
 
 #define CLOSE_FINAL 2
 
+static int __cdecl find_close_r(UCHAR *pir);
 static int __cdecl find_close(UCHAR *pir)
 {
-	outs("[find_cose]");
+	return call_big(find_close_r, pir);
+}
+
+static int __cdecl find_close_r(UCHAR *pir)
+{
 	_HeapFree((void *) IR_FH(pir), 0);
 	return set_err(pir, 0);
 }
@@ -1151,9 +1252,14 @@ static int __cdecl find_close(UCHAR *pir)
 static struct hndlmisc find_misc = { IFS_VERSION, IFS_REVISION, NUM_HNDLMISC,
 	                                 { vfn_bad, find_close, vfn_bad, vfn_bad, vfn_bad, vfn_bad, vfn_bad, vfn_bad } };
 
+static int __cdecl vfn_findopen_r(UCHAR *pir);
 static int __cdecl vfn_findopen(UCHAR *pir)
 {
-	outs("[vfn_fipen]");
+	return call_big(vfn_findopen_r, pir);
+}
+
+static int __cdecl vfn_findopen_r(UCHAR *pir)
+{
 	struct kvol *v = (struct kvol *) IR_RH(pir);
 	struct kfind *k;
 	const USHORT *pat;
@@ -1221,9 +1327,14 @@ struct kfile   /* one handle */
 #define SET_CREATION_DATETIME 7
 #define ENUMH_GETFILEINFO 0
 
+static int __cdecl file_read_r(UCHAR *pir);
 static int __cdecl file_read(UCHAR *pir)
 {
-	outs("[file_read]");
+	return call_big(file_read_r, pir);
+}
+
+static int __cdecl file_read_r(UCHAR *pir)
+{
 	struct kfile *f = (struct kfile *) IR_FH(pir);
 	struct kopen *o = f->o;
 	uint32_t got = 0;
@@ -1236,7 +1347,13 @@ static int __cdecl file_read(UCHAR *pir)
 	return set_err(pir, r ? win_err(r, 1) : 0);
 }
 
+static int __cdecl file_write_r(UCHAR *pir);
 static int __cdecl file_write(UCHAR *pir)
+{
+	return call_big(file_write_r, pir);
+}
+
+static int __cdecl file_write_r(UCHAR *pir)
 {
 	struct kfile *f = (struct kfile *) IR_FH(pir);
 	struct kopen *o = f->o;
@@ -1254,9 +1371,14 @@ static int __cdecl file_write(UCHAR *pir)
 	return set_err(pir, r ? write_err(r) : 0);
 }
 
+static int __cdecl file_seek_r(UCHAR *pir);
 static int __cdecl file_seek(UCHAR *pir)
 {
-	outs("[file_seek]");
+	return call_big(file_seek_r, pir);
+}
+
+static int __cdecl file_seek_r(UCHAR *pir)
+{
 	struct kfile *f = (struct kfile *) IR_FH(pir);
 	if (IR_FLAGS(pir) == FILE_END)
 	{
@@ -1268,9 +1390,14 @@ static int __cdecl file_seek(UCHAR *pir)
 	return set_err(pir, 0);
 }
 
+static int __cdecl file_commit_r(UCHAR *pir);
 static int __cdecl file_commit(UCHAR *pir)
 {
-	outs("[file_cmit]");
+	return call_big(file_commit_r, pir);
+}
+
+static int __cdecl file_commit_r(UCHAR *pir)
+{
 	struct kfile *f = (struct kfile *) IR_FH(pir);
 	int r;
 	vol_lock(f->o->v);
@@ -1279,9 +1406,14 @@ static int __cdecl file_commit(UCHAR *pir)
 	return set_err(pir, r ? write_err(r) : 0);
 }
 
+static int __cdecl file_close_r(UCHAR *pir);
 static int __cdecl file_close(UCHAR *pir)
 {
-	outs("[file_cose]");
+	return call_big(file_close_r, pir);
+}
+
+static int __cdecl file_close_r(UCHAR *pir)
+{
 	struct kfile *f = (struct kfile *) IR_FH(pir);
 	int r = 0;
 	if (IR_FLAGS(pir) == CLOSE_FINAL)
@@ -1309,16 +1441,26 @@ static int __cdecl file_close(UCHAR *pir)
 	return set_err(pir, r ? write_err(r) : 0);
 }
 
+static int __cdecl file_locks_r(UCHAR *pir);
 static int __cdecl file_locks(UCHAR *pir)
 {
-	outs("[file_lcks]");
+	return call_big(file_locks_r, pir);
+}
+
+static int __cdecl file_locks_r(UCHAR *pir)
+{
 	/* TODO: byte-range locks; accepted for now */
 	return set_err(pir, 0);
 }
 
+static int __cdecl file_times_r(UCHAR *pir);
 static int __cdecl file_times(UCHAR *pir)
 {
-	outs("[file_tmes]");
+	return call_big(file_times_r, pir);
+}
+
+static int __cdecl file_times_r(UCHAR *pir)
+{
 	struct kfile *f = (struct kfile *) IR_FH(pir);
 	struct kopen *o = f->o;
 	UCHAR fl = IR_FLAGS(pir);
@@ -1363,9 +1505,14 @@ struct bhfi   /* BY_HANDLE_FILE_INFORMATION */
 	ULONG serial, size_high, size_low, links, index_high, index_low;
 };
 
+static int __cdecl file_enum_r(UCHAR *pir);
 static int __cdecl file_enum(UCHAR *pir)
 {
-	outs("[file_enum]");
+	return call_big(file_enum_r, pir);
+}
+
+static int __cdecl file_enum_r(UCHAR *pir)
+{
 	struct kfile *f = (struct kfile *) IR_FH(pir);
 	exfat_node *n = &f->o->n;
 	if (IR_FLAGS(pir) == ENUMH_GETFILEINFO)
@@ -1393,9 +1540,14 @@ static struct hndlmisc file_misc = { IFS_VERSION, IFS_REVISION, NUM_HNDLMISC,
 	                                 { file_seek, file_close, file_commit, file_locks, file_times, vfn_bad, vfn_bad,
 	                                   file_enum } };
 
+static int __cdecl vfn_open_r(UCHAR *pir);
 static int __cdecl vfn_open(UCHAR *pir)
 {
-	outs("[vfn_oppen]");
+	return call_big(vfn_open_r, pir);
+}
+
+static int __cdecl vfn_open_r(UCHAR *pir)
+{
 	struct kvol *v = (struct kvol *) IR_RH(pir);
 	struct kfile *f;
 	struct kopen *o;
@@ -1406,8 +1558,10 @@ static int __cdecl vfn_open(UCHAR *pir)
 	ULONG action = IR_OPTIONS(pir) & 0xFF;
 	if (!path_ok(IR_PPATH(pir)) || (IR_ATTR(pir) & FATTR_LABEL))
 		return set_err(pir, ERROR_ACCESS_DENIED_);
+	open_step = 1;
 	f = (struct kfile *) _HeapAllocate(sizeof(*f), HEAPZEROINIT);
-	n = (exfat_node *) _HeapAllocate(2 * sizeof(*n), 0);
+	open_step = 2;
+	n = (exfat_node *) _HeapAllocate(2 * sizeof(*n), HEAPZEROINIT);
 	if (!f || !n)
 	{
 		if (f)
@@ -1417,8 +1571,11 @@ static int __cdecl vfn_open(UCHAR *pir)
 		return set_err(pir, ERROR_NOT_ENOUGH_MEMORY_);
 	}
 	d = n + 1;
+	open_step = 3;
 	vol_lock(v);
+	open_step = 4;
 	r = walk(v, IR_PPATH(pir), 1, d, &last, &last_len);
+
 	if (!r && (!last || last_len <= 0))
 		r = EXFAT_EISDIR;   /* the root */
 	if (r)
@@ -1433,8 +1590,10 @@ static int __cdecl vfn_open(UCHAR *pir)
 			else
 			{
 				new_name(pir, last, last_len, &name, &len);
+				open_step = 0x10;
 				r = exfat_create(v->ex, d, name, (size_t) len,
 				                 (uint16_t) ((IR_ATTR(pir) & 0x27) | EXFAT_ATTR_ARCHIVE), n);
+				open_step = 0x11;
 				e = r ? write_err(r) : 0;
 				action_taken = ACTION_CREATED;
 			}
@@ -1480,7 +1639,9 @@ static int __cdecl vfn_open(UCHAR *pir)
 			if (action_taken == ACTION_CREATED)
 			{
 				f->wrote = 1;
+				open_step = 0x12;
 				r = exfat_flush(v->ex);
+				open_step = 0x13;
 				if (r)
 					e = write_err(r);
 			}
@@ -1494,8 +1655,11 @@ static int __cdecl vfn_open(UCHAR *pir)
 			}
 		}
 	}
+	open_step = 5;
 	vol_unlock(v);
+	open_step = 6;
 	_HeapFree(n, 0);
+	open_step = 7;
 	if (e)
 	{
 		_HeapFree(f, 0);
@@ -1507,6 +1671,7 @@ static int __cdecl vfn_open(UCHAR *pir)
 		hf->write = file_write;
 		hf->misc = &file_misc;
 	}
+	open_step = 8;
 	IR_FH(pir) = (ULONG) f;
 	IR_OPTIONS(pir) = (USHORT) action_taken;
 	IR_SIZE(pir) = (ULONG) f->o->n.size;
@@ -1516,7 +1681,13 @@ static int __cdecl vfn_open(UCHAR *pir)
 }
 
 /* ---- the table ----------------------------------------------------------------------- */
+static int __cdecl vfn_getdiskparms_r(UCHAR *pir);
 static int __cdecl vfn_getdiskparms(UCHAR *pir)
+{
+	return call_big(vfn_getdiskparms_r, pir);
+}
+
+static int __cdecl vfn_getdiskparms_r(UCHAR *pir)
 {
 	/* the DOS drive parameter block: not for a volume DOS cannot read */
 	return set_err(pir, ERROR_INVALID_FUNCTION_);
@@ -1540,7 +1711,13 @@ static struct volfunc vfuncs = {
 /* ---- mount ------------------------------------------------------------------------------ */
 #define IR_FSD_MOUNT 0
 
+static int __cdecl fsd_mount_r(UCHAR *pir);
 static int __cdecl fsd_mount(UCHAR *pir)
+{
+	return call_big(fsd_mount_r, pir);
+}
+
+static int __cdecl fsd_mount_r(UCHAR *pir)
 {
 	ULONG vrp = IR_AUX1(pir);
 	struct kvol *v;
@@ -2152,6 +2329,37 @@ __attribute__((used)) void __cdecl aer_c(UCHAR *aep)
 		disk_gone(*(ULONG *) (aep + 0x0C));
 	if (func == AEP_BOOT_COMPLETE && !boot_done++)
 		scan_disks();
+	if (func == AEP_1_SEC)
+	{
+		/* DEBUG: a volume stuck in a request */
+		int i;
+		for (i = 0; i < n_own; i++)
+		{
+			struct kvol *v = own[i].vol;
+			if (v && (v->busy || !v->done || big_busy))
+			{
+				outs("{busy ");
+				outx(v->busy, 1);
+				outs(" big ");
+				outx(big_busy, 1);
+				outs(" who ");
+				outx(big_who, 8);
+				outs(" step ");
+				outx(open_step, 4);
+				outs(" waiter ");
+				outx(big_waiter, 8);
+				outs(" done ");
+				outx(v->done, 1);
+				outs(" func ");
+				outx(*(USHORT *) (v->iop + v->delta + 4), 2);
+				outs(" st ");
+				outx(*(USHORT *) (v->iop + v->delta + 6), 4);
+				outs(" start ");
+				outx(*(ULONG *) (v->iop + v->delta + 0x10), 8);
+				outs("}\r\n");
+			}
+		}
+	}
 	if (func == AEP_1_SEC && n_pending)
 	{
 		int i, n = n_pending;
@@ -2192,6 +2400,10 @@ static void ios_register(void)
 static void init(void)
 {
 	int id;
+	big_stack = (UCHAR *) _HeapAllocate(BIG_STACK, HEAPZEROINIT);
+	outs("kexfat: fsd_mount_r at ");
+	outx((ULONG) fsd_mount_r, 8);
+	outs("\r\n");
 	hook_int13();
 	ios_register();
 	__asm__ __volatile__("pushl %3\n\t"
