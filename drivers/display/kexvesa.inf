@@ -1,0 +1,143 @@
+;
+; kexvesa.inf - VESA (VBE 2.0+) display driver for Windows 98/ME, from KernelExEx
+; Driver: vmdisp9x by Jaroslav Hensl (JHRobotics), based on Michal Necasek's driver,
+; MIT licence. This INF is adapted from vmdisp9x.inf (Copyright 2012-2022 The OS/2
+; Museum, 2023-2026 Jaroslav Hensl), MIT licence.
+;
+; Works with any graphics card whose BIOS has VESA 2.0 or later (Intel HD/GMA, AMD,
+; NVIDIA), at the resolutions the card's BIOS offers. No acceleration.
+
+[version]
+DriverVer=11/16/2026,4.2026.11.16
+Class=DISPLAY
+signature="$CHICAGO$"
+Provider=%Mfg%
+
+[DestinationDirs]
+DefaultDestDir=11
+VESA.Copy=11
+
+[SourceDisksNames]
+1="KernelExEx display driver",,0
+
+[SourceDisksFiles]
+vesamini.drv=1
+vesamini.vxd=1
+
+[Manufacturer]
+%Mfg%=Mfg.KEX
+
+[Mfg.KEX]
+%IntelHD.DeviceDesc%=VESA, PCI\VEN_8086&DEV_0046
+%IntelHD.DeviceDesc%=VESA, PCI\VEN_8086&DEV_0042
+%IntelSNB.DeviceDesc%=VESA, PCI\VEN_8086&DEV_0106
+%IntelSNB.DeviceDesc%=VESA, PCI\VEN_8086&DEV_0116
+%IntelSNB.DeviceDesc%=VESA, PCI\VEN_8086&DEV_0126
+%IntelSNB.DeviceDesc%=VESA, PCI\VEN_8086&DEV_0102
+%VESAPCI.DeviceDesc%=VESA, PCI\CC_0300
+%VESAISA.DeviceDesc%=VESA, *PNP0900
+
+[VESA]
+CopyFiles=VESA.Copy
+DelReg=KEX.DelReg
+AddReg=VESA.AddReg,KEX.AddReg
+
+[VESA.Copy]
+vesamini.drv,,,0x00000004
+vesamini.vxd,,,0x00000004
+
+[VESA.AddReg]
+HKR,DEFAULT,drv,,vesamini.drv
+HKR,DEFAULT,minivdd,,vesamini.vxd
+HKR,DEFAULT,Mode,,"16,800,600"
+
+[KEX.DelReg]
+HKR,,Ver
+HKR,,DevLoader
+HKR,DEFAULT
+HKR,MODES
+HKR,CURRENT
+
+[KEX.AddReg]
+HKR,,Ver,,4.0
+HKR,,DevLoader,,*vdd
+HKR,DEFAULT,vdd,,"*vdd"
+HKR,DEFAULT,RefreshRate,,-1
+HKR,DEFAULT,DDC,,1
+HKR,"MODES\4\640,480",drv,,vga.drv
+HKR,"MODES\4\640,480",vdd,,*vdd
+HKR,"MODES\8\640,480"
+HKR,"MODES\8\800,600"
+HKR,"MODES\8\1024,768"
+HKR,"MODES\8\1152,864"
+HKR,"MODES\8\1280,720"
+HKR,"MODES\8\1280,800"
+HKR,"MODES\8\1280,960"
+HKR,"MODES\8\1280,1024"
+HKR,"MODES\8\1360,768"
+HKR,"MODES\8\1366,768"
+HKR,"MODES\8\1400,1050"
+HKR,"MODES\8\1440,900"
+HKR,"MODES\8\1600,900"
+HKR,"MODES\8\1600,1200"
+HKR,"MODES\8\1680,1050"
+HKR,"MODES\8\1920,1080"
+HKR,"MODES\8\1920,1200"
+HKR,"MODES\16\640,480"
+HKR,"MODES\16\800,600"
+HKR,"MODES\16\1024,768"
+HKR,"MODES\16\1152,864"
+HKR,"MODES\16\1280,720"
+HKR,"MODES\16\1280,800"
+HKR,"MODES\16\1280,960"
+HKR,"MODES\16\1280,1024"
+HKR,"MODES\16\1360,768"
+HKR,"MODES\16\1366,768"
+HKR,"MODES\16\1400,1050"
+HKR,"MODES\16\1440,900"
+HKR,"MODES\16\1600,900"
+HKR,"MODES\16\1600,1200"
+HKR,"MODES\16\1680,1050"
+HKR,"MODES\16\1920,1080"
+HKR,"MODES\16\1920,1200"
+HKR,"MODES\24\640,480"
+HKR,"MODES\24\800,600"
+HKR,"MODES\24\1024,768"
+HKR,"MODES\24\1152,864"
+HKR,"MODES\24\1280,720"
+HKR,"MODES\24\1280,800"
+HKR,"MODES\24\1280,960"
+HKR,"MODES\24\1280,1024"
+HKR,"MODES\24\1360,768"
+HKR,"MODES\24\1366,768"
+HKR,"MODES\24\1400,1050"
+HKR,"MODES\24\1440,900"
+HKR,"MODES\24\1600,900"
+HKR,"MODES\24\1600,1200"
+HKR,"MODES\24\1680,1050"
+HKR,"MODES\24\1920,1080"
+HKR,"MODES\24\1920,1200"
+HKR,"MODES\32\640,480"
+HKR,"MODES\32\800,600"
+HKR,"MODES\32\1024,768"
+HKR,"MODES\32\1152,864"
+HKR,"MODES\32\1280,720"
+HKR,"MODES\32\1280,800"
+HKR,"MODES\32\1280,960"
+HKR,"MODES\32\1280,1024"
+HKR,"MODES\32\1360,768"
+HKR,"MODES\32\1366,768"
+HKR,"MODES\32\1400,1050"
+HKR,"MODES\32\1440,900"
+HKR,"MODES\32\1600,900"
+HKR,"MODES\32\1600,1200"
+HKR,"MODES\32\1680,1050"
+HKR,"MODES\32\1920,1080"
+HKR,"MODES\32\1920,1200"
+
+[Strings]
+Mfg="KernelExEx"
+IntelHD.DeviceDesc="Intel HD Graphics (Core i3/i5/i7, 1st generation) - VESA"
+IntelSNB.DeviceDesc="Intel HD Graphics 2000/3000 - VESA"
+VESAPCI.DeviceDesc="Standard VESA graphics (PCI)"
+VESAISA.DeviceDesc="Standard VESA graphics"
