@@ -1,0 +1,24 @@
+; KernelExEx: Windows 98 Setup options (MSBATCH.INF). Setup asks everything else
+; as usual, including the product key. GPLv2.
+[BatchSetup]
+Version=3.0 (32-bit)
+
+[Version]
+Signature="$CHICAGO$"
+
+[Setup]
+; no startup floppy
+EBD=0
+
+[Install]
+AddReg=KexRunOnce
+UpdateInis=KexMemory
+
+[KexRunOnce]
+; the KernelExEx installer at the first logon
+HKLM,"Software\Microsoft\Windows\CurrentVersion\RunOnce","KernelExEx",,"C:\KEXINST\KEXSETUP.EXE"
+
+[KexMemory]
+; Windows 98 crashes with much more than 1 GB of RAM: use the first 1 GB
+system.ini,386Enh,,"MaxPhysPage=40000"
+system.ini,vcache,,"MaxFileCache=262144"

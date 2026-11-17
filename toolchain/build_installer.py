@@ -114,6 +114,7 @@ LAYOUT = {
     "drivers/acpi/KEXACPI.VXD": "core:KEXACPI.VXD",
     "kexpower/kexpower.exe": "core:kexpower.exe",
     "kexpower/kexpower.cpl": "core:kexpower.cpl",
+    "media/KEXMEM.SYS": "core:KEXMEM.SYS",
     "drivers/kexnet/kexvio.sys": "kexnet:kexvio.sys",
     "drivers/kexnet/kexvio.inf": "drivers/kexnet/vio/kexvio.inf",
     "docs/logo/kexex.ico": "docs/logo/kexex.ico",

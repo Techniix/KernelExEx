@@ -651,6 +651,7 @@ LangString DESC_KEXVIO ${LANG_ENGLISH} "The virtio network adapter of QEMU/KVM, 
 LangString DESC_KEXAHCI ${LANG_ENGLISH} "SATA hard disks, SSDs and DVD drives on boards whose SATA controller is in AHCI mode (most boards since 2008; Windows 98 does not see those disks at all). Not needed when the BIOS has the controller in IDE mode."
 LangString DESC_KEXNVME ${LANG_ENGLISH} "NVMe SSDs: M.2 NVMe drives and PCIe SSD cards (Windows 98 does not see them at all). For a second drive: booting Windows 98 from an NVMe SSD needs a BIOS that can boot from it."
 LangString DESC_KEXACPI ${LANG_ENGLISH} "For laptops: shows the battery's charge and time left on the taskbar, warns when it runs low, and can shut down when it is nearly empty or turn the screen off when the lid closes. For laptops whose battery Windows 98 cannot read (most from 2005 on). Not needed on a desktop."
+LangString DESC_KEXMEM ${LANG_ENGLISH} "For computers with more than 1 GB of RAM: Windows 98 and ME crash or say 'Insufficient memory' at start-up with that much. This makes Windows use the first 1 GB (adds KEXMEM.SYS to CONFIG.SYS). Takes effect after a restart."
 LangString DESC_KEXFAT ${LANG_ENGLISH} "Reads SD cards, USB sticks and disks formatted exFAT (cards over 32 GB come that way): they get a drive letter and open in Explorer and in programs. Read-only for now: copying files onto them is not possible yet. Experimental."
 LangString DESC_KEXVMM ${LANG_ENGLISH} "The mouse pointer moves in and out of the virtual machine's window freely, with no need to click into it or press keys to release it. For QEMU (the default PC machine) and VMware. Does nothing on a real PC."
 LangString DESC_GRPINET ${LANG_ENGLISH} "Internet helpers."
@@ -892,6 +893,56 @@ Section /o "Laptop battery (ACPI)" SECKEXACPI
   WriteRegStr HKLM "Software\KernelEx\Components" "KexAcpi" "1"
 SectionEnd
 
+Section /o "More than 1 GB of RAM (memory limit)" SECKEXMEM
+  ;Windows 98/ME crash at start-up with much more than 1 GB of RAM. KEXMEM.SYS,
+  ;first in CONFIG.SYS, makes the BIOS report at most 1 GB to DOS, HIMEM and
+  ;Windows (nothing in Windows is patched) and resets CPU control registers some
+  ;CSM BIOSes leave set. MaxFileCache keeps VCACHE inside the system arena.
+  !insertmacro KexUpd "media\KEXMEM.SYS" "$WINDIR" "KEXMEM.SYS"
+  SetOutPath "$INSTDIR"
+  StrCpy $R9 $WINDIR 3
+  StrCpy $R8 "0"
+  ClearErrors
+  FileOpen $R0 "$R9CONFIG.SYS" r
+  IfErrors kexmem_write
+  kexmem_scan:
+    FileRead $R0 $R1
+    IfErrors kexmem_scanned
+    ${WordFind} "$R1" "KEXMEM.SYS" "E+1{" $R2
+    IfErrors kexmem_scan
+    StrCpy $R8 "1"
+  kexmem_scanned:
+  FileClose $R0
+  kexmem_write:
+  StrCmp $R8 "1" kexmem_ini
+  ;new CONFIG.SYS = our line + the old one
+  GetTempFileName $R3
+  FileOpen $R4 $R3 w
+  FileWrite $R4 "DEVICE=$WINDIR\KEXMEM.SYS$\r$\n"
+  ClearErrors
+  FileOpen $R0 "$R9CONFIG.SYS" r
+  IfErrors kexmem_copied
+  kexmem_copy:
+    FileRead $R0 $R1
+    IfErrors kexmem_copydone
+    FileWrite $R4 $R1
+    Goto kexmem_copy
+  kexmem_copydone:
+  FileClose $R0
+  kexmem_copied:
+  FileClose $R4
+  SetFileAttributes "$R9CONFIG.SYS" NORMAL
+  CopyFiles /SILENT "$R9CONFIG.SYS" "$R9CONFIG.KEX"
+  CopyFiles /SILENT $R3 "$R9CONFIG.SYS"
+  Delete $R3
+  kexmem_ini:
+  ReadINIStr $R1 "$WINDIR\system.ini" "vcache" "MaxFileCache"
+  StrCmp $R1 "" 0 +2
+    WriteINIStr "$WINDIR\system.ini" "vcache" "MaxFileCache" "262144"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexMem" "1"
+  SetRebootFlag true
+SectionEnd
+
 SectionGroupEnd
 
 SectionGroup "Network adapters" SECNETDRV
@@ -1117,6 +1168,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXUMASS} $(DESC_KEXUMASS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXFAT} $(DESC_KEXFAT)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXACPI} $(DESC_KEXACPI)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEM} $(DESC_KEXMEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAHCI} $(DESC_KEXAHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXNVME} $(DESC_KEXNVME)
@@ -1134,6 +1186,32 @@ SectionGroupEnd
 Section "Uninstall"
 
   SetDetailsView show
+
+  ;Memory limit (KEXMEM.SYS): remove its CONFIG.SYS line
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexMem"
+  StrCmp $0 "1" 0 kexmem_un_done
+    StrCpy $R9 $WINDIR 3
+    GetTempFileName $R3
+    ClearErrors
+    FileOpen $R0 "$R9CONFIG.SYS" r
+    IfErrors kexmem_un_done
+    FileOpen $R4 $R3 w
+    kexmem_un_loop:
+      FileRead $R0 $R1
+      IfErrors kexmem_un_eof
+      ${un.WordFind} "$R1" "KEXMEM.SYS" "E+1{" $R2
+      IfErrors 0 kexmem_un_loop
+      FileWrite $R4 $R1
+      Goto kexmem_un_loop
+    kexmem_un_eof:
+    FileClose $R0
+    FileClose $R4
+    SetFileAttributes "$R9CONFIG.SYS" NORMAL
+    CopyFiles /SILENT $R3 "$R9CONFIG.SYS"
+    Delete $R3
+    Delete /REBOOTOK "$WINDIR\KEXMEM.SYS"
+    DeleteRegValue HKLM "Software\KernelEx\Components" "KexMem"
+  kexmem_un_done:
 
   ;Time sync
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "TimeSync"

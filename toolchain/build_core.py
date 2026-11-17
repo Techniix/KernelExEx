@@ -595,6 +595,12 @@ def build_kexacpi(b: Build):
            subsystem="console")
 
 
+def build_kexmem(b: Build):
+    """KEXMEM.SYS: DOS driver, first in CONFIG.SYS, that limits the RAM reported to
+    Windows (1 GB) and resets CPU control registers (media/dos/kexmem.asm, NASM)."""
+    run(["nasm", "-f", "bin", "-o", b.out / "KEXMEM.SYS", ROOT / "media/dos/kexmem.asm"])
+
+
 def build_vxd(b: Build):
     """VKrnlEx.vxd: compiled as ring-0 code, linked as a PE DLL by lld, then
     converted to the LE format by toolchain/vxd/le_link.py."""
@@ -631,7 +637,7 @@ STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "ge
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
          "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
          "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexfat": build_kexfat,
-         "kexacpi": build_kexacpi, "kexpower": build_kexpower}
+         "kexacpi": build_kexacpi, "kexpower": build_kexpower, "kexmem": build_kexmem}
 
 
 def main():
