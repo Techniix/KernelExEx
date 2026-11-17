@@ -1,0 +1,68 @@
+;
+; kextouch.inf - KernelExEx touchpad, TrackPoint and wheel mouse driver (PS/2 port)
+; for Windows 98 / ME. Copyright (C) 2026, KernelExEx contributors. GPLv2.
+; ALPS touchpads (v1-v5) get two-finger and edge scrolling, tapping and TrackPoint
+; scrolling; other PS/2 mice and touchpads work as IntelliMouse (wheel).
+
+[Version]
+Signature="$CHICAGO$"
+Class=Mouse
+Provider=%KEX%
+DriverVer=11/17/2026,1.0.0.0
+
+[DestinationDirs]
+DefaultDestDir=11
+
+[SourceDisksNames]
+1="KernelExEx touchpad driver",,0
+
+[SourceDisksFiles]
+kextouch.vxd=1
+kextouch.exe=1
+
+[Manufacturer]
+%KEX%=KEX
+
+[KEX]
+%Touch.DeviceDesc%=KexTouch,*PNP0F13
+%Touch.DeviceDesc%=KexTouch,*PNP0F03
+%Touch.DeviceDesc%=KexTouch,*PNP0F0E
+%Touch.DeviceDesc%=KexTouch,*PNP0F12
+%Touch.DeviceDesc%=KexTouch,*PNP0F19
+%Touch.DeviceDesc%=KexTouch,*PNP0F1C
+
+[KexTouch]
+DelReg=KexTouch.DelReg
+AddReg=KexTouch.AddReg
+CopyFiles=KexTouch.Copy
+UpdateInis=KexTouch.Ini
+LogConfig=KexTouch.LogConfig
+
+[KexTouch.DelReg]
+HKR,,DevLoader
+HKR,,MouseDriver
+HKR,,MouseType
+HKR,,ComInfo
+
+[KexTouch.AddReg]
+HKR,,DevLoader,,*vmouse
+HKR,,MouseDriver,,kextouch.vxd
+HKR,,MouseType,,"PS2"
+HKR,,NoSetupUI,,1
+HKLM,Software\Microsoft\Windows\CurrentVersion\Run,KexTouch,,"%11%\kextouch.exe"
+
+[KexTouch.Copy]
+kextouch.vxd,,,32
+kextouch.exe,,,32
+
+[KexTouch.Ini]
+system.ini,boot,,"mouse.drv=mouse.drv"
+system.ini,386Enh,,"mouse=*vmouse"
+
+[KexTouch.LogConfig]
+ConfigPriority=HARDWIRED
+IRQConfig=12
+
+[Strings]
+KEX="KernelExEx"
+Touch.DeviceDesc="KernelExEx Touchpad / TrackPoint / Wheel Mouse (PS/2)"

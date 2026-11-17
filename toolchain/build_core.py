@@ -595,6 +595,41 @@ def build_kexacpi(b: Build):
            subsystem="console")
 
 
+def build_kextouch(b: Build):
+    """KEXTOUCH.VXD: PS/2 touchpad, TrackPoint and wheel mouse driver (VMOUSE minidriver):
+    drivers/input/touch (portable core, host-tested in tests/touch) on the KEDCL VxD
+    backend (drivers/kedcl)."""
+    d = ROOT / "drivers/input/touch"
+    k = ROOT / "drivers/kedcl"
+    srcs = [d / "kextouch.c", d / "tp_core.c", d / "tp_alps.c", k / "kexos_vxd.c"]
+    flags = [f"-I{d}", f"-I{k}", "-mgeneral-regs-only", "-fno-jump-tables", "-mno-stack-arg-probe",
+             "-fno-builtin", "-ffreestanding"]
+    if b.debugcon:
+        flags.append("-DKEX_DEBUGCON")
+    objs = b.compile("kextouch", srcs, flags)
+    defs = b.obj / "defs" / "kextouch.def"
+    defs.parent.mkdir(parents=True, exist_ok=True)
+    defs.write_text("LIBRARY KEXTOUCH.dll\nEXPORTS\n    KEXTOUCH_DDB @1 DATA\n")
+    pe = b.link("kextouch", objs, [], base="0x10000000", entry="KEXTOUCH_CTRL", defs=defs, ext=".pe")
+    dis = run(["llvm-objdump", "-d", "--no-show-raw-insn", pe])
+    fpu = sorted(set(re.findall(r"^\s+[0-9a-f]+:\s+(f[a-z]+|emms|movq|movd|\w*xmm\w*)\b", dis, re.M)) - {"fs", "fwait"})
+    if fpu:
+        sys.exit(f"kextouch: FPU/SIMD instructions in ring-0 code: {fpu}")
+    out = run([sys.executable, ROOT / "toolchain/vxd/le_link.py", pe, b.out / "KEXTOUCH.VXD", "--name", "KEXTOUCH",
+               "--description", "KernelExEx touchpad and TrackPoint"])
+    print("  " + out.strip())
+
+
+def build_kextouch_exe(b: Build):
+    """kextouch.exe: KEXTOUCH.VXD's helper (wheel events, settings window, report)."""
+    d = ROOT / "kextouch"
+    objs = b.compile("kextouchx", [d / "kextouch.c"], [f"-I{d}", f"-I{ROOT / 'common'}", "-D_WIN32_WINNT=0x0400",
+                                                        "-D_WIN32_IE=0x0400", *COMPAT])
+    res = b.resource("kextouchx", d / "kextouch.rc")
+    b.link("kextouch", [*objs, res], ["kexcrt", "kernel32", "user32", "advapi32", "comctl32"], base="0x400000",
+           entry="entrypoint", kind="exe")
+
+
 def build_kexmem(b: Build):
     """KEXMEM.SYS: DOS driver, first in CONFIG.SYS, that limits the RAM reported to
     Windows (1 GB) and resets CPU control registers (media/dos/kexmem.asm, NASM)."""
@@ -645,7 +680,7 @@ STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "ge
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
          "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
          "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexfat": build_kexfat,
-         "kexacpi": build_kexacpi, "kexpower": build_kexpower, "kexmem": build_kexmem, "kexmedia": build_kexmedia}
+         "kexacpi": build_kexacpi, "kexpower": build_kexpower, "kexmem": build_kexmem, "kextouch": build_kextouch, "kextouchx": build_kextouch_exe, "kexmedia": build_kexmedia}
 
 
 def main():

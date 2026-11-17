@@ -1,0 +1,57 @@
+/* KernelExEx - kextouch.exe resources. GPLv2. */
+#include <windows.h>
+#include <commctrl.h>
+#include "resource.h"
+#include "version.h"
+
+IDD_SETTINGS DIALOGEX 0, 0, 260, 236
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Touchpad and TrackPoint settings"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "Device:", -1, 8, 8, 30, 8
+    LTEXT           "", IDC_DEVICE, 40, 8, 212, 16
+    GROUPBOX        "Touchpad", -1, 6, 28, 248, 112
+    AUTOCHECKBOX    "&Tap to click (two fingers: right click)", IDC_TAP, 14, 40, 230, 10
+    AUTOCHECKBOX    "Tap and &drag", IDC_TAPDRAG, 14, 52, 230, 10
+    AUTOCHECKBOX    "T&wo-finger scrolling", IDC_SCROLL2, 14, 64, 230, 10
+    AUTOCHECKBOX    "&Edge scrolling (right edge)", IDC_SCROLLEDGE, 14, 76, 230, 10
+    AUTOCHECKBOX    "&Reverse scrolling direction", IDC_REVERSE, 14, 88, 230, 10
+    LTEXT           "Pointer speed:", -1, 14, 104, 60, 8
+    CONTROL         "", IDC_SPEED, TRACKBAR_CLASS, TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 80, 100, 166, 14
+    LTEXT           "Scroll speed:", -1, 14, 122, 60, 8
+    CONTROL         "", IDC_SSPEED, TRACKBAR_CLASS, TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 80, 118, 166, 14
+    GROUPBOX        "TrackPoint / pointing stick", -1, 6, 144, 248, 46
+    AUTOCHECKBOX    "&Middle button + move = scroll", IDC_STICKSCROLL, 14, 156, 230, 10
+    LTEXT           "Stick speed:", -1, 14, 172, 60, 8
+    CONTROL         "", IDC_STSPEED, TRACKBAR_CLASS, TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 80, 168, 166, 14
+    PUSHBUTTON      "Save re&port", IDC_REPORT, 6, 198, 60, 14
+    PUSHBUTTON      "Re-&detect", IDC_REDETECT, 70, 198, 50, 14
+    DEFPUSHBUTTON   "OK", IDOK, 90, 216, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 146, 216, 50, 14
+    PUSHBUTTON      "&Apply", IDC_APPLY, 202, 216, 50, 14
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEOS VOS__WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "KernelExEx"
+            VALUE "FileDescription", "KernelExEx touchpad helper and settings"
+            VALUE "FileVersion", KEXEX_VERSION_STR
+            VALUE "LegalCopyright", "GPL version 2"
+            VALUE "ProductName", "KernelExEx"
+            VALUE "ProductVersion", KEXEX_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
