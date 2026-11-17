@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the KernelExEx audio drivers in drivers/audio as WDM drivers for
 PortCls on Windows 98 SE / ME: kexac97.sys (AC'97 on Intel ICH and
-compatibles).
+compatibles) and kexhda.sys (Intel High Definition Audio).
 
 usage: build_kexaudio.py [--out DIR] [--sdk DIR] [--debugcon]
 """
@@ -25,7 +25,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     extra = ["-DKEX_DEBUGCON"] if a.debugcon else []
     rt = wdm.ROOT / "net/rt/w9xrt_div.c"   # 64-bit division helpers
-    drivers = {"kexac97": [SRC / "ac97" / "kexac97.c", rt]}
+    drivers = {"kexac97": [SRC / "ac97" / "kexac97.c", rt], "kexhda": [SRC / "hda" / "kexhda.c", rt]}
     for name, srcs in drivers.items():
         dout = out / name
         dout.mkdir(exist_ok=True)

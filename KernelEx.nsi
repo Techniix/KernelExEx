@@ -660,6 +660,7 @@ LangString DESC_KEXATA ${LANG_ENGLISH} "Hard disks over 128 GB on IDE and SATA (
 LangString DESC_KEXUMASS ${LANG_ENGLISH} "USB flash drives, USB hard disks, card readers and USB CD/DVD drives, with no driver disk: Windows 98 has none for them. Works on USB 1.1 ports and, with the USB 2.0 driver, at USB 2.0 speed. Windows may ask for the Windows 98 CD the first time."
 LangString DESC_KEXEHCI ${LANG_ENGLISH} "USB 2.0 speed for the USB 2.0 ports of any EHCI controller (the Intel ICH4 to ICH10 and later chipsets, VIA, NEC and other add-in cards). Windows 98 runs them at USB 1.1 speed only. USB 1.1 mice, keyboards and printers stay on Windows' own drivers."
 LangString DESC_KEXAC97 ${LANG_ENGLISH} "Sound for onboard AC'97 audio (Intel ICH to ICH7, nVidia nForce 1 to 4, AMD-8111) with any AC'97 codec, such as the Realtek ALC655 on the MSI 848P Neo2-V. Windows 98 has no driver for these."
+LangString DESC_KEXHDA ${LANG_ENGLISH} "Sound for Intel High Definition Audio (most PCs and laptops from 2005 on, e.g. the Dell Vostro 1440 with its IDT codec): speaker, headphones and line out, with volume control. Windows 98 has no driver for these."
 LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
 LangString DESC_KEXRNDIS ${LANG_ENGLISH} "USB network adapters that speak RNDIS, including USB tethering from an Android phone, with OpenBSD's urndis driver."
 LangString DESC_KEXCDCE ${LANG_ENGLISH} "USB Ethernet adapters that follow the CDC Ethernet standard (many USB-C and Realtek RTL8152/8153 adapters)."
@@ -838,6 +839,22 @@ Section /o "AC'97 onboard sound" SECKEXAC97
     Call KexAc97Repair
     MessageBox MB_ICONINFORMATION|MB_OK "Your PC has not had a WDM sound driver before. When Windows sets up the sound card (after the restart), it asks for the Windows 98 CD for its sound system files (portcls.sys and others). Have the CD ready, or point Windows to the folder that holds its setup files (for example C:\WINDOWS\OPTIONS\CABS)." /SD IDOK
   ac97_wdm_ok:
+SectionEnd
+
+Section /o "HD Audio onboard sound (Intel, laptops)" SECKEXHDA
+  SectionIn 2
+  ;a WDM audio driver for Intel High Definition Audio (ICH6 and later) with any
+  ;HD Audio codec: speaker, headphones (they silence the speaker) and line out
+  SetOutPath "$INSTDIR\drivers\audio"
+  File "drivers\audio\kexhda.sys"
+  File "drivers\audio\kexhda.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\audio"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexHda" "1"
+  !insertmacro KexInfOther_kexhda
+  IfFileExists "$WINDIR\system32\drivers\portcls.sys" hda_wdm_ok
+    MessageBox MB_ICONINFORMATION|MB_OK "Your PC has not had a WDM sound driver before. When Windows sets up the sound card (after the restart), it asks for the Windows 98 CD for its sound system files (portcls.sys and others). Have the CD ready, or point Windows to the folder that holds its setup files (for example C:\WINDOWS\OPTIONS\CABS)." /SD IDOK
+  hda_wdm_ok:
 SectionEnd
 
 ;A sound device that our earlier builds set up without Windows' WDM audio
@@ -1164,6 +1181,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECNETDRV} $(DESC_NETDRV)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXCHIP} $(DESC_KEXCHIP)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAC97} $(DESC_KEXAC97)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXHDA} $(DESC_KEXHDA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEHCI} $(DESC_KEXEHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXUMASS} $(DESC_KEXUMASS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXFAT} $(DESC_KEXFAT)
@@ -1250,6 +1268,16 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\audio"
     RMDir "$INSTDIR\drivers"
   un_kexac97_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexHda"
+  StrCmp $0 "1" 0 un_kexhda_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\audio" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\audio\kexhda.sys"
+    Delete "$INSTDIR\drivers\audio\kexhda.inf"
+    RMDir "$INSTDIR\drivers\audio"
+    RMDir "$INSTDIR\drivers"
+  un_kexhda_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexEhci"
   StrCmp $0 "1" 0 un_kexehci_done
     ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
@@ -1433,6 +1461,7 @@ Section "Uninstall"
   !insertmacro un.KexInfOther_kexide
   !insertmacro un.KexInfOther_kexuhci
   !insertmacro un.KexInfOther_kexac97
+  !insertmacro un.KexInfOther_kexhda
   !insertmacro un.KexInfOther_kexrl
   !insertmacro un.KexInfOther_kexem
   !insertmacro un.KexInfOther_kexcdce
