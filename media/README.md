@@ -19,3 +19,15 @@ Tested in QEMU: an installed Windows 98 SE that crashed with 4 GB (fatal excepti
 boots to the desktop with KEXMEM and reports 1022 MB. The media puts it in CONFIG.SYS;
 for existing installs the KernelExEx installer has the component
 "More than 1 GB of RAM (memory limit)". PATCHMEM (R. Loew) is proprietary and is not used.
+
+## Planned: our own large-memory patch (beyond 1 GB)
+
+KEXMEM caps Windows at about 1 GB. To use up to ~3.5 GB we need our own equivalent of
+PATCHMEM (R. Loew). To do:
+
+- Research thoroughly what limits Windows 9x above 1 GB: VMM's system arena (1 GB),
+  VCACHE sizing, the page-frame tables, and drivers that map memory into the system arena.
+- PATCHMEM is proprietary, so a clean-room process: study its behaviour (and, where lawful
+  for interoperability, its patches) and write a specification. Implement only from that
+  specification and from our own analysis of VMM.VXD/VCACHE.VXD on the user's own CD,
+  without copying its code or patch bytes. Ship it as a patcher run on the user's own files.
