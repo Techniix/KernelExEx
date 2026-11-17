@@ -1,5 +1,25 @@
 # Install media (USB stick / CD) — work in progress
 
+## Making the stick
+
+1. `make_iso.sh KEXSETUP.IMG REBIOS.EFI CSMWRAP.EFI KEXSETUP.ISO` builds one hybrid image
+   for USB sticks and CDs.
+2. On a Windows XP–11 PC, run `kexmedia.exe` (built by `build_core.py --only kexmedia`)
+   with `KEXSETUP.ISO` beside it, as administrator. It lists only USB/removable disks
+   (never the system disk), asks for ERASE, releases the stick's drives, writes the
+   image and reads it back to check. Any raw image writer works too (`dd`, Rufus in
+   DD mode).
+
+## Booting
+
+- **BIOS / CSM (e.g. Dell Vostro 1440):** isolinux → MEMDISK → the setup RAM disk. Tested in QEMU.
+- **UEFI-only PCs:** `\EFI\BOOT\BOOTX64.EFI` is ReBIOS (GPLv2: SeaBIOS in a thin
+  hypervisor; needs VT-x with EPT or AMD-V, and an IOMMU (VT-d / AMD-Vi), enabled in the
+  firmware setup). Without those, start `\EFI\CSMWRAP\CSMWRAP.EFI` (CSMWrap, LGPL-2.1,
+  deprecated upstream; needs at least 2 CPU threads) from the firmware's boot-from-file
+  menu. Neither can be tested in stock QEMU; CSMWrap gets past its start-up checks in
+  QEMU/OVMF with 2 CPUs.
+
 Boots a RAM disk (syslinux MEMDISK) that prepares the laptop's disk (`dos/kexprep.c`),
 copies Windows 98 and KernelExEx onto it, and lets Windows 98 Setup run from the hard disk
 with `stage/MSBATCH.INF`. Prototype builder: `stage_extra.py` + `proto_image.py`.
