@@ -656,7 +656,7 @@ def build_kexinfo(b: Build):
 def build_kexmem(b: Build):
     """KEXMEM.SYS: DOS driver, first in CONFIG.SYS, that limits the RAM reported to
     Windows (1 GB) and resets CPU control registers (media/dos/kexmem.asm, NASM)."""
-    run(["nasm", "-f", "bin", "-o", b.out / "KEXMEM.SYS", ROOT / "media/dos/kexmem.asm"])
+    run(["nasm", "-f", "bin", "-I", str(ROOT / "media/dos") + "/", "-o", b.out / "KEXMEM.SYS", ROOT / "media/dos/kexmem.asm"])
 
 
 def build_kexmedia(b: Build):
@@ -695,7 +695,7 @@ def build_vxd(b: Build):
                "--description", "KernelEx Virtual Device"])
     print("  " + out.strip())
     # the LE image must equal the relocated PE, and every INT 20h must name a known service
-    known = "0x00010000,0x00010004,0x0001004F,0x00010051,0x00010052,0x00010063,0x00010090,0x0001012D"
+    known = "0x00010000,0x00010004,0x0001004F,0x00010051,0x00010052,0x00010053,0x00010063,0x00010090,0x0001012D"
     run([sys.executable, tv / "check_vxd.py", pe, b.out / "VKrnlEx.vxd", "--allow", known])
 
 
