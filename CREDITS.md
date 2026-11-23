@@ -17,6 +17,12 @@ credit to him. The patches marked `[Loew]` in our sources make the same changes
 as PATCHMEM's Windows 98 tables; we wrote our own pattern definitions and
 tooling, and added our own fixes where we found further problems.
 
+From PATCHMEM we use: the fix for the stale page-table record flag, the larger
+start-up page allowance with the record pool moved and enlarged (the key to more
+than 2 GB), and the 512 MB disk cache ceiling. We also ran PATCHMEM itself as the
+reference our version was checked against, byte for byte. His manual's advice on
+HIMEM handles above 2.75 GB is applied automatically by our installer.
+
 If Rudy Loew's family asks, we will remove this part of KernelExEx (or the whole
 project) without delay. Contact us through the project's GitHub issues.
 

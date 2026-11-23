@@ -34,6 +34,7 @@ struct le_obj
 	uint32_t vsize;     /* virtual size */
 	uint32_t flags;
 	uint32_t first_page, npages;   /* 1-based page index into the page map */
+	uint32_t phys_page;  /* 1-based page in the file (from the page map); 0: pages not contiguous */
 };
 
 struct vxd
@@ -43,6 +44,7 @@ struct vxd
 	uint32_t size;      /* bytes up to the next VxD (or the end) */
 	uint32_t page_size, last_page, npages;
 	uint32_t data_pages; /* file offset (in vxdfile.data) of page 1 */
+	uint32_t objtab;     /* offset of the object table in vxdfile.data */
 	int nobj;
 	struct le_obj obj[64];
 };
@@ -55,8 +57,9 @@ int vf_find(const struct vxdfile *f, const char *name, struct vxd *v);
 /* the file offset of byte `off` of object `obj` (1-based); 0 if outside the
    object's stored data (an object's tail may be zero-filled, not stored) */
 uint32_t vf_obj_offset(const struct vxdfile *f, const struct vxd *v, int obj, uint32_t off);
-/* bytes of object `obj` stored in the file (pages are contiguous in W3/LE files
-   written by Microsoft's tools; checked) */
+/* bytes of object `obj` stored in the file. The page map need not follow the
+   object order (VMM's is not), but each object's own pages must be contiguous
+   in the file (checked; 0 if not) */
 uint32_t vf_obj_stored(const struct vxdfile *f, const struct vxd *v, int obj);
 
 /* A patch: find `find` (with `mask`: 0xFF bytes must match, 0x00 are "any")
@@ -78,6 +81,8 @@ struct vf_patch
 enum { VP_APPLIED = 0, VP_ALREADY, VP_NOMATCH, VP_AMBIGUOUS, VP_NOVXD };
 /* *where = object << 24 | offset in the object */
 int vf_patch(struct vxdfile *f, const struct vf_patch *p, uint32_t *where);
+/* room in object `obj`'s last stored page after its virtual size (for appended code) */
+uint32_t vf_obj_slack(const struct vxdfile *f, const struct vxd *v, int obj);
 /* patch undo: the same patch with find/repl swapped is the undo */
 
 #endif

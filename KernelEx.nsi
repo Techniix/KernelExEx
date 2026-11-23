@@ -49,6 +49,7 @@
   !include "WinVer.nsh"
   !include "nsDialogs.nsh"
   !include "WordFunc.nsh"
+  !include "TextFunc.nsh"
   !include "drivers\chipset\kexchip_ids.nsh"
 
 ;--------------------------------
@@ -656,7 +657,8 @@ LangString DESC_KEXACPI ${LANG_ENGLISH} "For laptops: shows the battery's charge
 LangString DESC_KEXTOUCH ${LANG_ENGLISH} "For laptops: ALPS touchpads get tap-to-click, two-finger and edge scrolling; TrackPoints scroll with the middle button; other PS/2 mice get the wheel. Replaces the standard PS/2 mouse driver (uninstalling puts it back). Settings in the Start menu."
 LangString DESC_KEXINFO ${LANG_ENGLISH} "A hardware report (Start menu: Hardware report): every device with its IDs, driver, problems and resources, the firmware, and the KernelExEx driver logs, in C:\KEXINFO.TXT for bug reports."
 LangString DESC_KEXKEYS ${LANG_ENGLISH} "Makes laptop Fn volume/mute keys and USB keyboard media keys work: volume up/down and mute change the master volume; play/stop/next/previous control Winamp."
-LangString DESC_KEXMEMX ${LANG_ENGLISH} "Lets Windows 98 SE use up to 2 GB of RAM (tested in an emulator with 2 GB) by patching its memory manager (VMM32.VXD; the original is kept and comes back when this is removed). Builds on Rudolph R. Loew's PATCHMEM. Experimental: if Windows does not start afterwards, start from the KernelExEx install stick and type KEXUNDO."
+LangString DESC_KEXMEMX ${LANG_ENGLISH} "Lets Windows 98 SE use up to 2 GB of RAM by patching its memory manager (VMM32.VXD; the original is kept and comes back when this is removed). Builds on Rudolph R. Loew's PATCHMEM. Experimental, tested in an emulator: if Windows does not start afterwards, start from the KernelExEx install stick, which offers to undo it."
+LangString DESC_KEXMEMA ${LANG_ENGLISH} "Like 'Use up to 2 GB', but for all the RAM Windows can address: up to about 3.5 GB (a 32-bit PC maps the rest above 4 GB). Tested in an emulator with 2, 3 and 3.5 GB. Same patch, same undo."
 LangString DESC_KEXMEM ${LANG_ENGLISH} "For computers with more than 1 GB of RAM: Windows 98 and ME crash or say 'Insufficient memory' at start-up with that much. This makes Windows use the first 1 GB (adds KEXMEM.SYS to CONFIG.SYS). Takes effect after a restart."
 LangString DESC_KEXFAT ${LANG_ENGLISH} "Reads SD cards, USB sticks and disks formatted exFAT (cards over 32 GB come that way): they get a drive letter and open in Explorer and in programs. Read-only for now: copying files onto them is not possible yet. Experimental."
 LangString DESC_KEXVMM ${LANG_ENGLISH} "The mouse pointer moves in and out of the virtual machine's window freely, with no need to click into it or press keys to release it. For QEMU (the default PC machine) and VMware. Does nothing on a real PC."
@@ -1091,11 +1093,15 @@ Section /o "More than 1 GB of RAM (memory limit)" SECKEXMEM
 SectionEnd
 
 ;Rewrite (or add) the KEXMEM.SYS line of CONFIG.SYS with options $R7 ("" or " /MAX=2048")
+;$R7: KEXMEM options. With a /MAX above 1 GB, HIMEM also gets 128 handles: Windows'
+;loader takes RAM in 64 MB XMS blocks, one handle each, and HIMEM's default 32 run out
+;at about 2.75 GB (PATCHMEM's manual has the same advice).
 Function KexMemLine
   StrCpy $R9 $WINDIR 3
   GetTempFileName $R3
   FileOpen $R4 $R3 w
   StrCpy $R8 "0"
+  StrCpy $R6 "0"
   ClearErrors
   FileOpen $R0 "$R9CONFIG.SYS" r
   IfErrors kml_end
@@ -1104,10 +1110,22 @@ Function KexMemLine
     IfErrors kml_done
     ClearErrors
     ${WordFind} "$R1" "KEXMEM.SYS" "E+1{" $R2
-    IfErrors kml_keep
+    IfErrors kml_himem
       StrCmp $R8 "1" kml_copy
       FileWrite $R4 "DEVICE=$WINDIR\KEXMEM.SYS$R7$\r$\n"
       StrCpy $R8 "1"
+      Goto kml_copy
+    kml_himem:
+    ClearErrors
+    ${WordFind} "$R1" "HIMEM.SYS" "E+1{" $R2
+    IfErrors kml_keep
+      StrCpy $R6 "1"
+      StrCmp $R7 "" kml_keep
+      ClearErrors
+      ${WordFind} "$R1" "NUMHANDLES" "E+1{" $R2
+      IfErrors 0 kml_keep
+      ${TrimNewLines} "$R1" $R1
+      FileWrite $R4 "$R1 /NUMHANDLES=128$\r$\n"
       Goto kml_copy
     kml_keep:
     FileWrite $R4 $R1
@@ -1133,6 +1151,27 @@ Function KexMemLine
     Delete $R3
     StrCpy $R3 $R5
   kml_install:
+  ;no HIMEM line: Windows loads HIMEM by itself, with 32 handles; add ours after KEXMEM
+  StrCmp $R7 "" kml_write
+  StrCmp $R6 "1" kml_write
+    GetTempFileName $R5
+    FileOpen $R4 $R5 w
+    FileOpen $R0 $R3 r
+    kml_hcat:
+      FileRead $R0 $R1
+      IfErrors kml_hdone
+      FileWrite $R4 $R1
+      ClearErrors
+      ${WordFind} "$R1" "KEXMEM.SYS" "E+1{" $R2
+      IfErrors kml_hcat
+      FileWrite $R4 "DEVICE=$WINDIR\HIMEM.SYS /NUMHANDLES=128$\r$\n"
+      Goto kml_hcat
+    kml_hdone:
+    FileClose $R0
+    FileClose $R4
+    Delete $R3
+    StrCpy $R3 $R5
+  kml_write:
   SetFileAttributes "$R9CONFIG.SYS" NORMAL
   IfFileExists "$R9CONFIG.KEX" +2
     CopyFiles /SILENT "$R9CONFIG.SYS" "$R9CONFIG.KEX"
@@ -1140,9 +1179,23 @@ Function KexMemLine
   Delete $R3
 FunctionEnd
 
+Section /o "Use all RAM, up to about 3.5 GB (experimental: patches Windows)" SECKEXMEMA
+  StrCpy $R7 " /MAX=4095"
+  Call KexMemXOn
+SectionEnd
+
 Section /o "Use up to 2 GB of RAM (experimental: patches Windows)" SECKEXMEMX
-  ;kexpatch.exe patches VMM32.VXD (original kept as VMM32.KEX) so Windows 98 SE
-  ;can use more than 1 GB; KEXMEM then reports up to 2 GB (tested limit).
+  ;"all RAM" above wins when both are ticked
+  SectionGetFlags ${SECKEXMEMA} $0
+  IntOp $0 $0 & ${SF_SELECTED}
+  StrCmp $0 "0" 0 +3
+    StrCpy $R7 " /MAX=2048"
+    Call KexMemXOn
+SectionEnd
+
+;kexpatch.exe patches VMM32.VXD (original kept as VMM32.KEX) so Windows 98 SE can use
+;more than 1 GB; KEXMEM (options in $R7) then reports RAM up to that limit.
+Function KexMemXOn
   !insertmacro KexUpd "media\KEXMEM.SYS" "$WINDIR" "KEXMEM.SYS"
   SetOutPath "$INSTDIR"
   File "kexpatch\kexpatch.exe"
@@ -1150,9 +1203,8 @@ Section /o "Use up to 2 GB of RAM (experimental: patches Windows)" SECKEXMEMX
   StrCmp $0 "0" memx_ok
   StrCmp $0 "1" memx_ok
     MessageBox MB_ICONINFORMATION|MB_OK "This copy of Windows could not be patched to use more than 1 GB of RAM (kexpatch error $0: another Windows version, or VMM32.VXD changed by another program). Windows keeps using 1 GB." /SD IDOK
-    Goto memx_done
+    Return
   memx_ok:
-  StrCpy $R7 " /MAX=2048"
   Call KexMemLine
   ;Setup's 1 GB limit in SYSTEM.INI would still apply
   DeleteINIStr "$WINDIR\system.ini" "386Enh" "MaxPhysPage"
@@ -1162,8 +1214,7 @@ Section /o "Use up to 2 GB of RAM (experimental: patches Windows)" SECKEXMEMX
   WriteRegStr HKLM "Software\KernelEx\Components" "KexMemX" "1"
   WriteRegStr HKLM "Software\KernelEx\Components" "KexMem" "1"
   SetRebootFlag true
-  memx_done:
-SectionEnd
+FunctionEnd
 
 
 SectionGroupEnd
@@ -1398,6 +1449,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXKEYS} $(DESC_KEXKEYS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEM} $(DESC_KEXMEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEMX} $(DESC_KEXMEMX)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEMA} $(DESC_KEXMEMA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAHCI} $(DESC_KEXAHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXNVME} $(DESC_KEXNVME)
@@ -2080,6 +2132,11 @@ Function .onInit
   ${GetOptions} $0 "/MEMX" $1
   ${IfNot} ${Errors}
     !insertmacro SelectSection ${SECKEXMEMX}
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $0 "/MEMA" $1
+  ${IfNot} ${Errors}
+    !insertmacro SelectSection ${SECKEXMEMA}
   ${EndIf}
 
 FunctionEnd

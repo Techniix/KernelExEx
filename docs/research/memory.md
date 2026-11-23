@@ -62,3 +62,28 @@ page per 64 MB is (probably the loader's own use of each XMS block).
 2. Patch VMM: a bigger range table (relocate it; the LE fixups list every reference),
    and fix the one-past-the-end return. Tools: `vmmx` (W4 -> W3 -> VMM.VXD, from
    patcher9x's MIT code).
+
+## Update: past 2 GB, at parity with PATCHMEM (2026-11-23)
+
+PATCHMEM 7.2 (Rudolph R. Loew; source published by his family) was run in QEMU as a
+reference: Korean 98 SE reaches the desktop at 3072 MB with it. Its output was compared
+byte for byte with ours. What we learned:
+
+- PATCHMEM writes a standalone SYSTEM\VMM32\VMM.VXD (and VCACHE.VXD), patches the
+  real-mode loader in VMM32.VXD to take XMS 3.0 blocks (one large block instead of
+  64 MB ones), and patches VMM and VCACHE. We patch VMM and VCACHE inside VMM32.VXD
+  (W3) and keep our range merge instead of the loader patch.
+- **VMM's page map is not in object order**: the init object (ICOD) starts at file
+  page 0x23, not 0x19. Our first port assumed identity and put the pool hook into the
+  middle of the start-up page database; vxdfile.c now maps pages through the page map.
+- The start-up page database (13 bytes per page) sits in ICOD at 0x9430, directly
+  before the record pool's byte array (0xFEF0, 0x52D0 bytes). Raising the start-up page
+  cap 0x834 -> 0xE90 only works together with moving that array (PATCHMEM's pool patch):
+  this is why the cap raise alone failed before.
+- With 64 MB XMS blocks, HIMEM's default 32 handles run out at ~2.75 GB (Windows then
+  sees 2824 MB): the installer sets /NUMHANDLES=128 (PATCHMEM's manual gives the same
+  advice for the user to do by hand).
+
+Results (QEMU, Westmere, full set + merge): 2048, 3072 and 3560 MB (all a 32-bit PC
+maps below 4 GB) reach the desktop and report the full amount; also through the
+installer (/S /MEMA). Not yet tested: long runs under memory load.

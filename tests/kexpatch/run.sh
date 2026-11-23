@@ -6,4 +6,7 @@ set -e
 cd "$(dirname "$0")"
 gcc -std=c99 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o /tmp/vftest vftest.c ../../tools/kexpatch/vxdfile.c
 /tmp/vftest "$1"
-echo "kexpatch: ok"
+echo "vftest: ok"
+gcc -std=c99 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o /tmp/memtest memtest.c ../../tools/kexpatch/mempatch.c ../../tools/kexpatch/vxdfile.c
+/tmp/memtest "$1" /tmp/memtest.w3
+echo "memtest: ok"

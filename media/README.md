@@ -65,21 +65,21 @@ the VMM patch below:
 | 1280 MB (KEXMEM /MAX=1280) | 256 MB or 64 MB | "Insufficient memory to initialize Windows" |
 | 1536 / 1792 MB | 256 MB | same |
 
-## kexpatch /mem: up to 2 GB (installer option, experimental)
+## kexpatch /mem: more than 1 GB (installer options, experimental)
 
 `tools/kexpatch` patches the user's own VMM32.VXD (copy kept as SYSTEM\VMM32.KEX; the new
-file goes in at the next start through WININIT.INI). Two fixes, details in
-`docs/research/memory.md`:
+file goes in at the next start through WININIT.INI). Details in `docs/research/memory.md`:
 
 - ours: memory blocks from the loader (at most 64 MB each, one page apart) are merged, so
   VMM's 16-entry range table no longer caps Windows at 16 x 64 MB = 1 GB;
 - from Rudolph R. Loew's PATCHMEM (see CREDITS.md): a stale flag in page-table records
-  that crashes Windows at about 1.25 GB.
+  (crash at ~1.25 GB); more start-up pages with the record pool moved and enlarged
+  (needed above ~2 GB); VCACHE's ceiling lowered to 512 MB.
 
-The installer component "Use up to 2 GB of RAM" runs `kexpatch /mem on` and sets KEXMEM
-to `/MAX=2048`. Tested in QEMU at 2 GB: Windows starts and runs. 3-4 GB do not work yet
-(KEXMEM keeps those PCs at 2 GB). Safe Mode skips CONFIG.SYS, so above 1 GB it needs
-"Step-by-step confirmation" with KEXMEM loaded.
+Installer components: "Use up to 2 GB of RAM" (KEXMEM `/MAX=2048`) and "Use all RAM, up
+to about 3.5 GB" (`/MAX=4095`); both also give HIMEM `/NUMHANDLES=128`. Tested in QEMU at
+2048, 3072 and 3560 MB. Safe Mode skips CONFIG.SYS, so above 1 GB it needs
+"Step-by-step confirmation" with KEXMEM loaded (not tested).
 
 **If Windows no longer starts:** boot the install stick. When it finds a patched Windows it
 offers to undo the patch (press U): `KEXUNDO.COM` copies VMM32.KEX back and removes `/MAX=`

@@ -225,14 +225,35 @@ int vf_find(const struct vxdfile *f, const char *name, struct vxd *v)
 		if (v->nobj < 1 || v->nobj > 64 || !v->page_size || v->page_size > 0x1000 || off + ot + 24u * v->nobj > f->size ||
 		    v->data_pages + (v->npages ? (v->npages - 1) * v->page_size + v->last_page : 0) > f->size)
 			return VF_DAMAGED;
-		(void) pm;
+		v->objtab = off + ot;
+		if (off + pm + 4u * v->npages > f->size)
+			return VF_DAMAGED;
 		for (k = 0; k < v->nobj; k++)
 		{
+			uint32_t p, q;
 			o = off + ot + 24 * k;
 			v->obj[k].vsize = rd32(f->data + o);
 			v->obj[k].flags = rd32(f->data + o + 8);
 			v->obj[k].first_page = rd32(f->data + o + 12);
 			v->obj[k].npages = rd32(f->data + o + 16);
+			/* LE page map entry: 24-bit page number (high byte first), then flags */
+			v->obj[k].phys_page = 0;
+			if (!v->obj[k].npages || v->obj[k].first_page < 1 ||
+			    v->obj[k].first_page + v->obj[k].npages - 1 > v->npages)
+				continue;
+			for (q = 0; q < v->obj[k].npages; q++)
+			{
+				const uint8_t *e2 = f->data + off + pm + 4 * (v->obj[k].first_page - 1 + q);
+				p = (uint32_t) e2[0] << 16 | (uint32_t) e2[1] << 8 | e2[2];
+				if (!q)
+					v->obj[k].phys_page = p;
+				else if (p != v->obj[k].phys_page + q)
+					v->obj[k].phys_page = 0;
+				if (!v->obj[k].phys_page)
+					break;
+			}
+			if (v->obj[k].phys_page && v->obj[k].phys_page + v->obj[k].npages - 1 > v->npages)
+				v->obj[k].phys_page = 0;
 		}
 		return VF_OK;
 	}
@@ -247,18 +268,33 @@ uint32_t vf_obj_stored(const struct vxdfile *f, const struct vxd *v, int obj)
 	if (obj < 1 || obj > v->nobj)
 		return 0;
 	o = &v->obj[obj - 1];
-	if (!o->npages)
+	if (!o->npages || !o->phys_page)
 		return 0;
 	n = (o->npages - 1) * v->page_size;
-	n += o->first_page + o->npages - 1 == v->npages ? v->last_page : v->page_size;
+	n += o->phys_page + o->npages - 1 == v->npages ? v->last_page : v->page_size;
 	return n < o->vsize ? n : o->vsize;
+}
+
+uint32_t vf_obj_slack(const struct vxdfile *f, const struct vxd *v, int obj)
+{
+	const struct le_obj *o;
+	uint32_t n;
+	(void) f;
+	if (obj < 1 || obj > v->nobj)
+		return 0;
+	o = &v->obj[obj - 1];
+	if (!o->npages || !o->phys_page)
+		return 0;
+	n = (o->npages - 1) * v->page_size;
+	n += o->phys_page + o->npages - 1 == v->npages ? v->last_page : v->page_size;
+	return n > o->vsize ? n - o->vsize : 0;
 }
 
 uint32_t vf_obj_offset(const struct vxdfile *f, const struct vxd *v, int obj, uint32_t off)
 {
 	if (off >= vf_obj_stored(f, v, obj))
 		return 0;
-	return v->data_pages + (v->obj[obj - 1].first_page - 1) * v->page_size + off;
+	return v->data_pages + (v->obj[obj - 1].phys_page - 1) * v->page_size + off;
 }
 
 static int match(const uint8_t *p, const uint8_t *find, const uint8_t *mask, uint32_t n)

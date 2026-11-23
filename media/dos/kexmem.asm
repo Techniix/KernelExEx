@@ -8,7 +8,7 @@
 ;    1 GB of RAM: VMM and VCACHE run out of the 1 GB system arena and Windows
 ;    crashes during start-up. KEXMEM hooks the BIOS memory-size services (int 15h
 ;    E820h, E801h, E881h, 88h) so that DOS, HIMEM.SYS and Windows all see RAM only
-;    below n MB (default 1024, range 64..3072). Memory above the limit is reported
+;    below n MB (default 1024, range 64..4095). Memory above the limit is reported
 ;    as reserved; nothing in Windows is patched.
 ; 2. Control registers. Some CSM / UEFI compatibility BIOSes hand over with CR0,
 ;    CR4 or EFER bits still set ("While initializing device VCACHE: Windows
@@ -246,7 +246,7 @@ parse:
 .numx:  dec si
         cmp bx, 64
         jb .next                        ; out of range: keep the default
-        cmp bx, 3072
+        cmp bx, 4095                    ; limit = n << 20 must stay below 4 GB
         ja .next
         mov [cs:mb], bx
         jmp .next
