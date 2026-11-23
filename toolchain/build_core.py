@@ -618,6 +618,10 @@ def build_kextouch(b: Build):
     out = run([sys.executable, ROOT / "toolchain/vxd/le_link.py", pe, b.out / "KEXTOUCH.VXD", "--name", "KEXTOUCH",
                "--description", "KernelExEx touchpad and TrackPoint"])
     print("  " + out.strip())
+    # every VMM/VPICD/VMD service it may call (Get_System_Time, Set_Global_Time_Out,
+    # VPICD_Virtualize_IRQ/Phys_EOI/Physically_Mask/Unmask, VMD_Post_Pointer_Message)
+    run([sys.executable, ROOT / "toolchain/vxd/check_vxd.py", pe, b.out / "KEXTOUCH.VXD", "--allow",
+         "0x0001003F,0x0001003C,0x00030001,0x00030004,0x00030008,0x00030009,0x000C0003"])
 
 
 def build_kextouch_exe(b: Build):
