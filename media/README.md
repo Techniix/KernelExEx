@@ -2,13 +2,29 @@
 
 ## Making the stick
 
-1. `make_iso.sh KEXSETUP.IMG REBIOS.EFI CSMWRAP.EFI KEXSETUP.ISO` builds one hybrid image
-   for USB sticks and CDs.
-2. On a Windows XP–11 PC, run `kexmedia.exe` (built by `build_core.py --only kexmedia`)
-   with `KEXSETUP.ISO` beside it, as administrator. It lists only USB/removable disks
-   (never the system disk), asks for ERASE, releases the stick's drives, writes the
-   image and reads it back to check. Any raw image writer works too (`dd`, Rufus in
-   DD mode).
+**Users:** run `kexmedia.exe` on any Windows XP–11 PC (it asks for administrator
+rights). One window: pick the Windows 98 CD (a CD drive, or an .iso file of it with
+Browse), pick the USB stick, click *Make the USB stick*. It builds the stick from the
+CD and writes and checks it; nothing else is needed (no Linux, no command line).
+*Save as .iso file instead* makes an image for a CD or a virtual machine.
+Only USB/removable disks are offered, never the system disk, and nothing is written
+before the user confirms. The stick needs about 520 MB.
+
+How: `win/mkimage.c` (portable C) reads the CD (ISO 9660, its El Torito boot floppy
+with FAT12) and writes the stick: a base hybrid ISO (isolinux + MEMDISK, ReBIOS,
+CSMWrap) with an empty 512 MB extent for `KEXSETUP.IMG`, which it fills with the
+FAT16 setup disk (the floppy's DOS files, the CD's WIN98 folder, our stage) and then
+patches the file's size and MEMDISK's cylinders. Every MB written is read back and
+compared (CRC32). Nothing from Microsoft is in the program; it all comes from the CD.
+
+**Building it:** `build_core.py` builds `kexmedia.exe`; `build_usbmaker.sh BUILD_CORE
+KEXPREP.EXE KEXSETUP.EXE REBIOS.EFI CSMWRAP.EFI OUT.EXE` appends its payload
+(`pack_media.py`: our stage files, the base ISO without its zero runs, our MBR).
+`kexmedia /makeiso CD-OR-ISO OUT.ISO` works without a window (scripts, tests).
+`tests/media/run.sh` builds a stick on the host from a CD image and checks it.
+
+The Linux prototype (`stage_extra.py`, `proto_image.py`, `make_iso.sh`) does the same
+by hand and is kept for development.
 
 ## Booting
 
@@ -22,7 +38,7 @@
 
 Boots a RAM disk (syslinux MEMDISK) that prepares the laptop's disk (`dos/kexprep.c`),
 copies Windows 98 and KernelExEx onto it, and lets Windows 98 Setup run from the hard disk
-with `stage/MSBATCH.INF`. Prototype builder: `stage_extra.py` + `proto_image.py`.
+with `stage/MSBATCH.INF` and `/p i` (no Windows ACPI driver: KEXACPI reads batteries).
 
 ## KEXMEM.SYS — more than 1 GB of RAM
 
