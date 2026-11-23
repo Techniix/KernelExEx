@@ -120,6 +120,7 @@ LAYOUT = {
     "drivers/touch/KEXTOUCH.VXD": "core:KEXTOUCH.VXD",
     "drivers/touch/kextouch.exe": "core:kextouch.exe",
     "kexkeys/kexkeys.exe": "core:kexkeys.exe",
+    "kexinfo/kexinfo.exe": "core:kexinfo.exe",
     "kexkeys/kexkeyh.dll": "core:kexkeyh.dll",
     "drivers/kexnet/kexvio.sys": "kexnet:kexvio.sys",
     "drivers/kexnet/kexvio.inf": "drivers/kexnet/vio/kexvio.inf",

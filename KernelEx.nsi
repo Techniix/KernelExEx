@@ -652,6 +652,7 @@ LangString DESC_KEXAHCI ${LANG_ENGLISH} "SATA hard disks, SSDs and DVD drives on
 LangString DESC_KEXNVME ${LANG_ENGLISH} "NVMe SSDs: M.2 NVMe drives and PCIe SSD cards (Windows 98 does not see them at all). For a second drive: booting Windows 98 from an NVMe SSD needs a BIOS that can boot from it."
 LangString DESC_KEXACPI ${LANG_ENGLISH} "For laptops: shows the battery's charge and time left on the taskbar, warns when it runs low, and can shut down when it is nearly empty or turn the screen off when the lid closes. For laptops whose battery Windows 98 cannot read (most from 2005 on). Not needed on a desktop."
 LangString DESC_KEXTOUCH ${LANG_ENGLISH} "For laptops: ALPS touchpads get tap-to-click, two-finger and edge scrolling; TrackPoints scroll with the middle button; other PS/2 mice get the wheel. Replaces the standard PS/2 mouse driver (uninstalling puts it back). Settings in the Start menu."
+LangString DESC_KEXINFO ${LANG_ENGLISH} "A hardware report (Start menu: Hardware report): every device with its IDs, driver, problems and resources, the firmware, and the KernelExEx driver logs, in C:\KEXINFO.TXT for bug reports."
 LangString DESC_KEXKEYS ${LANG_ENGLISH} "Makes laptop Fn volume/mute keys and USB keyboard media keys work: volume up/down and mute change the master volume; play/stop/next/previous control Winamp."
 LangString DESC_KEXMEM ${LANG_ENGLISH} "For computers with more than 1 GB of RAM: Windows 98 and ME crash or say 'Insufficient memory' at start-up with that much. This makes Windows use the first 1 GB (adds KEXMEM.SYS to CONFIG.SYS). Takes effect after a restart."
 LangString DESC_KEXFAT ${LANG_ENGLISH} "Reads SD cards, USB sticks and disks formatted exFAT (cards over 32 GB come that way): they get a drive letter and open in Explorer and in programs. Read-only for now: copying files onto them is not possible yet. Experimental."
@@ -910,6 +911,18 @@ Section /o "Laptop battery (ACPI)" SECKEXACPI
     CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Battery.lnk" "$SYSDIR\kexpower.exe"
   !insertmacro MUI_STARTMENU_WRITE_END
   WriteRegStr HKLM "Software\KernelEx\Components" "KexAcpi" "1"
+SectionEnd
+
+Section "Hardware report tool" SECKEXINFO
+  ;kexinfo.exe: writes C:\KEXINFO.TXT (devices, IDs, resources, firmware, driver
+  ;logs) for bug reports
+  !insertmacro KexUpd "kexinfo\kexinfo.exe" "$INSTDIR" "kexinfo.exe"
+  SetOutPath "$INSTDIR"
+  !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
+    CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
+    CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Hardware report.lnk" "$INSTDIR\kexinfo.exe"
+  !insertmacro MUI_STARTMENU_WRITE_END
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexInfo" "1"
 SectionEnd
 
 Section /o "Touchpad and TrackPoint (PS/2)" SECKEXTOUCH
@@ -1239,6 +1252,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXFAT} $(DESC_KEXFAT)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXACPI} $(DESC_KEXACPI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXTOUCH} $(DESC_KEXTOUCH)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXINFO} $(DESC_KEXINFO)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXKEYS} $(DESC_KEXKEYS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEM} $(DESC_KEXMEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
@@ -1530,6 +1544,11 @@ Section "Uninstall"
     Delete /REBOOTOK "$SYSDIR\kexkeys.exe"
     Delete /REBOOTOK "$SYSDIR\kexkeyh.dll"
   un_kexkeys_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexInfo"
+  StrCmp $0 "1" 0 un_kexinfo_done
+    Delete "$INSTDIR\kexinfo.exe"
+    Delete "$SMPROGRAMS\$StartMenuFolder\Hardware report.lnk"
+  un_kexinfo_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexFat"
   StrCmp $0 "1" 0 un_kexfat_done
     DeleteRegKey HKLM "System\CurrentControlSet\Services\VxD\KEXFAT"
