@@ -67,9 +67,9 @@ def main():
           "[KexHda.WdmSys]", "wdmaud.drv", "ksuser.dll", "",
           "[DestinationDirs]", "KexHda.CopyList=10,system32\\drivers", "KexHda.WdmDrv=10,system32\\drivers", "KexHda.WdmSys=11", "",
           "[SourceDisksNames]", "1=%DISK%,,", "", "[SourceDisksFiles]", "kexhda.sys=1", "",
-          "[Strings]", 'KEX="KernelExEx"', 'DISK="KernelExEx drivers"', 'Desc="AC\'97 Audio (KernelExEx)"',
-          'MIDI="AC\'97 Audio MIDI (software synthesizer)"', 'Wave.szPname="AC\'97 Audio"',
-          'Topology.szPname="AC\'97 Audio Mixer"', f'Proxy.CLSID="{PROXY}"',
+          "[Strings]", 'KEX="KernelExEx"', 'DISK="KernelExEx drivers"', 'Desc="HD Audio (KernelExEx)"',
+          'MIDI="HD Audio MIDI (software synthesizer)"', 'Wave.szPname="HD Audio"',
+          'Topology.szPname="HD Audio Mixer"', f'Proxy.CLSID="{PROXY}"',
           'KSCATEGORY_AUDIO="{6994AD04-93EF-11D0-A3CC-00A0C9223196}"',
           'KSCATEGORY_RENDER="{65E8773E-8F56-11D0-A3B9-00A0C9223196}"',
           'KSNAME_Wave="Wave"', 'KSNAME_Topology="Topology"']
