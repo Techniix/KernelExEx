@@ -31,5 +31,13 @@ in VTD (not our bug); NTKERN lacks READ_REGISTER_* and KeSetTimerEx (use volatil
 - Open: first start after the KernelExEx installer can hang in QEMU in ISAPNP's VTD delay
   loop (PIT channel 0 reads never change, interrupts off); happens at 1 GB too, so not
   the memory patch. Reset -> fine. Investigate (which component touches the PIT?).
-- Ideas to go beyond PATCHMEM: test long runs under memory load; system-arena pressure
-  (PATCHMEM /A moves AGP/unfixed tables); Safe Mode above 1 GB without CONFIG.SYS.
+- Ideas to go beyond PATCHMEM: test long runs under memory load; Safe Mode above 1 GB
+  without CONFIG.SYS.
+- **For modern GPUs later (user's note): PATCHMEM's /A option.** Windows 9x puts AGP
+  apertures and "unfixed" allocations in the system arena (C0000000-FFFFFFFF, shared with
+  VxDs, the page database, VCACHE); a card with a large aperture/VRAM window fills it and
+  Windows fails. /A redirects AGP and unfixed system-arena requests of 128 MB or more to
+  the shared arena (80000000-BFFFFFFF). PATCHMEM.C: agp98[] (agp981d/agp982d: replaces
+  `mov ebp,0C0000h` in VMM's _PageReserve arena choice with a call that picks 080000h
+  for large requests), agpm[] for ME. Port it [Loew] into mempatch.c when GPU work starts;
+  also look at mapping large BARs (256 MB+) for display drivers.
