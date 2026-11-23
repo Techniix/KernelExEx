@@ -36,6 +36,25 @@ reset at 1280 MB (Windows then hung before the desktop) but the 64 MB ranges rem
 so the missing page is not from block misalignment. Still to find: what the missing
 page per 64 MB is (probably the loader's own use of each XMS block).
 
+## Update: the missing page and a first patch
+
+- The ranges come from the loader's list of XMS blocks (init block +0Ch): one entry per
+  block of at most 64 MB (XMS 2.0 sizes are 16-bit KB). The page between two blocks is
+  left out by the loader's rounding (it is zero and belongs to Windows' own blocks).
+  Rounding/aligning the XMS blocks (KEXXMS.SYS experiments) does not change that.
+- **Merge patch** (tested live with gdb, writing VMM's init code before it runs): in the
+  range builder's merge test (C03639A2 in this build), merge when the next range starts
+  1 *or 2* pages after the previous one ends:
+  `8B 41 04 2B 03 83 F8 FF 75 08` -> `8B 03 2B 41 04 48 D1 E8 75 08`
+  (mov eax,[ebx]; sub eax,[ecx+4]; dec eax; shr eax,1; jnz). Same length, same target.
+  The table then holds 1-2 ranges. Results (2 GB guest, KEXMEM /MAX):
+  1088, 1152, 1216, 1248 MB reach the desktop; 1272, 1280, 1536 MB fail.
+- **Second limit at ~1260 MB:** 0x4EC4E pages x 13 bytes (VMM's page database) = 4 MB.
+  Above it, a page-table record (in the region VMM reserves after the database) is
+  found flagged but missing from VMM's hash of such records (lookup at C00140A0 walks to
+  NULL: page fault at C00140CB, CR2=4, then double fault). The records are set up in
+  C0364220..C03642E5. Not solved yet.
+
 ## Ways forward
 
 1. Find the per-64 MB page's owner (VMM32 loader, real mode) and avoid it, so the
