@@ -630,6 +630,18 @@ def build_kextouch_exe(b: Build):
            entry="entrypoint", kind="exe")
 
 
+def build_kexkeys(b: Build):
+    """kexkeys.exe + kexkeyh.dll: multimedia keys (laptop Fn keys via a keyboard hook,
+    USB consumer-control keys via hid.dll) -> master volume / mute, Winamp."""
+    d = ROOT / "kexkeys"
+    flags = [f"-I{d}", "-D_WIN32_WINNT=0x0400", *COMPAT]
+    hobjs = b.compile("kexkeyh", [d / "kexkeyh.c"], flags)
+    b.link("kexkeyh", hobjs, ["kexcrt", "kernel32", "user32"], base="0x66E00000", entry="DllMain@12", ext=".dll",
+           defs=d / "kexkeyh.def", kill_at=True)
+    objs = b.compile("kexkeys", [d / "kexkeys.c"], flags)
+    b.link("kexkeys", objs, ["kexcrt", "kernel32", "user32", "winmm"], base="0x400000", entry="entrypoint", kind="exe")
+
+
 def build_kexmem(b: Build):
     """KEXMEM.SYS: DOS driver, first in CONFIG.SYS, that limits the RAM reported to
     Windows (1 GB) and resets CPU control registers (media/dos/kexmem.asm, NASM)."""
@@ -680,7 +692,7 @@ STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "ge
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
          "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
          "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexfat": build_kexfat,
-         "kexacpi": build_kexacpi, "kexpower": build_kexpower, "kexmem": build_kexmem, "kextouch": build_kextouch, "kextouchx": build_kextouch_exe, "kexmedia": build_kexmedia}
+         "kexacpi": build_kexacpi, "kexpower": build_kexpower, "kexmem": build_kexmem, "kexkeys": build_kexkeys, "kextouch": build_kextouch, "kextouchx": build_kextouch_exe, "kexmedia": build_kexmedia}
 
 
 def main():

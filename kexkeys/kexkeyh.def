@@ -1,0 +1,4 @@
+LIBRARY kexkeyh.dll
+EXPORTS
+    kk_hook
+    kk_unhook
