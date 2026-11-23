@@ -25,6 +25,21 @@ void *memcpy(void *d, const void *s, unsigned n)
 	return d;
 }
 
+void *memmove(void *d, const void *s, unsigned n)
+{
+	unsigned char *p = (unsigned char *) d;
+	const unsigned char *q = (const unsigned char *) s;
+	if (p == q || !n)
+		return d;
+	if (p < q)
+		while (n--)
+			*p++ = *q++;
+	else
+		while (n--)
+			p[n] = q[n];
+	return d;
+}
+
 int memcmp(const void *a, const void *b, unsigned n)
 {
 	const unsigned char *p = (const unsigned char *) a, *q = (const unsigned char *) b;

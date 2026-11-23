@@ -17,6 +17,7 @@ typedef unsigned int kx_u32;
 /* ---- C basics (ring 0 has no C runtime) ---- */
 void *memset(void *d, int c, unsigned n);
 void *memcpy(void *d, const void *s, unsigned n);
+void *memmove(void *d, const void *s, unsigned n);
 int memcmp(const void *a, const void *b, unsigned n);
 char *strcpy(char *d, const char *s);
 unsigned strlen(const char *s);

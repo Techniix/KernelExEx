@@ -103,6 +103,22 @@ int tp_init(struct tp *t)
 		CMD(t, p, PS2_RESET_BAT);
 	}
 
+	p[0] = p[1] = 0;
+	CMD(t, p, PS2_RESET_BAT);
+	CMD(t, NULL, PS2_DISABLE);
+	if (tp_elan_detect(t) == 0)
+	{
+		if (tp_elan_init(t) == 0)
+		{
+			t->kind = TP_ELANTECH;
+			tp_log(t, "touch: %s, %dx%d\n", t->name, t->x_max, t->y_max);
+			return 0;
+		}
+		tp_log(t, "touch: Elantech set-up failed, using IntelliMouse mode\n");
+		p[0] = p[1] = 0;
+		CMD(t, p, PS2_RESET_BAT);
+	}
+
 	/* not a touchpad we drive: best plain mouse mode */
 	t->kind = detect_wheel(t);
 	id = get_id(t);
@@ -153,6 +169,8 @@ static int valid_byte(struct tp *t, int idx, u8 b)
 		return tp_alps_valid_byte(t, idx, b);
 	if (t->kind == TP_SYNAPTICS)
 		return tp_syn_valid_byte(t, idx, b);
+	if (t->kind == TP_ELANTECH)
+		return tp_elan_valid_byte(t, idx, b);
 	if (idx == 0)
 		return (b & 0x08) != 0;   /* bit 3 is always 1 in a PS/2 first byte */
 	return 1;
@@ -216,6 +234,26 @@ int tp_byte(struct tp *t, u8 b, u32 now, struct tp_out *out)
 	}
 	if (t->pktcnt < t->pktsize)
 		return 0;
+	if (t->kind == TP_ELANTECH)
+	{
+		struct tp_frame f;
+		int r = tp_elan_packet(t, &f);
+		if (r < 0)
+		{
+			/* not a packet: try the next byte as its start */
+			memmove(t->packet, t->packet + 1, (size_t) (t->pktsize - 1));
+			t->pktcnt = t->pktsize - 1;
+			t->out_of_sync++;
+			return 0;
+		}
+		t->pktcnt = 0;
+		t->out_of_sync = 0;
+		if (!r)
+			return 0;
+		tp_gesture(t, &f, now, out);
+		out->buttons = t->g.sent_buttons;
+		return 1;
+	}
 	t->pktcnt = 0;
 	t->out_of_sync = 0;
 	return finish(t, now, out);
@@ -223,7 +261,7 @@ int tp_byte(struct tp *t, u8 b, u32 now, struct tp_out *out)
 
 int tp_tick(struct tp *t, u32 now, struct tp_out *out)
 {
-	if (t->kind != TP_ALPS && t->kind != TP_SYNAPTICS)
+	if (t->kind != TP_ALPS && t->kind != TP_SYNAPTICS && t->kind != TP_ELANTECH)
 		return 0;
 	return tp_gesture_tick(t, now, out);
 }

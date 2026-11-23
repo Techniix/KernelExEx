@@ -13,7 +13,7 @@ static int fails, verbose;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
 /* ---------------- simulated devices ---------------- */
-enum { DEV_ALPS3, DEV_IMPS2, DEV_NONE, DEV_SYN };
+enum { DEV_ALPS3, DEV_IMPS2, DEV_NONE, DEV_SYN, DEV_ELAN };
 static struct
 {
 	int type;
@@ -26,6 +26,9 @@ static struct
 	/* Synaptics */
 	int slices, sliced, mode, client;
 	unsigned identity, model, caps;
+	/* Elantech */
+	int e6run, f8, f8q, regwrites;
+	unsigned fw;
 } sim;
 
 static const u16 v3_cmd[16] = { PS2_SETPOLL, PS2_RESET_DIS, PS2_SETSCALE21, PS2_SETRATE, PS2_SETRATE, PS2_SETRATE,
@@ -59,6 +62,57 @@ int tp_ps2_command(struct tp *t, u8 *p, int cmd)
 		p[0] = 0xaa;
 		p[1] = 0;
 		sim.cmdmode = 0;
+		return 0;
+	}
+	if (sim.type == DEV_ELAN)
+	{
+		int q = -1;
+		if (cmd == PS2_SETSCALE11)
+		{
+			sim.e6run++;
+			sim.slices = 0, sim.sliced = 0;
+			if (sim.f8 == 1)
+				sim.f8 = 0;
+		}
+		else if (cmd == PS2_SETRES)
+		{
+			sim.sliced = ((sim.sliced << 2) | (p[0] & 3)) & 0xff;
+			sim.slices++;
+			sim.e6run = 0;
+		}
+		else if (cmd == 0xf8)
+			sim.f8 = 1, sim.e6run = 0;
+		else if (cmd == PS2_GETINFO)
+		{
+			if (sim.e6run >= 3)
+				p[0] = 0x3c, p[1] = 0x03, p[2] = 0xc8;   /* the magic knock */
+			else
+			{
+				q = sim.f8 == 2 ? sim.f8q : sim.slices >= 4 ? sim.sliced : 0xff;
+				if (q == 0x01)
+					p[0] = (u8) (sim.fw >> 16), p[1] = (u8) (sim.fw >> 8), p[2] = (u8) sim.fw;
+				else if (q == 0x02)
+					p[0] = 0x00, p[1] = 0x15, p[2] = 0x0c;   /* capabilities: traces */
+				else if (q == 0x00)
+					p[0] = 0x35, p[1] = 0xac, p[2] = 0xc0;   /* range 0x5ac x 0x3c0 */
+				else
+					p[0] = 0, p[1] = 0, p[2] = 0x64;
+			}
+			sim.e6run = 0, sim.slices = 0, sim.sliced = 0, sim.f8 = 0;
+		}
+		else if ((cmd >> 8) == 0)   /* a raw byte after F8 */
+		{
+			if (sim.f8 == 1)
+				sim.f8 = 2, sim.f8q = cmd & 0xff;
+			else
+				sim.f8 = 0;
+			sim.e6run = 0;
+			sim.regwrites++;
+		}
+		else if (cmd == PS2_GETID)
+			p[0] = 0;
+		else
+			sim.e6run = 0;
 		return 0;
 	}
 	if (sim.type == DEV_SYN)
@@ -241,6 +295,38 @@ static void syn_stick(u8 *b, int dx, int dy, int buttons)
 	b[3] = 0xc4;
 	b[4] = (u8) dx;
 	b[5] = (u8) y;
+}
+
+/* Elantech v4 packets (no CRC), our coordinates (y down); y_max 0x3c0 */
+static void elan_head(u8 *b, int id, int x, int y, int buttons)
+{
+	int ry = 0x3c0 - y, pres = 0x40;
+	b[0] = (u8) (buttons & 3);
+	b[1] = (u8) ((pres & 0xf0) | ((x >> 8) & 0x0f));
+	b[2] = (u8) x;
+	b[3] = (u8) (0x10 | 1 | ((id + 1) << 5));
+	b[4] = (u8) (((pres & 0x0f) << 4) | ((ry >> 8) & 0x0f));
+	b[5] = (u8) ry;
+}
+
+static void elan_status(u8 *b, int bitmap, int buttons)
+{
+	b[0] = (u8) (buttons & 3);
+	b[1] = (u8) bitmap;
+	b[2] = 0;
+	b[3] = 0x10;
+	b[4] = 0;
+	b[5] = 0;
+}
+
+static void elan_motion(u8 *b, int id, int dx, int dy, int sid, int dx2, int dy2)
+{
+	b[0] = (u8) ((id + 1) << 5);
+	b[1] = (u8) dx;
+	b[2] = (u8) -dy;   /* the pad's y grows upward */
+	b[3] = (u8) (0x10 | 2 | (sid >= 0 ? (sid + 1) << 5 : 0));
+	b[4] = (u8) dx2;
+	b[5] = (u8) -dy2;
 }
 
 static struct tp T;
@@ -566,6 +652,86 @@ int main(int argc, char **argv_)
 			now += 10;
 		}
 		CHECK(acc.dx == 20 && acc.dy == -10, "syn stick: %d %d", acc.dx, acc.dy);
+	}
+
+	/* ---- Elantech v4 ---- */
+	memset(&sim, 0, sizeof(sim));
+	sim.type = DEV_ELAN;
+	sim.fw = 0x470f01;   /* ic 7: hardware version 4 */
+	CHECK(tp_init(&T) == 0 && T.kind == TP_ELANTECH, "Elantech detected: kind %d (%s)", T.kind, T.name);
+	CHECK(T.elan.hw == 4 && T.x_max == 0x5ac && T.y_max == 0x3c0, "v4 %d, range %d x %d", T.elan.hw, T.x_max, T.y_max);
+	CHECK(sim.regwrites > 0, "absolute mode register written");
+	{
+		u8 b[6];
+		reset_acc();
+		last_buttons = 0;
+		now = 90000;
+		elan_status(b, 1, 0);
+		feed(b, 6);
+		elan_head(b, 0, 400, 300, 0);
+		feed(b, 6);
+		now += 12;
+		for (i = 0; i < 20; i++)
+		{
+			elan_motion(b, 0, 12, 6, -1, 0, 0);
+			feed(b, 6);
+			now += 12;
+		}
+		elan_status(b, 0, 0);
+		feed(b, 6);
+		wait_ms(300);
+		CHECK(acc.dx > 100 && acc.dy > 40 && presses[0] == 0, "elan move: %d %d", acc.dx, acc.dy);
+		/* tap */
+		reset_acc();
+		elan_status(b, 1, 0);
+		feed(b, 6);
+		elan_head(b, 0, 700, 500, 0);
+		feed(b, 6);
+		now += 40;
+		elan_status(b, 0, 0);
+		feed(b, 6);
+		wait_ms(300);
+		CHECK(presses[0] == 1 && releases[0] == 1, "elan tap: %d %d", presses[0], releases[0]);
+		/* two fingers moving up: scroll up */
+		reset_acc();
+		elan_status(b, 3, 0);
+		feed(b, 6);
+		elan_head(b, 0, 600, 700, 0);
+		feed(b, 6);
+		elan_head(b, 1, 800, 700, 0);
+		feed(b, 6);
+		now += 12;
+		for (i = 0; i < 20; i++)
+		{
+			elan_motion(b, 0, 0, -20, 1, 0, -20);
+			feed(b, 6);
+			now += 12;
+		}
+		elan_status(b, 0, 0);
+		feed(b, 6);
+		wait_ms(300);
+		CHECK(acc.wheel >= 360 && acc.dx == 0 && acc.dy == 0, "elan two-finger scroll: %d (%d %d)", acc.wheel, acc.dx, acc.dy);
+		/* garbage, then a valid stream again */
+		reset_acc();
+		{
+			u8 g[3] = { 0x08, 0x55, 0xaa };
+			feed(g, 3);
+		}
+		elan_status(b, 1, 0);
+		feed(b, 6);
+		elan_head(b, 0, 400, 300, 0);
+		feed(b, 6);
+		now += 12;
+		for (i = 0; i < 10; i++)
+		{
+			elan_motion(b, 0, 10, 0, -1, 0, 0);
+			feed(b, 6);
+			now += 12;
+		}
+		elan_status(b, 0, 0);
+		feed(b, 6);
+		wait_ms(300);
+		CHECK(acc.dx > 30, "elan recovers after garbage: %d", acc.dx);
 	}
 
 	/* ---- IntelliMouse fallback ---- */

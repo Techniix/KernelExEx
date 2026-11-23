@@ -109,6 +109,18 @@ struct tp_syn
 	int newabs;
 };
 
+struct tp_elan
+{
+	int hw;                 /* hardware version 2..4 */
+	u32 fw;
+	int crc, pressure, buttonpad;
+	u8 caps[3];
+	int y_max;
+	int mx[5], my[5];       /* v3 head / v4 per-finger positions */
+	u8 active;              /* v4: fingers down */
+	u8 known;               /* v4: fingers whose position a head packet gave */
+};
+
 struct tp
 {
 	void *ctx;                 /* platform data */
@@ -122,6 +134,7 @@ struct tp
 	int has_stick;
 	struct tp_alps alps;
 	struct tp_syn syn;
+	struct tp_elan elan;
 	struct tp_settings set;
 	/* gesture state */
 	struct
@@ -158,6 +171,10 @@ int tp_syn_detect(struct tp *t);
 int tp_syn_init(struct tp *t);
 int tp_syn_packet(struct tp *t, struct tp_frame *f, struct tp_out *stick, int *have_stick, int *have_frame);
 int tp_syn_valid_byte(struct tp *t, int idx, u8 b);
+int tp_elan_detect(struct tp *t);
+int tp_elan_init(struct tp *t);
+int tp_elan_packet(struct tp *t, struct tp_frame *f);
+int tp_elan_valid_byte(struct tp *t, int idx, u8 b);
 void tp_gesture(struct tp *t, const struct tp_frame *f, u32 now_ms, struct tp_out *out);
 int tp_gesture_tick(struct tp *t, u32 now_ms, struct tp_out *out);
 void tp_stick(struct tp *t, int dx, int dy, int buttons, struct tp_out *out);
