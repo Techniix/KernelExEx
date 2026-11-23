@@ -20,3 +20,16 @@ Next, in order:
 
 Known facts: CSMWrap needs >= 2 CPUs; Windows 98 warm reboot under QEMU TCG can hang
 in VTD (not our bug); NTKERN lacks READ_REGISTER_* and KeSetTimerEx (use volatile, KeSetTimer).
+
+## After build 27 (memory)
+
+- Done: "Use up to 2 GB" and "Use all RAM, up to ~3.5 GB" (kexpatch /mem: our range
+  merge + PATCHMEM's VMM/VCACHE set, page-map-aware vxdfile). QEMU: 2048/3072/3560 MB.
+- Next (user asked): RAM disk for the swap file from RAM Windows cannot use: above the
+  KEXMEM limit and above 4 GB (PAE/PSE-36 mapping in our own driver; PATCHMEM's family of
+  tools had RAMDSK64 for this). As installer option(s).
+- Open: first start after the KernelExEx installer can hang in QEMU in ISAPNP's VTD delay
+  loop (PIT channel 0 reads never change, interrupts off); happens at 1 GB too, so not
+  the memory patch. Reset -> fine. Investigate (which component touches the PIT?).
+- Ideas to go beyond PATCHMEM: test long runs under memory load; system-arena pressure
+  (PATCHMEM /A moves AGP/unfixed tables); Safe Mode above 1 GB without CONFIG.SYS.
