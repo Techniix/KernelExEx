@@ -42,7 +42,9 @@
 ;--------------------------------
 ;Includes
 
-  !include "MUI2.nsh"
+  !include "Sections.nsh"
+!include "FileFunc.nsh"
+!include "MUI2.nsh"
   !include "UpdateDLL.nsh"
   !include "WinVer.nsh"
   !include "nsDialogs.nsh"
@@ -2071,6 +2073,14 @@ Function .onInit
   Call KexFindHardware
   ;"Recommended" again, now with the drivers for hardware found on this PC
   SetCurInstType 0
+
+  ;/MEMX: also "Use up to 2 GB of RAM" (for unattended installs and tests)
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/MEMX" $1
+  ${IfNot} ${Errors}
+    !insertmacro SelectSection ${SECKEXMEMX}
+  ${EndIf}
 
 FunctionEnd
 
