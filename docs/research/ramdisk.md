@@ -33,6 +33,9 @@ from the Windows 95/98 DDK documentation (techshelps MSDN archive), no Microsoft
 Alternative if IOS port drivers prove too fiddly: a SCSI miniport on a root-enumerated
 devnode (like kexahci.mpd, SCSIPORT does the IOS side).
 
-Memory map: KEXMEM saves the BIOS E820 map (before its own filtering) and its limit
-where the VxD can find it (BIOS data area 0040:00F0, inter-application area, signature
-plus segment), so the RAM disk takes exactly the RAM KEXMEM hid plus all RAM above 4 GB.
+Memory map (done, tested): KEXMEM saves the BIOS's E820 map (up to 32 entries, before
+its own filtering) and its limit in its resident part and publishes it in the BIOS data
+area's inter-application bytes: 0040:00F0 = 'KX', 00F2 = offset, 00F4 = segment; the
+table is 'KXMP', dd limit, dw count, then 20-byte entries. KEXRAMT read it at
+Device_Init in QEMU (6 GB, /MAX=2048): RAM 1 MB-3 GB and 4-7 GB, limit 2 GB, so the RAM
+disk would get 2-3 GB and 4-7 GB (4 GB).

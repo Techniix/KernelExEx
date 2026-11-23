@@ -38,6 +38,26 @@ static void test(void)
 {
 	ULONG d = cpuid_edx(), lin, pdl, old, i, ok = 1;
 	static const ULONG hi_lo[][2] = { { 0, 0x90000000 }, { 1, 0x00000000 }, { 1, 0x00400000 }, { 1, 0x40000000 } };
+	{
+		/* KEXMEM's saved BIOS memory map (BDA 0040:00F0 = 'KX', offset, segment) */
+		const unsigned short *ica = (const unsigned short *) 0x4F0;
+		ds("\nKEXRAMT map: ");
+		if (ica[0] == 0x584B)
+		{
+			const unsigned char *t = (const unsigned char *) ((ULONG) ica[2] * 16 + ica[1]);
+			unsigned n = *(const unsigned short *) (t + 8), k;
+			kv("limit", *(const ULONG *) (t + 4));
+			kv("n", n);
+			for (k = 0; k < n && k < 32; k++)
+			{
+				const ULONG *e = (const ULONG *) (t + 10 + 20 * k);
+				ds("\n  ");
+				dx(e[1]); dx(e[0]); ds(" +"); dx(e[3]); dx(e[2]); ds(" type "); dx(e[4]);
+			}
+		}
+		else
+			ds("none");
+	}
 	ds("\nKEXRAMT: ");
 	kv("cpuid.edx", d);
 	kv("cr3", cr3());

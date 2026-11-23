@@ -9,7 +9,9 @@
 ;    crashes during start-up. KEXMEM hooks the BIOS memory-size services (int 15h
 ;    E820h, E801h, E881h, 88h) so that DOS, HIMEM.SYS and Windows all see RAM only
 ;    below n MB (default 1024, range 64..4095). Memory above the limit is reported
-;    as reserved; nothing in Windows is patched.
+;    as reserved; nothing in Windows is patched. The BIOS's own map and the
+;    limit stay resident for KernelExEx's RAM disk (BDA 0040:00F0 = 'KX', then
+;    offset and segment of the table; see savemap).
 ; 2. Control registers. Some CSM / UEFI compatibility BIOSes hand over with CR0,
 ;    CR4 or EFER bits still set ("While initializing device VCACHE: Windows
 ;    protection error"). KEXMEM resets them to their power-on values, checking
@@ -34,6 +36,16 @@ e801bx: dw 0                            ; max 64 KB blocks above 16 MB
 
 ; ---------------------------------------------------------------- resident part
 %include "memclip.inc"
+
+; The BIOS memory map as the BIOS gave it (before our filtering) and our limit, for
+; KernelExEx's RAM disk driver, which uses the RAM hidden here and above 4 GB. Found
+; through the BIOS data area's inter-application bytes: 0040:00F0 = 'KX', then the
+; offset and segment of this table.
+MAPMAX  equ 32
+kexmap: db 'KXMP'
+maplim: dd 0                            ; = limit
+mapn:   dw 0                            ; entries (20 bytes each: base, length, type)
+mapent: times MAPMAX*20 db 0
 
 resident_end:
 
@@ -90,7 +102,8 @@ init:
         jne .hook
         call fixcr
 
-.hook:  xor ax, ax
+.hook:  call savemap
+        xor ax, ax
         push es
         mov es, ax
         cli
@@ -124,6 +137,38 @@ init:
         les bx, [req]
         mov word [es:bx+14], 0          ; don't stay resident
         mov [es:bx+16], cs
+        ret
+
+; Copy the BIOS's E820 map (int 15h not hooked yet) and publish it in the BDA.
+savemap:
+        push es
+        mov eax, [limit]
+        mov [maplim], eax
+        push cs
+        pop es
+        mov di, mapent
+        xor ebx, ebx
+.next:  cmp word [mapn], MAPMAX
+        jae .pub
+        mov eax, 0xE820
+        mov edx, 0x534D4150             ; 'SMAP'
+        mov ecx, 20
+        push di
+        int 0x15
+        pop di
+        jc .pub
+        cmp eax, 0x534D4150
+        jne .pub
+        inc word [mapn]
+        add di, 20
+        test ebx, ebx
+        jnz .next
+.pub:   xor ax, ax
+        mov es, ax
+        mov word [es:0x4F0], 'KX'
+        mov word [es:0x4F2], kexmap
+        mov [es:0x4F4], cs
+        pop es
         ret
 
 ; Reset control registers to power-on state (real mode, paging off, caches on).
