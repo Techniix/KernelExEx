@@ -2,8 +2,8 @@
  *  KernelExEx Driver Compatibility Layer (KEDCL): the OS interface drivers use.
  *  Copyright (C) 2026, KernelExEx contributors. GPLv2.  See docs/KEDCL.md.
  *
- *  Backends: kexos_vxd.c (ring-0 VxDs on Windows 98/ME). A WDM backend follows,
- *  extracted from kexbsd/kern.c and kexhda. Drivers include only this header.
+ *  Backends: kexos_vxd.c (ring-0 VxDs on Windows 98/ME), kexos_wdm.c (WDM drivers),
+ *  each with kexos_common.c. Drivers include only this header.
  */
 #ifndef KEXOS_H
 #define KEXOS_H
@@ -56,6 +56,10 @@ int kexos_timer(kx_u32 ms, void (*fn)(void *ref), void *ref);
  *      The backend sends the EOI. Returns a handle, 0 on failure. ---- */
 kx_u32 kexos_irq_attach(int irq, int shared, int (*isr)(void *ref), void *ref);
 void kexos_irq_mask(kx_u32 h, int masked);
+/* WDM backend: attach to the CmResourceTypeInterrupt descriptor of the translated
+   resources (IRP_MN_START_DEVICE); detach at stop/remove */
+kx_u32 kexos_irq_attach_wdm(void *desc, int (*isr)(void *ref), void *ref);
+void kexos_irq_detach_wdm(kx_u32 h);
 
 /* ---- logging (KEDCL: a ring per driver, read by kexinfo and the driver's helper) ---- */
 struct kexos_log

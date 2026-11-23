@@ -40,7 +40,7 @@ its bus glue.
 
 1. `kexos.h` + WDM backend, extracted from kexbsd/kern.c and kexhda (first: log, timers,
    MMIO, contiguous DMA).
-2. VxD backend from vxdrt.c/osl98.c (KEXACPI, the touchpad VxD).
+2. VxD backend from vxdrt.c/osl98.c (KEXACPI, the touchpad VxD). Done for the touchpad: `kexos_vxd.c` + `kexos_common.c`; WDM backend `kexos_wdm.c` (timers, interrupts from translated resources) ready for kexhda/kexbsd to move onto.
 3. Existing drivers move over when they are next changed.
 
 ## Hardware report (kexinfo)
