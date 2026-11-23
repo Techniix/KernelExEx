@@ -651,6 +651,8 @@ LangString DESC_KEXVIO ${LANG_ENGLISH} "The virtio network adapter of QEMU/KVM, 
 LangString DESC_KEXAHCI ${LANG_ENGLISH} "SATA hard disks, SSDs and DVD drives on boards whose SATA controller is in AHCI mode (most boards since 2008; Windows 98 does not see those disks at all). Not needed when the BIOS has the controller in IDE mode."
 LangString DESC_KEXNVME ${LANG_ENGLISH} "NVMe SSDs: M.2 NVMe drives and PCIe SSD cards (Windows 98 does not see them at all). For a second drive: booting Windows 98 from an NVMe SSD needs a BIOS that can boot from it."
 LangString DESC_KEXACPI ${LANG_ENGLISH} "For laptops: shows the battery's charge and time left on the taskbar, warns when it runs low, and can shut down when it is nearly empty or turn the screen off when the lid closes. For laptops whose battery Windows 98 cannot read (most from 2005 on). Not needed on a desktop."
+LangString DESC_KEXTOUCH ${LANG_ENGLISH} "For laptops: ALPS touchpads get tap-to-click, two-finger and edge scrolling; TrackPoints scroll with the middle button; other PS/2 mice get the wheel. Replaces the standard PS/2 mouse driver (uninstalling puts it back). Settings in the Start menu."
+LangString DESC_KEXKEYS ${LANG_ENGLISH} "Makes laptop Fn volume/mute keys and USB keyboard media keys work: volume up/down and mute change the master volume; play/stop/next/previous control Winamp."
 LangString DESC_KEXMEM ${LANG_ENGLISH} "For computers with more than 1 GB of RAM: Windows 98 and ME crash or say 'Insufficient memory' at start-up with that much. This makes Windows use the first 1 GB (adds KEXMEM.SYS to CONFIG.SYS). Takes effect after a restart."
 LangString DESC_KEXFAT ${LANG_ENGLISH} "Reads SD cards, USB sticks and disks formatted exFAT (cards over 32 GB come that way): they get a drive letter and open in Explorer and in programs. Read-only for now: copying files onto them is not possible yet. Experimental."
 LangString DESC_KEXVMM ${LANG_ENGLISH} "The mouse pointer moves in and out of the virtual machine's window freely, with no need to click into it or press keys to release it. For QEMU (the default PC machine) and VMware. Does nothing on a real PC."
@@ -908,6 +910,56 @@ Section /o "Laptop battery (ACPI)" SECKEXACPI
     CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Battery.lnk" "$SYSDIR\kexpower.exe"
   !insertmacro MUI_STARTMENU_WRITE_END
   WriteRegStr HKLM "Software\KernelEx\Components" "KexAcpi" "1"
+SectionEnd
+
+Section /o "Touchpad and TrackPoint (PS/2)" SECKEXTOUCH
+  ;KEXTOUCH.VXD replaces MSMOUSE.VXD for the PS/2 mouse (VMOUSE minidriver):
+  ;ALPS touchpads get tapping and scrolling, other PS/2 mice and touchpads
+  ;work as IntelliMouse. kextouch.exe: wheel events and the settings window.
+  !insertmacro KexUpd "drivers\touch\KEXTOUCH.VXD" "$SYSDIR" "kextouch.vxd"
+  !insertmacro KexUpd "drivers\touch\kextouch.exe" "$SYSDIR" "kextouch.exe"
+  SetOutPath "$INSTDIR"
+  ;the PS/2 mouse's driver key: MouseType PS2 under Class\Mouse
+  StrCpy $R0 0
+  StrCpy $R2 ""
+  kextouch_enum:
+    EnumRegKey $R1 HKLM "System\CurrentControlSet\Services\Class\Mouse" $R0
+    StrCmp $R1 "" kextouch_enum_done
+    IntOp $R0 $R0 + 1
+    ReadRegStr $R3 HKLM "System\CurrentControlSet\Services\Class\Mouse\$R1" "MouseType"
+    StrCmp $R3 "PS2" 0 kextouch_enum
+    StrCpy $R2 $R1
+  kextouch_enum_done:
+  StrCmp $R2 "" 0 kextouch_found
+    MessageBox MB_ICONINFORMATION|MB_OK "No PS/2 mouse or touchpad is installed in Windows, so the touchpad driver was copied but not switched on." /SD IDOK
+    Goto kextouch_end
+  kextouch_found:
+  ReadRegStr $R3 HKLM "System\CurrentControlSet\Services\Class\Mouse\$R2" "MouseDriver"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexTouchKey" $R2
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexTouchOldDriver" $R3
+  WriteRegStr HKLM "System\CurrentControlSet\Services\Class\Mouse\$R2" "MouseDriver" "kextouch.vxd"
+  ReadINIStr $R3 "$WINDIR\system.ini" "386Enh" "mouse"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexTouchOldIni" $R3
+  WriteINIStr "$WINDIR\system.ini" "386Enh" "mouse" "*vmouse"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexTouch" '"$SYSDIR\kextouch.exe"'
+  !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
+    CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
+    CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Touchpad settings.lnk" "$SYSDIR\kextouch.exe" "/settings"
+  !insertmacro MUI_STARTMENU_WRITE_END
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexTouch" "1"
+  SetRebootFlag true
+  kextouch_end:
+SectionEnd
+
+Section /o "Multimedia keys (volume, mute, media)" SECKEXKEYS
+  ;kexkeys.exe + kexkeyh.dll: laptop Fn keys and USB keyboard media keys ->
+  ;master volume / mute, and play/stop/next/previous for Winamp
+  !insertmacro KexUpd "kexkeys\kexkeys.exe" "$SYSDIR" "kexkeys.exe"
+  !insertmacro KexUpd "kexkeys\kexkeyh.dll" "$SYSDIR" "kexkeyh.dll"
+  SetOutPath "$INSTDIR"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexKeys" '"$SYSDIR\kexkeys.exe"'
+  Exec '"$SYSDIR\kexkeys.exe"'
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexKeys" "1"
 SectionEnd
 
 Section /o "More than 1 GB of RAM (memory limit)" SECKEXMEM
@@ -1186,6 +1238,8 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXUMASS} $(DESC_KEXUMASS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXFAT} $(DESC_KEXFAT)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXACPI} $(DESC_KEXACPI)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXTOUCH} $(DESC_KEXTOUCH)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXKEYS} $(DESC_KEXKEYS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEM} $(DESC_KEXMEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAHCI} $(DESC_KEXAHCI)
@@ -1447,6 +1501,35 @@ Section "Uninstall"
     Delete "$SMPROGRAMS\$StartMenuFolder\Battery.lnk"
     DeleteRegKey HKCU "Software\KernelExEx\Power"
   un_kexacpi_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexTouch"
+  StrCmp $0 "1" 0 un_kextouch_done
+    ;give the mouse back to Windows' own driver
+    ReadRegStr $1 HKLM "Software\KernelEx\Components" "KexTouchKey"
+    ReadRegStr $2 HKLM "Software\KernelEx\Components" "KexTouchOldDriver"
+    StrCmp $1 "" un_kextouch_ini
+    StrCmp $2 "" 0 +3
+      DeleteRegValue HKLM "System\CurrentControlSet\Services\Class\Mouse\$1" "MouseDriver"
+      Goto un_kextouch_ini
+    WriteRegStr HKLM "System\CurrentControlSet\Services\Class\Mouse\$1" "MouseDriver" $2
+    un_kextouch_ini:
+    ReadRegStr $2 HKLM "Software\KernelEx\Components" "KexTouchOldIni"
+    StrCmp $2 "" 0 +2
+      StrCpy $2 "*vmouse, msmouse.vxd"
+    WriteINIStr "$WINDIR\system.ini" "386Enh" "mouse" $2
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexTouch"
+    Delete /REBOOTOK "$SYSDIR\kextouch.exe"
+    Delete /REBOOTOK "$SYSDIR\kextouch.vxd"
+    Delete "$SMPROGRAMS\$StartMenuFolder\Touchpad settings.lnk"
+    DeleteRegValue HKLM "Software\KernelEx\Components" "KexTouchKey"
+    DeleteRegValue HKLM "Software\KernelEx\Components" "KexTouchOldDriver"
+    DeleteRegValue HKLM "Software\KernelEx\Components" "KexTouchOldIni"
+  un_kextouch_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexKeys"
+  StrCmp $0 "1" 0 un_kexkeys_done
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "KexKeys"
+    Delete /REBOOTOK "$SYSDIR\kexkeys.exe"
+    Delete /REBOOTOK "$SYSDIR\kexkeyh.dll"
+  un_kexkeys_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexFat"
   StrCmp $0 "1" 0 un_kexfat_done
     DeleteRegKey HKLM "System\CurrentControlSet\Services\VxD\KEXFAT"
