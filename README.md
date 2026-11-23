@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 26 | [KernelExEx-1.0.0-testbuild26.zip](KernelExEx-1.0.0-testbuild26.zip) | [08bbba9](https://github.com/Techniix/KernelExEx/commit/08bbba95083e9701a7fb0ed8f06de059bf6d86ae) | Use up to 2 GB of RAM (installer option, patches VMM); stick offers to undo it (KEXUNDO) |
 | 25 | [KernelExEx-1.0.0-testbuild25.zip](KernelExEx-1.0.0-testbuild25.zip) | [4c8e772](https://github.com/Techniix/KernelExEx/commit/4c8e77208e4e3fa2dad9c824224342815c89f248) | Install stick maker for Windows (one window), Setup no longer cut short by the KernelExEx installer, /p i, boot log on the stick, VESA component |
 | 24 | [KernelExEx-testbuild24.zip](KernelExEx-testbuild24.zip) | [2297f24](https://github.com/Techniix/KernelExEx/commit/2297f24ac27b93d5e05178f3b5d7e16e02e982c1) | Multimedia keys (kexkeys), HD Audio name fix; otherwise as build 23 |
 | 23 | [KernelExEx-testbuild23.zip](KernelExEx-testbuild23.zip) | [d96b9dc](https://github.com/Techniix/KernelExEx/commit/d96b9dc7d7ab4b29dda650b4a7ed66f601ce1e60) | Vostro 1440 batch: HD Audio, KEXMEM (>1 GB RAM), touchpad/TrackPoint driver, VESA display driver, USB install kit |
