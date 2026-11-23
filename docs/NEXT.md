@@ -41,3 +41,16 @@ in VTD (not our bug); NTKERN lacks READ_REGISTER_* and KeSetTimerEx (use volatil
   `mov ebp,0C0000h` in VMM's _PageReserve arena choice with a call that picks 080000h
   for large requests), agpm[] for ME. Port it [Loew] into mempatch.c when GPU work starts;
   also look at mapping large BARs (256 MB+) for display drivers.
+
+## Test target from 2026-11-23: Dell Latitude E6410 (the Vostro 1440 stays in mind)
+
+From Dell's setup guide and reviews (to confirm with kexinfo on the machine):
+- Core i5/i7 Arrandale (i5-520M/540M, i7-620M...), Mobile Intel QM57 (5 series PCH).
+- Up to 8 GB DDR3 (2 SODIMM): the RAM disk above 4 GB matters here.
+- Graphics: Intel HD (UMA) or NVIDIA NVS 3100M (512 MB): note the AGP/arena item above.
+- LAN: Intel 82577LM (PCH gigabit; OpenBSD em(4) covers it: check kexem's ID list).
+- Wi-Fi: Intel Centrino 6200/6300 (no driver yet) or Dell/Broadcom options.
+- Audio: Intel HD Audio with IDT 92HD81B1C5 codec (kexhda: check the codec path).
+- ALPS touchpad + trackstick (kextouch ALPS support; trackstick middle-button scroll).
+- SD/MMC reader, ExpressCard/PC Card, FireWire, eSATA, legacy BIOS (no UEFI needed);
+  SATA AHCI/IDE switch in the BIOS.
