@@ -1,11 +1,12 @@
-# Where work stopped (2026-11-17, test build 23)
+# Where work stopped (2026-11-22, test build 24)
 
 Waiting for: Dell Vostro 1440 results (C:\KEXTOUCH.TXT, HD Audio speaker/headphones,
 RAM shown with KEXMEM, display modes offered by the VESA driver, USB stick boot).
 
 Next, in order:
 1. Fix whatever the Vostro report shows (touchpad ALPS model, audio codec paths).
-2. USB keyboard extras: consumer-control (media/volume) keys and NKRO (kexusb HID).
+2. Keys: kexkeys done (Fn + USB media keys, test build 24). Still: NKRO check on hardware,
+   installer component + Run key for kexkeys and kextouch, on-screen volume indicator.
 3. kexinfo hardware report (docs/KEDCL.md), reading KEDCL logs (kextouch first).
 4. Touchpad: Synaptics absolute mode and Elantech (port from Linux, as tp_alps.c);
    ALPS v6-v9; horizontal scroll (Shift+wheel?); installer component for kextouch.
