@@ -309,10 +309,17 @@ out:
 
 /* ------------------------------------------------------------------ the window */
 
+static char last_iso[MAX_PATH];   /* kept across refreshes (a stick plugged in, Refresh) */
+
 static void fill_sources(const char *select)
 {
-	int c, i, sel = -1;
+	int c, i, sel = -1, cur = (int) SendMessageA(h_src, CB_GETCURSEL, 0, 0);
+	char keep[MAX_PATH] = "";
 	DWORD mask = GetLogicalDrives();
+	if (select)
+		lstrcpynA(last_iso, select, sizeof(last_iso));
+	else if (cur >= 0 && cur < nsources)
+		lstrcpynA(keep, sources[cur], sizeof(keep));   /* a refresh keeps the choice */
 	SendMessageA(h_src, CB_RESETCONTENT, 0, 0);
 	nsources = 0;
 	for (c = 'A'; c <= 'Z' && nsources < MAXSRC - 1; c++)
@@ -327,12 +334,17 @@ static void fill_sources(const char *select)
 		SendMessageA(h_src, CB_ADDSTRING, 0, (LPARAM) item);
 		nsources++;
 	}
-	if (select && nsources < MAXSRC)
+	if (last_iso[0] && nsources < MAXSRC)
 	{
-		lstrcpynA(sources[nsources], select, MAX_PATH);
-		SendMessageA(h_src, CB_ADDSTRING, 0, (LPARAM) select);
-		sel = nsources++;
+		lstrcpynA(sources[nsources], last_iso, MAX_PATH);
+		SendMessageA(h_src, CB_ADDSTRING, 0, (LPARAM) last_iso);
+		if (select)
+			sel = nsources;
+		nsources++;
 	}
+	for (i = 0; i < nsources && sel < 0 && keep[0]; i++)
+		if (!lstrcmpiA(sources[i], keep))
+			sel = i;
 	for (i = 0; i < nsources && sel < 0; i++)
 	{
 		char root[4] = { sources[i][0], ':', '\\', 0 }, label[64];
@@ -344,8 +356,10 @@ static void fill_sources(const char *select)
 
 static void fill_disks(void)
 {
-	int i, sys = system_disk();
+	int i, sys = system_disk(), cur = (int) SendMessageA(h_dst, CB_GETCURSEL, 0, 0), keep = -1, sel = 0;
 	char item[160];
+	if (cur >= 0 && cur < ndisks)
+		keep = disks[cur].num;   /* a refresh keeps the choice */
 	SendMessageA(h_dst, CB_RESETCONTENT, 0, 0);
 	ndisks = 0;
 	for (i = 0; i < MAXDISK && ndisks < MAXDISK; i++)
@@ -353,11 +367,13 @@ static void fill_disks(void)
 		{
 			snprintf(item, sizeof(item), "%s  (%lu MB)", disks[ndisks].name, (unsigned long) (disks[ndisks].size >> 20));
 			SendMessageA(h_dst, CB_ADDSTRING, 0, (LPARAM) item);
+			if (disks[ndisks].num == keep)
+				sel = ndisks;
 			ndisks++;
 		}
 	if (!ndisks)
 		SendMessageA(h_dst, CB_ADDSTRING, 0, (LPARAM) "(no USB stick found: plug one in)");
-	SendMessageA(h_dst, CB_SETCURSEL, 0, 0);
+	SendMessageA(h_dst, CB_SETCURSEL, (WPARAM) sel, 0);
 }
 
 static void status(const char *s)
