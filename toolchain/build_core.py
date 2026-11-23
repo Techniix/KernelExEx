@@ -657,6 +657,8 @@ def build_kexmem(b: Build):
     """KEXMEM.SYS: DOS driver, first in CONFIG.SYS, that limits the RAM reported to
     Windows (1 GB) and resets CPU control registers (media/dos/kexmem.asm, NASM)."""
     run(["nasm", "-f", "bin", "-I", str(ROOT / "media/dos") + "/", "-o", b.out / "KEXMEM.SYS", ROOT / "media/dos/kexmem.asm"])
+    # KEXLOG.COM: the install stick shows the end of Windows' start-up log with it
+    run(["nasm", "-f", "bin", "-o", b.out / "KEXLOG.COM", ROOT / "media/dos/kexlog.asm"])
 
 
 def build_kexmedia(b: Build):

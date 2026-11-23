@@ -6,6 +6,18 @@ echo.
 echo   KernelExEx: Windows 98 install
 echo   ==============================
 echo.
+rem a Windows already on a disk (e.g. Setup stopped with a blue screen): show the end of
+rem its start-up log, which names the driver it stopped at
+set L=
+for %%d in (D E F G H I J K L) do if exist %%d:\WINDOWS\WIN.COM if exist %%d:\BOOTLOG.TXT set L=%%d
+if "%L%"=="" goto nolog
+echo   Windows on drive %L%: the end of its last start-up log (BOOTLOG.TXT).
+echo   If Windows stopped with an error, take a photo of this for a bug report.
+echo.
+KEXLOG %L%:\BOOTLOG.TXT
+pause
+echo.
+:nolog
 rem Windows 98 already copied onto a disk: nothing more to do here
 set T=
 for %%d in (D E F G H I J K L) do if exist %%d:\KEXINST\READY.TXT set T=%%d
