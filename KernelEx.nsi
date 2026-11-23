@@ -663,6 +663,7 @@ LangString DESC_KEXATA ${LANG_ENGLISH} "Hard disks over 128 GB on IDE and SATA (
 LangString DESC_KEXUMASS ${LANG_ENGLISH} "USB flash drives, USB hard disks, card readers and USB CD/DVD drives, with no driver disk: Windows 98 has none for them. Works on USB 1.1 ports and, with the USB 2.0 driver, at USB 2.0 speed. Windows may ask for the Windows 98 CD the first time."
 LangString DESC_KEXEHCI ${LANG_ENGLISH} "USB 2.0 speed for the USB 2.0 ports of any EHCI controller (the Intel ICH4 to ICH10 and later chipsets, VIA, NEC and other add-in cards). Windows 98 runs them at USB 1.1 speed only. USB 1.1 mice, keyboards and printers stay on Windows' own drivers."
 LangString DESC_KEXAC97 ${LANG_ENGLISH} "Sound for onboard AC'97 audio (Intel ICH to ICH7, nVidia nForce 1 to 4, AMD-8111) with any AC'97 codec, such as the Realtek ALC655 on the MSI 848P Neo2-V. Windows 98 has no driver for these."
+LangString DESC_KEXVESA ${LANG_ENGLISH} "A display driver for graphics cards Windows 98 has no driver for (e.g. Intel HD Graphics in the Dell Vostro 1440): the screen's own resolution and millions of colours through the card's VESA BIOS, no acceleration. Cards with their maker's driver are left alone. Takes effect after a restart; if the screen stays black, start in Safe Mode and pick another driver."
 LangString DESC_KEXHDA ${LANG_ENGLISH} "Sound for Intel High Definition Audio (most PCs and laptops from 2005 on, e.g. the Dell Vostro 1440 with its IDT codec): speaker, headphones and line out, with volume control. Windows 98 has no driver for these."
 LangString DESC_NETDRV ${LANG_ENGLISH} "Drivers for network adapters Windows 98 has none for, from the BSD systems."
 LangString DESC_KEXRNDIS ${LANG_ENGLISH} "USB network adapters that speak RNDIS, including USB tethering from an Android phone, with OpenBSD's urndis driver."
@@ -859,6 +860,67 @@ Section /o "HD Audio onboard sound (Intel, laptops)" SECKEXHDA
     MessageBox MB_ICONINFORMATION|MB_OK "Your PC has not had a WDM sound driver before. When Windows sets up the sound card (after the restart), it asks for the Windows 98 CD for its sound system files (portcls.sys and others). Have the CD ready, or point Windows to the folder that holds its setup files (for example C:\WINDOWS\OPTIONS\CABS)." /SD IDOK
   hda_wdm_ok:
 SectionEnd
+
+Section /o "VESA display driver (any graphics card, no acceleration)" SECKEXVESA
+  ;vesamini.drv/.vxd (vmdisp9x, MIT): the screen's own resolutions through the
+  ;card's VESA BIOS, for cards Windows 98 has no driver for (Intel HD and others)
+  SetOutPath "$INSTDIR\drivers\display"
+  File "drivers\display\kexvesa.inf"
+  File "drivers\display\vesamini.drv"
+  File "drivers\display\vesamini.vxd"
+  File "drivers\display\LICENSE.vesa.txt"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\display"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexVesa" "1"
+  !insertmacro KexInfOther_kexvesa
+  Call KexVesaRedetect
+SectionEnd
+
+;Graphics cards on Windows' standard VGA driver (or ones our INF names) are
+;forgotten, so Windows finds them again at the restart and sets them up from
+;kexvesa.inf. A card with its maker's driver is left alone.
+Function KexVesaRedetect
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R4
+  Push $R5
+  StrCpy $R0 0
+  kvr_loop:
+    EnumRegKey $R1 HKLM "Enum\PCI" $R0
+    StrCmp $R1 "" kvr_done
+    IntOp $R0 $R0 + 1
+    StrCpy $R2 0
+    kvr_inst:
+      EnumRegKey $R3 HKLM "Enum\PCI\$R1" $R2
+      StrCmp $R3 "" kvr_loop
+      IntOp $R2 $R2 + 1
+      ReadRegStr $R4 HKLM "Enum\PCI\$R1\$R3" "Class"
+      StrCmp $R4 "DISPLAY" 0 kvr_inst
+      ReadRegStr $R4 HKLM "Enum\PCI\$R1\$R3" "Driver"
+      StrCpy $R5 ""
+      StrCmp $R4 "" +2
+        ReadRegStr $R5 HKLM "System\CurrentControlSet\Services\Class\$R4\DEFAULT" "drv"
+      StrCmp $R5 "vesamini.drv" kvr_inst
+      StrCmp $R5 "" kvr_forget
+      StrCmp $R5 "vga.drv" kvr_forget
+      StrCmp $R5 "framebuf.drv" kvr_forget
+      StrCmp $R5 "supervga.drv" kvr_forget
+      Goto kvr_inst
+      kvr_forget:
+        DetailPrint "Will set up again: PCI\$R1"
+        DeleteRegKey HKLM "Enum\PCI\$R1\$R3"
+        IntOp $R2 $R2 - 1
+        Goto kvr_inst
+  kvr_done:
+  Pop $R5
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
 
 ;A sound device that our earlier builds set up without Windows' WDM audio
 ;files cannot start (Code 2). Detect it again at the restart, so it is set
@@ -1247,6 +1309,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXCHIP} $(DESC_KEXCHIP)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAC97} $(DESC_KEXAC97)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXHDA} $(DESC_KEXHDA)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXVESA} $(DESC_KEXVESA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEHCI} $(DESC_KEXEHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXUMASS} $(DESC_KEXUMASS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXFAT} $(DESC_KEXFAT)
@@ -1346,6 +1409,19 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\audio"
     RMDir "$INSTDIR\drivers"
   un_kexhda_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexVesa"
+  StrCmp $0 "1" 0 un_kexvesa_done
+    ;the driver files in SYSTEM stay: the card may still use them
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\display" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete "$INSTDIR\drivers\display\kexvesa.inf"
+    Delete "$INSTDIR\drivers\display\vesamini.drv"
+    Delete "$INSTDIR\drivers\display\vesamini.vxd"
+    Delete "$INSTDIR\drivers\display\LICENSE.vesa.txt"
+    RMDir "$INSTDIR\drivers\display"
+    RMDir "$INSTDIR\drivers"
+  un_kexvesa_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexEhci"
   StrCmp $0 "1" 0 un_kexehci_done
     ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
@@ -1564,6 +1640,7 @@ Section "Uninstall"
   !insertmacro un.KexInfOther_kexuhci
   !insertmacro un.KexInfOther_kexac97
   !insertmacro un.KexInfOther_kexhda
+  !insertmacro un.KexInfOther_kexvesa
   !insertmacro un.KexInfOther_kexrl
   !insertmacro un.KexInfOther_kexem
   !insertmacro un.KexInfOther_kexcdce

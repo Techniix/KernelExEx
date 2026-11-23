@@ -54,6 +54,10 @@ LAYOUT = {
     "drivers/audio/kexac97.inf": "drivers/audio/ac97/kexac97.inf",
     "drivers/audio/kexhda.sys": "kexaudio:kexhda.sys",
     "drivers/audio/kexhda.inf": "drivers/audio/hda/kexhda.inf",
+    "drivers/display/kexvesa.inf": "drivers/display/kexvesa.inf",
+    "drivers/display/vesamini.drv": "display:vesamini.drv",
+    "drivers/display/vesamini.vxd": "display:vesamini.vxd",
+    "drivers/display/LICENSE.vesa.txt": "display:LICENSE",
     "drivers/usb2/kexehci.sys": "kexusb:kexehci.sys",
     "drivers/usbstor/kexumass.sys": "kexusb:kexumass.sys",
     "drivers/usbstor/kexumass.inf": "drivers/usb/storage/kexumass.inf",
@@ -144,6 +148,7 @@ def main():
     ap.add_argument("--kexaudio", type=Path, default=ROOT.parent / "build" / "kexaudio")
     ap.add_argument("--kexusb", type=Path, default=ROOT.parent / "build" / "kexusb")
     ap.add_argument("--kexstor", type=Path, default=ROOT.parent / "build" / "kexstor")
+    ap.add_argument("--display", type=Path, default=ROOT.parent / "build" / "display")
     ap.add_argument("--nsis", required=True, type=Path, help="NSIS install prefix (bin/makensis)")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--testbuild", type=int, help="name it \"1.0.0 test build N\"")
@@ -167,6 +172,8 @@ def main():
             path = a.kexusb / src[7:]
         elif src.startswith("kexstor:"):
             path = a.kexstor / src[8:]
+        elif src.startswith("display:"):
+            path = a.display / src[8:]
         else:
             path = ROOT / src
         if not path.is_file():
