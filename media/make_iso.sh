@@ -18,6 +18,9 @@ cp /usr/lib/ISOLINUX/isolinux.bin /usr/lib/syslinux/modules/bios/ldlinux.c32 \
    /usr/lib/syslinux/memdisk "$W/iso/isolinux/"
 cp "$IMG" "$W/iso/KEXSETUP.IMG"
 C=$(( $(stat -c %s "$IMG") / 512 / 16065 ))
+# KEX_CTOKEN=1 (pack_media.py): KEXSETUP.IMG is an empty placeholder that kexmedia.exe
+# fills; it writes the cylinder count over this token
+[ "$KEX_CTOKEN" = 1 ] && C="@@@@@@"
 cat > "$W/iso/isolinux/isolinux.cfg" <<EOF
 DEFAULT kex
 PROMPT 0

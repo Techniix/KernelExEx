@@ -660,11 +660,15 @@ def build_kexmem(b: Build):
 
 
 def build_kexmedia(b: Build):
-    """kexmedia.exe: writes the install image (media/make_iso.sh) to a USB stick;
-    runs on Windows XP to 11 (media/win)."""
-    objs = b.compile("kexmedia", [ROOT / "media/win/kexmedia.c"], COMPAT)
-    b.link("kexmedia", objs, ["kexcrt", "kernel32"], base="0x400000", entry="entrypoint", kind="exe",
-           subsystem="console")
+    """kexmedia.exe: the install stick maker (one window; builds the stick from the
+    user's Windows 98 CD and writes it). Windows XP to 11 (media/win). Its payload
+    is appended later by media/pack_media.py."""
+    d = ROOT / "media/win"
+    objs = b.compile("kexmedia", [d / "kexmedia.c", d / "mkimage.c"], [f"-I{d}", "-D_WIN32_WINNT=0x0501",
+                                                                      "-D_WIN32_IE=0x0501", *COMPAT])
+    res = b.resource("kexmedia", d / "kexmedia.rc")
+    b.link("kexmedia", [*objs, res], ["kexcrt", "kernel32", "user32", "gdi32", "comctl32", "comdlg32"],
+           base="0x400000", entry="entrypoint", kind="exe")
 
 
 def build_vxd(b: Build):
