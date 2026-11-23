@@ -595,4 +595,7 @@ contributors. Mbed TLS is used under its GPL-2.0-or-later option. Wine and
 ReactOS are used as behavioural references. Root certificates come from
 Mozilla via certifi.
 
+The memory patch builds on Rudolph R. Loew's PATCHMEM, with thanks and respect;
+see [CREDITS.md](CREDITS.md) for everyone whose work KernelExEx uses.
+
 Not affiliated with Microsoft, Protoweb, Discord or 8BitDo.

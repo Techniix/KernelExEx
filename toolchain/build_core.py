@@ -673,6 +673,16 @@ def build_kexmedia(b: Build):
            base="0x400000", entry="entrypoint", kind="exe")
 
 
+def build_kexpatch(b: Build):
+    """kexpatch.exe: patches the user's own Windows files (VMM32.VXD for more than
+    1 GB of RAM); tools/kexpatch. The installer runs it."""
+    d = ROOT / "tools/kexpatch"
+    objs = b.compile("kexpatch", [d / "kexpatch.c", d / "mempatch.c", d / "vxdfile.c"],
+                     [f"-I{d}", "-D_WIN32_WINNT=0x0400", *COMPAT])
+    b.link("kexpatch", objs, ["kexcrt", "kernel32"], base="0x400000", entry="entrypoint", kind="exe",
+           subsystem="console")
+
+
 def build_vxd(b: Build):
     """VKrnlEx.vxd: compiled as ring-0 code, linked as a PE DLL by lld, then
     converted to the LE format by toolchain/vxd/le_link.py."""
@@ -709,7 +719,7 @@ STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "ge
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
          "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
          "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexfat": build_kexfat,
-         "kexacpi": build_kexacpi, "kexpower": build_kexpower, "kexmem": build_kexmem, "kexinfo": build_kexinfo, "kexkeys": build_kexkeys, "kextouch": build_kextouch, "kextouchx": build_kextouch_exe, "kexmedia": build_kexmedia}
+         "kexacpi": build_kexacpi, "kexpower": build_kexpower, "kexmem": build_kexmem, "kexinfo": build_kexinfo, "kexkeys": build_kexkeys, "kextouch": build_kextouch, "kextouchx": build_kextouch_exe, "kexmedia": build_kexmedia, "kexpatch": build_kexpatch}
 
 
 def main():
