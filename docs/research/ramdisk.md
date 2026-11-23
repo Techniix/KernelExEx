@@ -39,3 +39,28 @@ area's inter-application bytes: 0040:00F0 = 'KX', 00F2 = offset, 00F4 = segment;
 table is 'KXMP', dd limit, dw count, then 20-byte entries. KEXRAMT read it at
 Device_Init in QEMU (6 GB, /MAX=2048): RAM 1 MB-3 GB and 4-7 GB, limit 2 GB, so the RAM
 disk would get 2-3 GB and 4-7 GB (4 GB).
+
+## KEXRAM.VXD status (2026-11-23, work in progress, not installed by setup)
+
+`drivers/storage/ramdisk/` — `ramcore.c` (chunk selection, FAT16/FAT32 layout; host test
+`tests/ramdisk/run.sh`: fsck.fat clean, mtools can write a swap-sized file) and
+`kexram.c` (the VxD, SYSTEM.INI `device=KEXRAM.VXD`, init at Sys_VM_Init).
+
+Works in QEMU (6 GB, KEXMEM /MAX=2048): picks 1023 chunks (~4 GB: 2-3 GB and 4-7 GB),
+writes the FAT32 volume through the PSE-36 window, IOS_Register succeeds, IOS sends
+AEP_DEVICE_INQUIRY (we claim unit 0) and AEP_CONFIG_DCB with its physical DCB (we set
+geometry, WRITEABLE, clear MUST_CONFIGURE, insert our calldown), and at appy time
+(_SHELL_CallAtAppyTime, CAAFL_RING0) we create the logical DCB and ISP_ASSOCIATE_DCB
+gives it Z:. IFSMGR mounts (AEP_CREATE_VRP arrives).
+
+Open problem: on first access, every read the volume gets is IOR_READ of sector 0 with
+IOR_xfer_count = 0, flags 0x04080449 (PHYS_SGDS | LOGICAL_START_SECTOR | VERSION_002 |
+DOUBLE_BUFFER | BYPASS_VOLTRK | HIGH_PRIORITY), retried forever. The VRP built for the
+volume has VRP_max_sgd = 0 (block size 0x200 is right) even though both DCBs have
+DCB_max_sg_elements = 17 (offset 0x7B, checked at request time); the demand flags
+(small memory or none) and max_xfer_len make no difference. Next: find where IOS takes
+VRP_max_sgd from (likely the calldown/DDB, or a field IOS fills in AEP_CONFIG_DCB for a
+claimed device that we overwrite), e.g. by comparing with a real disk's VRP/DCB (walk
+DCBs with ISP_GET_FIRST_NEXT_DCB as cfu1 does), or set VRP_max_sgd in AEP_CREATE_VRP.
+Notes from cfu1-vxd (MIT) that this follows: be your own TSD, appy-time association,
+WRITEABLE on both DCBs, logical SG list order {sectors, pointer}.

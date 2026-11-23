@@ -544,6 +544,24 @@ def build_kexramt(b: Build):
     run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXRAMT.VXD", "--allow", "0x0001006C"])
 
 
+def build_kexram(b: Build):
+    """KEXRAM.VXD: RAM disk for the swap file from RAM Windows does not use (above
+    KEXMEM's limit and above 4 GB); drivers/storage/ramdisk."""
+    d = ROOT / "drivers/storage/ramdisk"
+    tv = ROOT / "toolchain/vxd"
+    objs = b.compile("kexram", [d / "kexram.c", d / "ramcore.c", tv / "vxdwraps.c"],
+                     [f"-I{tv / 'include'}", "-mgeneral-regs-only", "-fno-jump-tables", "-mno-stack-arg-probe", *COMPAT])
+    defs = b.obj / "defs" / "kexram.def"
+    defs.parent.mkdir(parents=True, exist_ok=True)
+    defs.write_text("LIBRARY KEXRAM.dll\nEXPORTS\n    KEXRAM_DDB @1 DATA\n")
+    pe = b.link("kexram", objs, ["kexcrt"], base="0x10000000", entry="KEXRAM_CTRL", defs=defs, ext=".pe")
+    out = run([sys.executable, tv / "le_link.py", pe, b.out / "KEXRAM.VXD", "--name", "KEXRAM",
+               "--description", "KernelExEx RAM disk"])
+    print("  " + out.strip())
+    run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXRAM.VXD",
+         "--allow", "0x0001006C,0x0001011D,0x00100007,0x0017000E,0x0001004F,0x00010051,0x00010052,0x00010053,0x00010063,0x0001012D"])
+
+
 def build_kexfatp(b: Build):
     """KEXFATP.VXD: test-only probe for the exFAT driver's development: logs
     IFSMgr's mount requests to port 0xE9. Never installed by setup."""
@@ -575,7 +593,7 @@ def build_kexfat(b: Build):
                "--description", "KernelExEx exFAT file system"])
     print("  " + out.strip())
     run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXFAT.VXD",
-         "--allow", "0x00400001,0x00400007,0x00400012,0x00400036,0x00400013,0x00400014,0x00400039,0x00100004,0x00100007,0x0001004F,0x00010051,0x00010052,0x00010053,0x00010063,0x0001012D,0x00010041"])
+         "--allow", "0x00400001,0x00400007,0x00400012,0x00400036,0x00400013,0x00400014,0x00400039,0x00100004,0x00100007,0x0017000E,0x0001004F,0x00010051,0x00010052,0x00010053,0x00010063,0x0001012D,0x00010041"])
 
 
 def build_kexacpi(b: Build):
@@ -737,7 +755,7 @@ def build_vxd(b: Build):
 STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "gen": prepare_apilibs,
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
          "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
-         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexramt": build_kexramt, "kexfat": build_kexfat,
+         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexramt": build_kexramt, "kexram": build_kexram, "kexfat": build_kexfat,
          "kexacpi": build_kexacpi, "kexpower": build_kexpower, "kexmem": build_kexmem, "kexinfo": build_kexinfo, "kexkeys": build_kexkeys, "kextouch": build_kextouch, "kextouchx": build_kextouch_exe, "kexmedia": build_kexmedia, "kexpatch": build_kexpatch}
 
 
