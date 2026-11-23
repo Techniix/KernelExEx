@@ -527,6 +527,23 @@ def build_kexvmm(b: Build):
     run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXVMM.VXD", "--allow", "0x00010000"])
 
 
+def build_kexramt(b: Build):
+    """KEXRAMT.VXD: test-only probe for the RAM disk: maps RAM above 4 GB through a
+    PSE-36 window at Device_Init and logs to port 0xE9. Never installed by setup."""
+    d = ROOT / "drivers/storage/ramdisk"
+    tv = ROOT / "toolchain/vxd"
+    objs = b.compile("kexramt", [d / "ramtest.c"],
+                     [f"-I{tv / 'include'}", "-mgeneral-regs-only", "-fno-jump-tables", "-mno-stack-arg-probe", *COMPAT])
+    defs = b.obj / "defs" / "kexramt.def"
+    defs.parent.mkdir(parents=True, exist_ok=True)
+    defs.write_text("LIBRARY KEXRAMT.dll\nEXPORTS\n    KEXRAMT_DDB @1 DATA\n")
+    pe = b.link("kexramt", objs, ["kexcrt"], base="0x10000000", entry="KEXRAMT_CTRL", defs=defs, ext=".pe")
+    out = run([sys.executable, tv / "le_link.py", pe, b.out / "KEXRAMT.VXD", "--name", "KEXRAMT",
+               "--description", "KernelExEx RAM window probe (test only)"])
+    print("  " + out.strip())
+    run([sys.executable, tv / "check_vxd.py", pe, b.out / "KEXRAMT.VXD", "--allow", "0x0001006C"])
+
+
 def build_kexfatp(b: Build):
     """KEXFATP.VXD: test-only probe for the exFAT driver's development: logs
     IFSMgr's mount requests to port 0xE9. Never installed by setup."""
@@ -720,7 +737,7 @@ def build_vxd(b: Build):
 STEPS = {"kexcrt": build_kexcrt, "k32ord": build_k32ord, "core": build_core, "gen": prepare_apilibs,
          "kexbases": build_kexbases, "kexbasen": build_kexbasen, "sheet": build_sheet, "kexCOM": build_kexcom,
          "auxiliary": build_auxiliary, "verify": build_verify, "vxd": build_vxd,
-         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexfat": build_kexfat,
+         "kexwifi": build_kexwifi, "kexvmm": build_kexvmm, "kexfatp": build_kexfatp, "kexramt": build_kexramt, "kexfat": build_kexfat,
          "kexacpi": build_kexacpi, "kexpower": build_kexpower, "kexmem": build_kexmem, "kexinfo": build_kexinfo, "kexkeys": build_kexkeys, "kextouch": build_kextouch, "kextouchx": build_kextouch_exe, "kexmedia": build_kexmedia, "kexpatch": build_kexpatch}
 
 
