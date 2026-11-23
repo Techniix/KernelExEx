@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 24 | [KernelExEx-testbuild24.zip](KernelExEx-testbuild24.zip) | [2297f24](https://github.com/Techniix/KernelExEx/commit/2297f24ac27b93d5e05178f3b5d7e16e02e982c1) | Multimedia keys (kexkeys), HD Audio name fix; otherwise as build 23 |
 | 23 | [KernelExEx-testbuild23.zip](KernelExEx-testbuild23.zip) | [d96b9dc](https://github.com/Techniix/KernelExEx/commit/d96b9dc7d7ab4b29dda650b4a7ed66f601ce1e60) | Vostro 1440 batch: HD Audio, KEXMEM (>1 GB RAM), touchpad/TrackPoint driver, VESA display driver, USB install kit |
 | 22 | [KernelExEx-1.0.0-testbuild22.zip](KernelExEx-1.0.0-testbuild22.zip) | [7e2172d](https://github.com/Techniix/KernelExEx/commit/7e2172df89b89200c341730ddaaabc471511ee0d) | Laptop battery: KEXACPI.VXD (ACPICA) reads _BIX/_BIF/_BST, _PSR, _LID; kexpower taskbar icon and window, low-battery warning, shutdown when nearly empty, lid action |
 | 21 | [KernelExEx-1.0.0-testbuild21.zip](KernelExEx-1.0.0-testbuild21.zip) | [c546420](https://github.com/Techniix/KernelExEx/commit/c546420acddc8850fea9a161800dc8ca95f5a62b) | AHCI and NVMe: interrupts and several commands at once (NCQ); Windows can start from an AHCI disk; an NVMe SSD the BIOS uses is left to the BIOS |
