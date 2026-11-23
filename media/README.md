@@ -54,29 +54,33 @@ with `stage/MSBATCH.INF` and `/p i` (no Windows ACPI driver: KEXACPI reads batte
 Tested in QEMU: an installed Windows 98 SE that crashed with 4 GB (fatal exception 06)
 boots to the desktop with KEXMEM and reports 1022 MB. The media puts it in CONFIG.SYS;
 for existing installs the KernelExEx installer has the component
-"More than 1 GB of RAM (memory limit)". PATCHMEM (R. Loew) is proprietary and is not used.
+"More than 1 GB of RAM (memory limit)".
 
-Measured in QEMU (Korean Windows 98 SE, 2 GB machine, Westmere CPU, 2026-11-23):
+Measured in QEMU (Korean Windows 98 SE, 2 GB machine, Westmere CPU, 2026-11-23), before
+the VMM patch below:
 
 | Windows sees | VCACHE limit | Result |
 |---|---|---|
 | 1024 MB (KEXMEM default) | 256 MB | starts, 9 of 9 boots |
 | 1280 MB (KEXMEM /MAX=1280) | 256 MB or 64 MB | "Insufficient memory to initialize Windows" |
-| 1280 MB (MaxPhysPage=50000, no KEXMEM) | 64 MB | same |
 | 1536 / 1792 MB | 256 MB | same |
 
-So the limit is not VCACHE's size and not KEXMEM: VMM itself gives up during its
-protected-mode start-up (it is back in real mode, GDT/TSS in the system arena, when
-the message is shown). Going past 1 GB needs a change to VMM, below.
+## kexpatch /mem: up to 2 GB (installer option, experimental)
 
-## Planned: our own large-memory patch (beyond 1 GB)
+`tools/kexpatch` patches the user's own VMM32.VXD (copy kept as SYSTEM\VMM32.KEX; the new
+file goes in at the next start through WININIT.INI). Two fixes, details in
+`docs/research/memory.md`:
 
-KEXMEM caps Windows at about 1 GB. To use up to ~3.5 GB we need our own equivalent of
-PATCHMEM (R. Loew). To do:
+- ours: memory blocks from the loader (at most 64 MB each, one page apart) are merged, so
+  VMM's 16-entry range table no longer caps Windows at 16 x 64 MB = 1 GB;
+- from Rudolph R. Loew's PATCHMEM (see CREDITS.md): a stale flag in page-table records
+  that crashes Windows at about 1.25 GB.
 
-- Research thoroughly what limits Windows 9x above 1 GB: VMM's system arena (1 GB),
-  VCACHE sizing, the page-frame tables, and drivers that map memory into the system arena.
-- PATCHMEM is proprietary, so a clean-room process: study its behaviour (and, where lawful
-  for interoperability, its patches) and write a specification. Implement only from that
-  specification and from our own analysis of VMM.VXD/VCACHE.VXD on the user's own CD,
-  without copying its code or patch bytes. Ship it as a patcher run on the user's own files.
+The installer component "Use up to 2 GB of RAM" runs `kexpatch /mem on` and sets KEXMEM
+to `/MAX=2048`. Tested in QEMU at 2 GB: Windows starts and runs. 3-4 GB do not work yet
+(KEXMEM keeps those PCs at 2 GB). Safe Mode skips CONFIG.SYS, so above 1 GB it needs
+"Step-by-step confirmation" with KEXMEM loaded.
+
+**If Windows no longer starts:** boot the install stick. When it finds a patched Windows it
+offers to undo the patch (press U): `KEXUNDO.COM` copies VMM32.KEX back and removes `/MAX=`
+from the KEXMEM line, so Windows is limited to 1 GB again. By hand: `KEXUNDO D:`.

@@ -37,6 +37,7 @@ def main():
         shutil.copyfile(sys.argv[5], os.path.join(out, "KEXINST/MSBATCH.INF"))
     shutil.copyfile(os.path.join(core, "KEXMEM.SYS"), os.path.join(out, "KEXMEM.SYS"))
     shutil.copyfile(os.path.join(core, "KEXLOG.COM"), os.path.join(out, "KEXLOG.COM"))
+    shutil.copyfile(os.path.join(core, "KEXUNDO.COM"), os.path.join(out, "KEXUNDO.COM"))
     shutil.copyfile(kexprep, os.path.join(out, "KEXPREP.EXE"))
     shutil.copyfile(kexsetup, os.path.join(out, "KEXINST/KEXSETUP.EXE"))
     print(out)

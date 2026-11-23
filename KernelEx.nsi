@@ -654,6 +654,7 @@ LangString DESC_KEXACPI ${LANG_ENGLISH} "For laptops: shows the battery's charge
 LangString DESC_KEXTOUCH ${LANG_ENGLISH} "For laptops: ALPS touchpads get tap-to-click, two-finger and edge scrolling; TrackPoints scroll with the middle button; other PS/2 mice get the wheel. Replaces the standard PS/2 mouse driver (uninstalling puts it back). Settings in the Start menu."
 LangString DESC_KEXINFO ${LANG_ENGLISH} "A hardware report (Start menu: Hardware report): every device with its IDs, driver, problems and resources, the firmware, and the KernelExEx driver logs, in C:\KEXINFO.TXT for bug reports."
 LangString DESC_KEXKEYS ${LANG_ENGLISH} "Makes laptop Fn volume/mute keys and USB keyboard media keys work: volume up/down and mute change the master volume; play/stop/next/previous control Winamp."
+LangString DESC_KEXMEMX ${LANG_ENGLISH} "Lets Windows 98 SE use up to 2 GB of RAM (tested in an emulator with 2 GB) by patching its memory manager (VMM32.VXD; the original is kept and comes back when this is removed). Builds on Rudolph R. Loew's PATCHMEM. Experimental: if Windows does not start afterwards, start from the KernelExEx install stick and type KEXUNDO."
 LangString DESC_KEXMEM ${LANG_ENGLISH} "For computers with more than 1 GB of RAM: Windows 98 and ME crash or say 'Insufficient memory' at start-up with that much. This makes Windows use the first 1 GB (adds KEXMEM.SYS to CONFIG.SYS). Takes effect after a restart."
 LangString DESC_KEXFAT ${LANG_ENGLISH} "Reads SD cards, USB sticks and disks formatted exFAT (cards over 32 GB come that way): they get a drive letter and open in Explorer and in programs. Read-only for now: copying files onto them is not possible yet. Experimental."
 LangString DESC_KEXVMM ${LANG_ENGLISH} "The mouse pointer moves in and out of the virtual machine's window freely, with no need to click into it or press keys to release it. For QEMU (the default PC machine) and VMware. Does nothing on a real PC."
@@ -1087,6 +1088,82 @@ Section /o "More than 1 GB of RAM (memory limit)" SECKEXMEM
   SetRebootFlag true
 SectionEnd
 
+;Rewrite (or add) the KEXMEM.SYS line of CONFIG.SYS with options $R7 ("" or " /MAX=2048")
+Function KexMemLine
+  StrCpy $R9 $WINDIR 3
+  GetTempFileName $R3
+  FileOpen $R4 $R3 w
+  StrCpy $R8 "0"
+  ClearErrors
+  FileOpen $R0 "$R9CONFIG.SYS" r
+  IfErrors kml_end
+  kml_copy:
+    FileRead $R0 $R1
+    IfErrors kml_done
+    ClearErrors
+    ${WordFind} "$R1" "KEXMEM.SYS" "E+1{" $R2
+    IfErrors kml_keep
+      StrCmp $R8 "1" kml_copy
+      FileWrite $R4 "DEVICE=$WINDIR\KEXMEM.SYS$R7$\r$\n"
+      StrCpy $R8 "1"
+      Goto kml_copy
+    kml_keep:
+    FileWrite $R4 $R1
+    Goto kml_copy
+  kml_done:
+  FileClose $R0
+  kml_end:
+  FileClose $R4
+  StrCmp $R8 "1" kml_install
+    ;no KEXMEM line yet: ours first, then the rest
+    GetTempFileName $R5
+    FileOpen $R4 $R5 w
+    FileWrite $R4 "DEVICE=$WINDIR\KEXMEM.SYS$R7$\r$\n"
+    FileOpen $R0 $R3 r
+    kml_cat:
+      FileRead $R0 $R1
+      IfErrors kml_catdone
+      FileWrite $R4 $R1
+      Goto kml_cat
+    kml_catdone:
+    FileClose $R0
+    FileClose $R4
+    Delete $R3
+    StrCpy $R3 $R5
+  kml_install:
+  SetFileAttributes "$R9CONFIG.SYS" NORMAL
+  IfFileExists "$R9CONFIG.KEX" +2
+    CopyFiles /SILENT "$R9CONFIG.SYS" "$R9CONFIG.KEX"
+  CopyFiles /SILENT $R3 "$R9CONFIG.SYS"
+  Delete $R3
+FunctionEnd
+
+Section /o "Use up to 2 GB of RAM (experimental: patches Windows)" SECKEXMEMX
+  ;kexpatch.exe patches VMM32.VXD (original kept as VMM32.KEX) so Windows 98 SE
+  ;can use more than 1 GB; KEXMEM then reports up to 2 GB (tested limit).
+  !insertmacro KexUpd "media\KEXMEM.SYS" "$WINDIR" "KEXMEM.SYS"
+  SetOutPath "$INSTDIR"
+  File "kexpatch\kexpatch.exe"
+  ExecWait '"$INSTDIR\kexpatch.exe" /mem on' $0
+  StrCmp $0 "0" memx_ok
+  StrCmp $0 "1" memx_ok
+    MessageBox MB_ICONINFORMATION|MB_OK "This copy of Windows could not be patched to use more than 1 GB of RAM (kexpatch error $0: another Windows version, or VMM32.VXD changed by another program). Windows keeps using 1 GB." /SD IDOK
+    Goto memx_done
+  memx_ok:
+  StrCpy $R7 " /MAX=2048"
+  Call KexMemLine
+  ;Setup's 1 GB limit in SYSTEM.INI would still apply
+  DeleteINIStr "$WINDIR\system.ini" "386Enh" "MaxPhysPage"
+  ReadINIStr $R1 "$WINDIR\system.ini" "vcache" "MaxFileCache"
+  StrCmp $R1 "" 0 +2
+    WriteINIStr "$WINDIR\system.ini" "vcache" "MaxFileCache" "262144"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexMemX" "1"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexMem" "1"
+  SetRebootFlag true
+  memx_done:
+SectionEnd
+
+
 SectionGroupEnd
 
 SectionGroup "Network adapters" SECNETDRV
@@ -1318,6 +1395,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXINFO} $(DESC_KEXINFO)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXKEYS} $(DESC_KEXKEYS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEM} $(DESC_KEXMEM)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEMX} $(DESC_KEXMEMX)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAHCI} $(DESC_KEXAHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXNVME} $(DESC_KEXNVME)
@@ -1332,33 +1410,74 @@ SectionGroupEnd
 ;--------------------------------
 ;Uninstaller Section
 
+;Rewrite (or add) the KEXMEM.SYS line of CONFIG.SYS with options $R7 ("" or " /MAX=2048")
+Function un.KexMemLine
+  StrCpy $R9 $WINDIR 3
+  GetTempFileName $R3
+  FileOpen $R4 $R3 w
+  StrCpy $R8 "0"
+  ClearErrors
+  FileOpen $R0 "$R9CONFIG.SYS" r
+  IfErrors unkml_end
+  unkml_copy:
+    FileRead $R0 $R1
+    IfErrors unkml_done
+    ClearErrors
+    ${un.WordFind} "$R1" "KEXMEM.SYS" "E+1{" $R2
+    IfErrors unkml_keep
+      StrCmp $R8 "1" unkml_copy
+      FileWrite $R4 "DEVICE=$WINDIR\KEXMEM.SYS$R7$\r$\n"
+      StrCpy $R8 "1"
+      Goto unkml_copy
+    unkml_keep:
+    FileWrite $R4 $R1
+    Goto unkml_copy
+  unkml_done:
+  FileClose $R0
+  unkml_end:
+  FileClose $R4
+  StrCmp $R8 "1" unkml_install
+    ;no KEXMEM line yet: ours first, then the rest
+    GetTempFileName $R5
+    FileOpen $R4 $R5 w
+    FileWrite $R4 "DEVICE=$WINDIR\KEXMEM.SYS$R7$\r$\n"
+    FileOpen $R0 $R3 r
+    unkml_cat:
+      FileRead $R0 $R1
+      IfErrors ununkml_catdone
+      FileWrite $R4 $R1
+      Goto unkml_cat
+    ununkml_catdone:
+    FileClose $R0
+    FileClose $R4
+    Delete $R3
+    StrCpy $R3 $R5
+  unkml_install:
+  SetFileAttributes "$R9CONFIG.SYS" NORMAL
+  IfFileExists "$R9CONFIG.KEX" +2
+    CopyFiles /SILENT "$R9CONFIG.SYS" "$R9CONFIG.KEX"
+  CopyFiles /SILENT $R3 "$R9CONFIG.SYS"
+  Delete $R3
+FunctionEnd
+
 Section "Uninstall"
 
   SetDetailsView show
 
   ;Memory limit (KEXMEM.SYS): remove its CONFIG.SYS line
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexMemX"
+  StrCmp $0 "1" 0 un_kexmemx_done
+    ExecWait '"$INSTDIR\kexpatch.exe" /mem off'
+    Delete /REBOOTOK "$INSTDIR\kexpatch.exe"
+    WriteINIStr "$WINDIR\system.ini" "386Enh" "MaxPhysPage" "40000"
+    DeleteRegValue HKLM "Software\KernelEx\Components" "KexMemX"
+  un_kexmemx_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexMem"
   StrCmp $0 "1" 0 kexmem_un_done
-    StrCpy $R9 $WINDIR 3
-    GetTempFileName $R3
-    ClearErrors
-    FileOpen $R0 "$R9CONFIG.SYS" r
-    IfErrors kexmem_un_done
-    FileOpen $R4 $R3 w
-    kexmem_un_loop:
-      FileRead $R0 $R1
-      IfErrors kexmem_un_eof
-      ${un.WordFind} "$R1" "KEXMEM.SYS" "E+1{" $R2
-      IfErrors 0 kexmem_un_loop
-      FileWrite $R4 $R1
-      Goto kexmem_un_loop
-    kexmem_un_eof:
-    FileClose $R0
-    FileClose $R4
-    SetFileAttributes "$R9CONFIG.SYS" NORMAL
-    CopyFiles /SILENT $R3 "$R9CONFIG.SYS"
-    Delete $R3
-    Delete /REBOOTOK "$WINDIR\KEXMEM.SYS"
+    ;KEXMEM stays, set back to its 1 GB default: without it a PC with more than
+    ;1 GB of RAM would no longer start Windows (WININIT puts VMM32.KEX back)
+    StrCpy $R7 ""
+    Call un.KexMemLine
     DeleteRegValue HKLM "Software\KernelEx\Components" "KexMem"
   kexmem_un_done:
 

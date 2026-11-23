@@ -16,6 +16,8 @@ echo   If Windows stopped with an error, take a photo of this for a bug report.
 echo.
 KEXLOG %L%:\BOOTLOG.TXT
 pause
+if exist %L%:\WINDOWS\SYSTEM\VMM32.KEX KEXUNDO %L%: /ASK
+if errorlevel 2 goto end
 echo.
 :nolog
 rem Windows 98 already copied onto a disk: nothing more to do here

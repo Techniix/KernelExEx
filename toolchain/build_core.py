@@ -659,6 +659,8 @@ def build_kexmem(b: Build):
     run(["nasm", "-f", "bin", "-I", str(ROOT / "media/dos") + "/", "-o", b.out / "KEXMEM.SYS", ROOT / "media/dos/kexmem.asm"])
     # KEXLOG.COM: the install stick shows the end of Windows' start-up log with it
     run(["nasm", "-f", "bin", "-o", b.out / "KEXLOG.COM", ROOT / "media/dos/kexlog.asm"])
+    # KEXUNDO.COM: the install stick undoes the more-than-1-GB patch with it
+    run(["nasm", "-f", "bin", "-o", b.out / "KEXUNDO.COM", ROOT / "media/dos/kexundo.asm"])
 
 
 def build_kexmedia(b: Build):
