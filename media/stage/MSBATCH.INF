@@ -15,8 +15,10 @@ AddReg=KexRunOnce
 UpdateInis=KexMemory
 
 [KexRunOnce]
-; the KernelExEx installer at the first logon
-HKLM,"Software\Microsoft\Windows\CurrentVersion\RunOnce","KernelExEx",,"C:\KEXINST\KEXSETUP.EXE"
+; the KernelExEx installer at the first logon, once Setup has finished: the user's
+; RunOnce, not the machine's, which Setup works through in its last phase (the
+; installer's restart then cut Setup short, and Windows crashed at the next start)
+HKCU,"Software\Microsoft\Windows\CurrentVersion\RunOnce","KernelExEx",,"C:\KEXINST\KEXSETUP.EXE"
 
 [KexMemory]
 ; Windows 98 crashes with much more than 1 GB of RAM: use the first 1 GB
