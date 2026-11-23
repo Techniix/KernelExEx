@@ -56,6 +56,19 @@ boots to the desktop with KEXMEM and reports 1022 MB. The media puts it in CONFI
 for existing installs the KernelExEx installer has the component
 "More than 1 GB of RAM (memory limit)". PATCHMEM (R. Loew) is proprietary and is not used.
 
+Measured in QEMU (Korean Windows 98 SE, 2 GB machine, Westmere CPU, 2026-11-23):
+
+| Windows sees | VCACHE limit | Result |
+|---|---|---|
+| 1024 MB (KEXMEM default) | 256 MB | starts, 9 of 9 boots |
+| 1280 MB (KEXMEM /MAX=1280) | 256 MB or 64 MB | "Insufficient memory to initialize Windows" |
+| 1280 MB (MaxPhysPage=50000, no KEXMEM) | 64 MB | same |
+| 1536 / 1792 MB | 256 MB | same |
+
+So the limit is not VCACHE's size and not KEXMEM: VMM itself gives up during its
+protected-mode start-up (it is back in real mode, GDT/TSS in the system arena, when
+the message is shown). Going past 1 GB needs a change to VMM, below.
+
 ## Planned: our own large-memory patch (beyond 1 GB)
 
 KEXMEM caps Windows at about 1 GB. To use up to ~3.5 GB we need our own equivalent of
