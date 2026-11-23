@@ -13,7 +13,7 @@ static int fails, verbose;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
 /* ---------------- simulated devices ---------------- */
-enum { DEV_ALPS3, DEV_IMPS2, DEV_NONE };
+enum { DEV_ALPS3, DEV_IMPS2, DEV_NONE, DEV_SYN };
 static struct
 {
 	int type;
@@ -23,6 +23,9 @@ static struct
 	u8 reg[0x10000];
 	u8 rates[3];
 	int writes;
+	/* Synaptics */
+	int slices, sliced, mode, client;
+	unsigned identity, model, caps;
 } sim;
 
 static const u16 v3_cmd[16] = { PS2_SETPOLL, PS2_RESET_DIS, PS2_SETSCALE21, PS2_SETRATE, PS2_SETRATE, PS2_SETRATE,
@@ -56,6 +59,29 @@ int tp_ps2_command(struct tp *t, u8 *p, int cmd)
 		p[0] = 0xaa;
 		p[1] = 0;
 		sim.cmdmode = 0;
+		return 0;
+	}
+	if (sim.type == DEV_SYN)
+	{
+		if (cmd == PS2_SETSCALE11)
+			sim.slices = 0, sim.sliced = 0;
+		else if (cmd == PS2_SETRES)
+		{
+			sim.sliced = ((sim.sliced << 2) | (p[0] & 3)) & 0xff;
+			sim.slices++;
+		}
+		else if (cmd == PS2_GETINFO)
+		{
+			unsigned v = sim.sliced == 0 ? sim.identity : sim.sliced == 2 ? sim.caps : sim.sliced == 3 ? sim.model : 0;
+			p[0] = (u8) (v >> 16), p[1] = (u8) (v >> 8), p[2] = (u8) v;
+			sim.slices = 0, sim.sliced = 0;
+		}
+		else if (cmd == PS2_SETRATE && sim.slices >= 4 && p[0] == 0x14)
+			sim.mode = sim.sliced, sim.slices = 0, sim.sliced = 0;
+		else if (cmd == PS2_SETRATE && sim.slices >= 4 && p[0] == 0x28)
+			sim.client = sim.sliced, sim.slices = 0, sim.sliced = 0;
+		else if (cmd == PS2_GETID)
+			p[0] = 0;
 		return 0;
 	}
 	if (sim.type == DEV_IMPS2)
@@ -192,6 +218,29 @@ static void v3_stick(u8 *p, int dx, int dy, int buttons)
 	p[3] = (u8) (buttons & 7);
 	p[4] = 0x10;
 	p[5] = 0x3f;
+}
+
+/* Synaptics NEWABS packet (inverse of tp_syn_packet), our coordinates (0-based, y down) */
+static void syn_pkt(u8 *b, int x, int y, int z, int w, int buttons)
+{
+	int rx = x + 1472, ry = 4448 - y;
+	b[0] = (u8) (0x80 | ((w & 0x0c) << 2) | ((w & 0x02) << 1) | (buttons & 3));
+	b[1] = (u8) ((((ry >> 8) & 0x0f) << 4) | ((rx >> 8) & 0x0f));
+	b[2] = (u8) z;
+	b[3] = (u8) (0xc0 | (((rx >> 12) & 1) << 4) | (((ry >> 12) & 1) << 5) | ((w & 1) << 2) | (buttons & 3));
+	b[4] = (u8) rx;
+	b[5] = (u8) ry;
+}
+
+static void syn_stick(u8 *b, int dx, int dy, int buttons)
+{
+	int y = -dy;
+	b[0] = 0x84 | 0x00;
+	b[1] = (u8) (0x08 | (buttons & 7) | (dx < 0 ? 0x10 : 0) | (y < 0 ? 0x20 : 0));
+	b[2] = 0;
+	b[3] = 0xc4;
+	b[4] = (u8) dx;
+	b[5] = (u8) y;
 }
 
 static struct tp T;
@@ -442,6 +491,82 @@ int main(int argc, char **argv_)
 		wait_ms(300);
 	}
 	CHECK(acc.dx > 0, "recovers after garbage: dx %d", acc.dx);
+
+	/* ---- Synaptics ---- */
+	memset(&sim, 0, sizeof(sim));
+	sim.type = DEV_SYN;
+	sim.identity = 0x024717;   /* v7.2 */
+	sim.model = 0x0000b1;      /* NEWABS */
+	sim.caps = 0x800083;       /* extended, pass-through, multi-finger, palm */
+	CHECK(tp_init(&T) == 0 && T.kind == TP_SYNAPTICS, "Synaptics detected: kind %d", T.kind);
+	CHECK(sim.mode == 0xc1, "mode absolute|high rate|W: %02x", sim.mode);
+	CHECK(sim.client == 0xf4, "pass-through stick enabled: %02x", sim.client);
+	CHECK(T.has_stick && !strncmp(T.name, "Synaptics v7.2", 14), "name '%s'", T.name);
+	{
+		u8 b[6];
+		reset_acc();
+		last_buttons = 0;
+		now = 50000;
+		for (i = 0; i < 20; i++)
+		{
+			syn_pkt(b, 1000 + i * 40, 1000 + i * 20, 60, 4, 0);
+			feed(b, 6);
+			now += 12;
+		}
+		syn_pkt(b, 0, 0, 0, 0, 0);
+		feed(b, 6);
+		wait_ms(300);
+		CHECK(acc.dx > 100 && acc.dy > 40 && presses[0] == 0, "syn move: %d %d", acc.dx, acc.dy);
+		/* tap */
+		reset_acc();
+		syn_pkt(b, 2000, 1500, 60, 4, 0);
+		feed(b, 6);
+		now += 30;
+		syn_pkt(b, 0, 0, 0, 0, 0);
+		feed(b, 6);
+		wait_ms(300);
+		CHECK(presses[0] == 1 && releases[0] == 1, "syn tap: %d %d", presses[0], releases[0]);
+		/* two fingers (W = 0) moving up: scroll up */
+		reset_acc();
+		for (i = 0; i < 20; i++)
+		{
+			syn_pkt(b, 2000, 2500 - i * 60, 60, 0, 0);
+			feed(b, 6);
+			now += 12;
+		}
+		syn_pkt(b, 0, 0, 0, 0, 0);
+		feed(b, 6);
+		wait_ms(300);
+		CHECK(acc.wheel >= 360 && acc.dx == 0 && acc.dy == 0, "syn two-finger scroll: %d (%d %d)", acc.wheel, acc.dx, acc.dy);
+		/* a palm (W = 12) moves nothing and clicks nothing */
+		reset_acc();
+		for (i = 0; i < 10; i++)
+		{
+			syn_pkt(b, 1500 + i * 50, 1500, 120, 12, 0);
+			feed(b, 6);
+			now += 12;
+		}
+		syn_pkt(b, 0, 0, 0, 0, 0);
+		feed(b, 6);
+		wait_ms(300);
+		CHECK(acc.dx == 0 && presses[0] == 0, "syn palm ignored: %d", acc.dx);
+		/* hardware buttons */
+		reset_acc();
+		syn_pkt(b, 0, 0, 0, 0, 2);
+		feed(b, 6);
+		syn_pkt(b, 0, 0, 0, 0, 0);
+		feed(b, 6);
+		CHECK(presses[1] == 1 && releases[1] == 1, "syn right button: %d %d", presses[1], releases[1]);
+		/* the stick through the pass-through port */
+		reset_acc();
+		for (i = 0; i < 5; i++)
+		{
+			syn_stick(b, 4, -2, 0);
+			feed(b, 6);
+			now += 10;
+		}
+		CHECK(acc.dx == 20 && acc.dy == -10, "syn stick: %d %d", acc.dx, acc.dy);
+	}
 
 	/* ---- IntelliMouse fallback ---- */
 	memset(&sim, 0, sizeof(sim));

@@ -103,6 +103,12 @@ struct tp_alps
 	int v4_fingers, v4_x2, v4_y2;
 };
 
+struct tp_syn
+{
+	u32 identity, model, caps, ext0c;
+	int newabs;
+};
+
 struct tp
 {
 	void *ctx;                 /* platform data */
@@ -115,6 +121,7 @@ struct tp
 	int x_max, y_max;          /* touchpad range */
 	int has_stick;
 	struct tp_alps alps;
+	struct tp_syn syn;
 	struct tp_settings set;
 	/* gesture state */
 	struct
@@ -147,6 +154,10 @@ int tp_alps_detect(struct tp *t);
 int tp_alps_init(struct tp *t);
 int tp_alps_packet(struct tp *t, struct tp_frame *f, struct tp_out *stick, int *have_stick, int *have_frame);
 int tp_alps_valid_byte(struct tp *t, int idx, u8 b);
+int tp_syn_detect(struct tp *t);
+int tp_syn_init(struct tp *t);
+int tp_syn_packet(struct tp *t, struct tp_frame *f, struct tp_out *stick, int *have_stick, int *have_frame);
+int tp_syn_valid_byte(struct tp *t, int idx, u8 b);
 void tp_gesture(struct tp *t, const struct tp_frame *f, u32 now_ms, struct tp_out *out);
 int tp_gesture_tick(struct tp *t, u32 now_ms, struct tp_out *out);
 void tp_stick(struct tp *t, int dx, int dy, int buttons, struct tp_out *out);

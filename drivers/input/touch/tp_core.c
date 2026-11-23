@@ -78,6 +78,18 @@ int tp_init(struct tp *t)
 	}
 	CMD(t, NULL, PS2_DISABLE);
 
+	if (tp_syn_detect(t) == 0)
+	{
+		if (tp_syn_init(t) == 0)
+		{
+			t->kind = TP_SYNAPTICS;
+			tp_log(t, "touch: %s, %dx%d\n", t->name, t->x_max, t->y_max);
+			return 0;
+		}
+		tp_log(t, "touch: Synaptics set-up failed, using IntelliMouse mode\n");
+		p[0] = p[1] = 0;
+		CMD(t, p, PS2_RESET_BAT);
+	}
 	if (tp_alps_detect(t) == 0)
 	{
 		if (tp_alps_init(t) == 0)
@@ -139,6 +151,8 @@ static int valid_byte(struct tp *t, int idx, u8 b)
 {
 	if (t->kind == TP_ALPS)
 		return tp_alps_valid_byte(t, idx, b);
+	if (t->kind == TP_SYNAPTICS)
+		return tp_syn_valid_byte(t, idx, b);
 	if (idx == 0)
 		return (b & 0x08) != 0;   /* bit 3 is always 1 in a PS/2 first byte */
 	return 1;
@@ -149,9 +163,12 @@ static int finish(struct tp *t, u32 now, struct tp_out *out)
 	struct tp_frame f;
 	struct tp_out st;
 	int hs, hf, r = 0;
-	if (t->kind != TP_ALPS)
+	if (t->kind == TP_ALPS)
+		tp_alps_packet(t, &f, &st, &hs, &hf);
+	else if (t->kind == TP_SYNAPTICS)
+		tp_syn_packet(t, &f, &st, &hs, &hf);
+	else
 		return mouse_packet(t, out);
-	tp_alps_packet(t, &f, &st, &hs, &hf);
 	memset(out, 0, sizeof(*out));
 	if (hs)
 	{
@@ -206,7 +223,7 @@ int tp_byte(struct tp *t, u8 b, u32 now, struct tp_out *out)
 
 int tp_tick(struct tp *t, u32 now, struct tp_out *out)
 {
-	if (t->kind != TP_ALPS)
+	if (t->kind != TP_ALPS && t->kind != TP_SYNAPTICS)
 		return 0;
 	return tp_gesture_tick(t, now, out);
 }
@@ -279,7 +296,7 @@ void tp_gesture(struct tp *t, const struct tp_frame *f, u32 now, struct tp_out *
 {
 	int fingers = f->fingers, was = t->g.fingers;
 	memset(o, 0, sizeof(*o));
-	if (t->set.palm && f->width >= 8)
+	if (t->set.palm && f->width >= 10)
 		fingers = 0;   /* a palm */
 
 	if (fingers && !was)

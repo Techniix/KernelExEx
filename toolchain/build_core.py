@@ -601,7 +601,7 @@ def build_kextouch(b: Build):
     backend (drivers/kedcl)."""
     d = ROOT / "drivers/input/touch"
     k = ROOT / "drivers/kedcl"
-    srcs = [d / "kextouch.c", d / "tp_core.c", d / "tp_alps.c", k / "kexos_vxd.c"]
+    srcs = [d / "kextouch.c", d / "tp_core.c", d / "tp_alps.c", d / "tp_syn.c", k / "kexos_vxd.c"]
     flags = [f"-I{d}", f"-I{k}", "-mgeneral-regs-only", "-fno-jump-tables", "-mno-stack-arg-probe",
              "-fno-builtin", "-ffreestanding"]
     if b.debugcon:
