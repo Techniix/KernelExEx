@@ -8,6 +8,7 @@
 #define KEXBSD_BUILD
 #include "kexbsd/kern.h"
 #include "irqlock.h"
+#include "../../kedcl/kexos.h"
 
 #define KEXBSD_TAG 'dsbK'
 
@@ -26,20 +27,7 @@ static void copy(void *d, const void *s, size_t n)
 		*a++ = *b++;
 }
 
-/* the compiler may emit these for structure copies and initialisers */
-void *__cdecl memcpy(void *d, const void *s, size_t n)
-{
-	copy(d, s, n);
-	return d;
-}
-
-void *__cdecl memset(void *d, int c, size_t n)
-{
-	unsigned char *b = (unsigned char *) d;
-	while (n--)
-		*b++ = (unsigned char) c;
-	return d;
-}
+/* memcpy/memset (which the compiler also emits for structure copies): from KEDCL */
 
 /* ---- malloc(9) ---------------------------------------------------------- */
 
@@ -529,12 +517,8 @@ void microtime(struct timeval *tv)
 
 void DELAY(int usec)
 {
-	while (usec > 0)
-	{
-		int n = usec > 50 ? 50 : usec;
-		KeStallExecutionProcessor((ULONG) n);
-		usec -= n;
-	}
+	if (usec > 0)
+		kexos_stall_us((kx_u32) usec);
 }
 
 /* ---- printf and the log ring -------------------------------------------- */

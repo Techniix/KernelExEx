@@ -4,6 +4,7 @@
  */
 #define KEXBSD_BUILD
 #include "kexbsd/bus.h"
+#include "../../kedcl/kexos.h"
 
 static void zero(void *p, size_t n)
 {
@@ -50,7 +51,7 @@ void kexbsd_device_destroy(device_t d)
 		return;
 	for (i = 0; i < d->nres; i++)
 		if (d->res[i].va)
-			MmUnmapIoSpace((PVOID) d->res[i].va, d->res[i].size);
+			kexos_mmio_unmap((void *) d->res[i].va, d->res[i].size);
 	kexbsd_free(d->softc, M_DEVBUF);
 	kexbsd_free(d, M_DEVBUF);
 }
@@ -89,9 +90,8 @@ struct resource *bus_alloc_resource_any(device_t dev, int type, int *rid, unsign
 				return NULL;
 			if (type == SYS_RES_MEMORY && !r->va)
 			{
-				PHYSICAL_ADDRESS pa;
-				pa.QuadPart = r->start;
-				r->va = (volatile uint8_t *) MmMapIoSpace(pa, r->size, MmNonCached);
+				r->va = (volatile uint8_t *) kexos_mmio_map((kx_u32) r->start, (kx_u32) ((uint64_t) r->start >> 32),
+				                                            r->size);
 				if (!r->va)
 					return NULL;
 			}
@@ -114,7 +114,7 @@ int bus_release_resource(device_t dev, int type, int rid, struct resource *r)
 	(void) rid;
 	if (r && r->type == SYS_RES_MEMORY && r->va)
 	{
-		MmUnmapIoSpace((PVOID) r->va, r->size);
+		kexos_mmio_unmap((void *) r->va, r->size);
 		r->va = NULL;
 	}
 	return 0;
@@ -330,18 +330,11 @@ int bus_dma_tag_destroy(bus_dma_tag_t t)
 	return 0;
 }
 
+/* contiguous memory below lowaddr, aligned: KEDCL (which remembers the block's start) */
 static void *contig_alloc(bus_size_t size, bus_addr_t lowaddr, bus_size_t align, void **base)
 {
-	PHYSICAL_ADDRESS hi;
-	unsigned char *p;
-	bus_size_t extra = align > PAGE_SIZE ? align : 0;
-	hi.QuadPart = lowaddr ? lowaddr : 0xFFFFFFFFu;
-	p = (unsigned char *) MmAllocateContiguousMemory(size + extra, hi);
+	void *p = kexos_dma_alloc_ex((kx_u32) size, (kx_u32) lowaddr, (kx_u32) align, NULL);
 	*base = p;
-	if (!p)
-		return NULL;
-	if (extra)
-		p = (unsigned char *) (((ULONG_PTR) p + align - 1) & ~(ULONG_PTR) (align - 1));
 	return p;
 }
 
@@ -362,7 +355,7 @@ int bus_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t m)
 	if (!m)
 		return 0;
 	if (m->bounce_va)
-		MmFreeContiguousMemory(m->bounce_va);
+		kexos_dma_free(m->bounce_va, 0);
 	kexbsd_free(m, M_DEVBUF);
 	return 0;
 }
@@ -391,7 +384,7 @@ void bus_dmamem_free(bus_dma_tag_t t, void *vaddr, bus_dmamap_t m)
 {
 	(void) vaddr;
 	if (m && m->mem_base)
-		MmFreeContiguousMemory(m->mem_base);
+		kexos_dma_free(m->mem_base, 0);
 	if (m)
 	{
 		m->mem_base = NULL;
@@ -452,7 +445,7 @@ int bus_dmamap_load(bus_dma_tag_t t, bus_dmamap_t m, void *buf, bus_size_t len, 
 		{
 			void *base;
 			if (m->bounce_va)
-				MmFreeContiguousMemory(m->bounce_va);
+				kexos_dma_free(m->bounce_va, 0);
 			m->bounce_va = contig_alloc(t->maxsize, t->lowaddr, PAGE_SIZE, &base);
 			m->bounce_size = m->bounce_va ? t->maxsize : 0;
 			if (!m->bounce_va)

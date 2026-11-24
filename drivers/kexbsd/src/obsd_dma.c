@@ -9,6 +9,7 @@
  */
 #define KEXBSD_BUILD
 #include "obsd/kexobsd.h"
+#include "../../kedcl/kexos.h"
 
 /* dmamem allocations, so map/free can find the virtual address of a segment */
 struct dmamem
@@ -163,7 +164,7 @@ int obsd_bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t align, bu
                           bus_dma_segment_t *segs, int nsegs, int *rsegs, int flags)
 {
 	struct dmamem *d;
-	PHYSICAL_ADDRESS hi;
+	kx_u32 phys = 0;
 	KIRQL irql;
 	(void) t;
 	(void) nsegs;
@@ -174,16 +175,14 @@ int obsd_bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t align, bu
 	d = (struct dmamem *) kexbsd_malloc(sizeof(*d), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (!d)
 		return ENOMEM;
-	hi.QuadPart = 0xFFFFFFFFu;
 	d->size = (size + PAGE_SIZE - 1) & ~(bus_size_t) (PAGE_SIZE - 1);
-	d->va = MmAllocateContiguousMemory(d->size, hi);
+	d->va = kexos_dma_alloc((kx_u32) d->size, &phys);   /* zeroed, below 4 GB */
 	if (!d->va)
 	{
 		kexbsd_free(d, M_DEVBUF);
 		return ENOMEM;
 	}
-	d->phys = MmGetPhysicalAddress(d->va).LowPart;
-	memset(d->va, 0, d->size);
+	d->phys = phys;
 	list_lock(&irql);
 	d->next = dmamem_list;
 	dmamem_list = d;
@@ -218,7 +217,7 @@ void obsd_bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 	d = find(segs[0].ds_addr, 1);
 	if (d)
 	{
-		MmFreeContiguousMemory(d->va);
+		kexos_dma_free(d->va, (kx_u32) d->size);
 		kexbsd_free(d, M_DEVBUF);
 	}
 }
