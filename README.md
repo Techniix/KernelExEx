@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 28 | [KernelExEx-1.0.0-testbuild28.zip](KernelExEx-1.0.0-testbuild28.zip) | [06f6578](https://github.com/Techniix/KernelExEx/commit/06f657879e7b80a1961debc8204e030b40ac0137) | Swap file in RAM above 4 GB (KEXRAM.VXD, RAM disk Z:); E6410 is the test machine |
 | 27 | [KernelExEx-1.0.0-testbuild27.zip](KernelExEx-1.0.0-testbuild27.zip) | [5fd744c](https://github.com/Techniix/KernelExEx/commit/5fd744c57a46595b812edb173e5c9e0f1fb3c0e6) | All RAM up to ~3.5 GB (PATCHMEM's full VMM set + our merge); 2 GB option kept |
 | 26 | [KernelExEx-1.0.0-testbuild26.zip](KernelExEx-1.0.0-testbuild26.zip) | [08bbba9](https://github.com/Techniix/KernelExEx/commit/08bbba95083e9701a7fb0ed8f06de059bf6d86ae) | Use up to 2 GB of RAM (installer option, patches VMM); stick offers to undo it (KEXUNDO) |
 | 25 | [KernelExEx-1.0.0-testbuild25.zip](KernelExEx-1.0.0-testbuild25.zip) | [4c8e772](https://github.com/Techniix/KernelExEx/commit/4c8e77208e4e3fa2dad9c824224342815c89f248) | Install stick maker for Windows (one window), Setup no longer cut short by the KernelExEx installer, /p i, boot log on the stick, VESA component |
