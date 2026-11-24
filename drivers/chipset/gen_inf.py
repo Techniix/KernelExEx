@@ -21,7 +21,11 @@ RANGES = [(0x2440, 0x245F), (0x2480, 0x248F), (0x24C0, 0x24DF), (0x25A0, 0x25AF)
           (0x3340, 0x3341), (0x3580, 0x3584), (0x2588, 0x2589), (0x25D0, 0x25FF), (0x3590, 0x359F),
           # ICH8, ICH9, ICH10 and the G31/G33/P35/G41/G45/P45/X38/X48 hosts
           (0x2810, 0x285F), (0x2910, 0x294F), (0x3A00, 0x3A7F), (0x29B0, 0x29B1), (0x29C0, 0x29C1), (0x29D0, 0x29D1),
-          (0x29E0, 0x29E1), (0x29F0, 0x29F1), (0x2E00, 0x2E33), (0x2A00, 0x2A01), (0x2A40, 0x2A41)]
+          (0x29E0, 0x29E1), (0x29F0, 0x29F1), (0x2E00, 0x2E33), (0x2A00, 0x2A01), (0x2A40, 0x2A41),
+          # 5 Series / 3400 (Ibex Peak: Latitude E6510 and friends), first Core i3/i5/i7 hosts
+          # (Arrandale/Clarkdale 0040-004B, Lynnfield DMI/ports D130-D13B) and the
+          # processors' own register devices (QuickPath, memory controller: 2C50-2DB3, D150-D15F)
+          (0x3B00, 0x3B7F), (0x0040, 0x004B), (0x2C50, 0x2DB3), (0xD130, 0xD15F)]
 # SATA in RAID-only mode (RAID class, not IDE): not ours
 RAID_ONLY = {0x24DF, 0x2652, 0x2653}
 # 98 SE knows these already (82801AA/AB)
@@ -30,6 +34,17 @@ KNOWN = {0x2410, 0x2411, 0x2412, 0x2413, 0x2418, 0x2420, 0x2421, 0x2422, 0x2423,
 
 def classify(name):
     n = name.lower()
+    # devices only firmware or a management agent use: named, no driver. The ME's
+    # IDE-redirection function must not get the IDE driver: no drives behind it, and
+    # probing its channels stalls start-up
+    if any(k in n for k in ("quickpath", "qpi ", "non-core", "integrated memory controller", "address decoder",
+                            "mirror port", "reserved", "thermal subsystem", "heci", "kt controller", "veci",
+                            "ider controller", "semaphore and scratchpad", "system management registers",
+                            "system control and status", "miscellaneous registers", "routing and protocol")) \
+            or n.endswith("processor dmi") or n.endswith("qpi link"):
+        return "chip", "NO_DRV"
+    if "graphics" in n or "high definition audio" in n or "lan controller" in n:
+        return None, None
     if "lpc" in n or "isa bridge" in n:
         return "chip", "ISA_DRV"
     if "smbus" in n:
@@ -43,7 +58,7 @@ def classify(name):
     if ("ide" in n or "ultra ata" in n or "pata" in n or ("sata" in n and "ide" in n)
             or ("serial ata" in n and "raid" not in n and "ahci" not in n)) and "raid" not in n and "ahci" not in n:
         return "ide", "DUAL_GOOD_IDE"
-    if "agp" in n or "pci bridge" in n or "pci express root port" in n or "hub interface to pci" in n \
+    if "agp" in n or "pci bridge" in n or "pci express root port" in n or "x16 root port" in n or "hub interface to pci" in n \
             or "pci-to-pci" in n or "pci express port" in n:
         return "chip", "PCI_BRIDGE_DRV"
     if "memory controller hub" in n or "dram controller" in n or "host bridge" in n or "host-hub" in n \

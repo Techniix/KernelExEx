@@ -500,7 +500,21 @@ Function KexChipRedetect
     IfErrors 0 kcr_ours
     ClearErrors
     ${WordFind} "${KEXCHIP_IDS1}" ";$R3;" "E+1{" $R2
-    IfErrors kcr_loop kcr_ours
+    IfErrors 0 kcr_ours
+    !if ${KEXCHIP_NCHUNKS} > 2
+    ClearErrors
+    ${WordFind} "${KEXCHIP_IDS2}" ";$R3;" "E+1{" $R2
+    IfErrors 0 kcr_ours
+    !endif
+    !if ${KEXCHIP_NCHUNKS} > 3
+    ClearErrors
+    ${WordFind} "${KEXCHIP_IDS3}" ";$R3;" "E+1{" $R2
+    IfErrors 0 kcr_ours
+    !endif
+    !if ${KEXCHIP_NCHUNKS} > 4
+      !error "kexchip_ids.nsh: more than 4 chunks, extend KexChipRedetect"
+    !endif
+    Goto kcr_loop
   kcr_ours:
     StrCpy $R6 0
     kcr_inst:

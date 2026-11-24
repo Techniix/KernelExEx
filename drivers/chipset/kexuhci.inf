@@ -61,6 +61,15 @@ Provider=%KEX%
 %i3A67%=KEX_UHCI,PCI\VEN_8086&DEV_3A67
 %i3A68%=KEX_UHCI,PCI\VEN_8086&DEV_3A68
 %i3A69%=KEX_UHCI,PCI\VEN_8086&DEV_3A69
+%i3B36%=KEX_UHCI,PCI\VEN_8086&DEV_3B36
+%i3B37%=KEX_UHCI,PCI\VEN_8086&DEV_3B37
+%i3B38%=KEX_UHCI,PCI\VEN_8086&DEV_3B38
+%i3B39%=KEX_UHCI,PCI\VEN_8086&DEV_3B39
+%i3B3A%=KEX_UHCI,PCI\VEN_8086&DEV_3B3A
+%i3B3B%=KEX_UHCI,PCI\VEN_8086&DEV_3B3B
+%i3B3E%=KEX_UHCI,PCI\VEN_8086&DEV_3B3E
+%i3B3F%=KEX_UHCI,PCI\VEN_8086&DEV_3B3F
+%i3B40%=KEX_UHCI,PCI\VEN_8086&DEV_3B40
 
 [ControlFlags]
 ExcludeFromSelect=PCI\VEN_8086&DEV_2442
@@ -109,6 +118,15 @@ ExcludeFromSelect=PCI\VEN_8086&DEV_3A66
 ExcludeFromSelect=PCI\VEN_8086&DEV_3A67
 ExcludeFromSelect=PCI\VEN_8086&DEV_3A68
 ExcludeFromSelect=PCI\VEN_8086&DEV_3A69
+ExcludeFromSelect=PCI\VEN_8086&DEV_3B36
+ExcludeFromSelect=PCI\VEN_8086&DEV_3B37
+ExcludeFromSelect=PCI\VEN_8086&DEV_3B38
+ExcludeFromSelect=PCI\VEN_8086&DEV_3B39
+ExcludeFromSelect=PCI\VEN_8086&DEV_3B3A
+ExcludeFromSelect=PCI\VEN_8086&DEV_3B3B
+ExcludeFromSelect=PCI\VEN_8086&DEV_3B3E
+ExcludeFromSelect=PCI\VEN_8086&DEV_3B3F
+ExcludeFromSelect=PCI\VEN_8086&DEV_3B40
 
 [KEX_UHCI]
 AddReg=KEX_UHCI.AddReg,KEX_USB.AddReg
@@ -184,3 +202,12 @@ i3A66="Intel 82801JD/DO (ICH10 Family) USB UHCI Controller #3"
 i3A67="Intel 82801JD/DO (ICH10 Family) USB UHCI Controller #4"
 i3A68="Intel 82801JD/DO (ICH10 Family) USB UHCI Controller #5"
 i3A69="Intel 82801JD/DO (ICH10 Family) USB UHCI Controller #6"
+i3B36="Intel 5 Series/3400 Series Chipset USB Universal Host Controller"
+i3B37="Intel 5 Series/3400 Series Chipset USB Universal Host Controller"
+i3B38="Intel 5 Series/3400 Series Chipset USB Universal Host Controller"
+i3B39="Intel 5 Series/3400 Series Chipset USB Universal Host Controller"
+i3B3A="Intel 5 Series/3400 Series Chipset USB Universal Host Controller"
+i3B3B="Intel 5 Series/3400 Series Chipset USB Universal Host Controller"
+i3B3E="Intel 5 Series/3400 Series Chipset USB Universal Host Controller"
+i3B3F="Intel 5 Series/3400 Series Chipset USB Universal Host Controller"
+i3B40="Intel 5 Series/3400 Series Chipset USB Universal Host Controller"
