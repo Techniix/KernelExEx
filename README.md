@@ -7,6 +7,7 @@ Each build links to the `main` commit it was built from. The newest build is at 
 
 | Build | Zip | Source | What's new |
 |---|---|---|---|
+| 31 | [KernelExEx-1.0.0-testbuild31.zip](KernelExEx-1.0.0-testbuild31.zip) | [610a737](https://github.com/Techniix/KernelExEx/commit/610a737f36b60cd581b788eef155ca3af500f330) | Atheros Wi-Fi (AR9285 and others, OpenBSD athn) first try; includes builds 29-30 |
 | 30 | [KernelExEx-1.0.0-testbuild30.zip](KernelExEx-1.0.0-testbuild30.zip) | [a01648a](https://github.com/Techniix/KernelExEx/commit/a01648ad4c4330951d98b73e6d7b264b4a0c3ddc) | E6510 chipset: Intel 5 Series and Core i5 devices named (no more PCI Card); includes build 29 |
 | 29 | [KernelExEx-1.0.0-testbuild29.zip](KernelExEx-1.0.0-testbuild29.zip) | [930960a](https://github.com/Techniix/KernelExEx/commit/930960a432e4095174b8eea7965f2833fa8f6e57) | E6510: Ethernet/sound drivers found for devices Windows met before (INFs in INF, kexinfo /reinstall); touchpad interrupt fix and diagnostics; driver files in the hardware report |
 | 28 | [KernelExEx-1.0.0-testbuild28.zip](KernelExEx-1.0.0-testbuild28.zip) | [06f6578](https://github.com/Techniix/KernelExEx/commit/06f657879e7b80a1961debc8204e030b40ac0137) | Swap file in RAM above 4 GB (KEXRAM.VXD, RAM disk Z:); E6410 is the test machine |
