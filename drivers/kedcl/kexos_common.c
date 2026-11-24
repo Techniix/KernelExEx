@@ -5,20 +5,23 @@
 #include "kexos.h"
 
 /* ---- C basics ---- */
+/* rep stosd/movsd for the bulk, bytes for the tail (network buffers, DMA rings);
+   inline assembly, so the compiler cannot turn the loops back into calls to us */
 void *memset(void *d, int c, unsigned n)
 {
-	unsigned char *p = (unsigned char *) d;
-	while (n--)
-		*p++ = (unsigned char) c;
+	unsigned v = (unsigned char) c * 0x01010101u, q = n >> 2, r = n & 3;
+	void *p = d;
+	__asm__ __volatile__("cld; rep stosl" : "+D"(p), "+c"(q) : "a"(v) : "memory");
+	__asm__ __volatile__("rep stosb" : "+D"(p), "+c"(r) : "a"(v) : "memory");
 	return d;
 }
 
 void *memcpy(void *d, const void *s, unsigned n)
 {
-	unsigned char *p = (unsigned char *) d;
-	const unsigned char *q = (const unsigned char *) s;
-	while (n--)
-		*p++ = *q++;
+	unsigned q = n >> 2, r = n & 3;
+	void *p = d;
+	__asm__ __volatile__("cld; rep movsl" : "+D"(p), "+S"(s), "+c"(q) : : "memory");
+	__asm__ __volatile__("rep movsb" : "+D"(p), "+S"(s), "+c"(r) : : "memory");
 	return d;
 }
 

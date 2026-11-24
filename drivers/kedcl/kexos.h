@@ -74,6 +74,9 @@ static __inline void kexos_wr32(volatile void *b, kx_u32 o, kx_u32 v) { *(volati
 
 /* ---- DMA memory: physically contiguous, below 4 GB, zeroed; *phys = its bus address ---- */
 void *kexos_dma_alloc(kx_u32 size, kx_u32 *phys);
+/* the same, below max_phys (last usable byte; 0 = 4 GB) and aligned to align (a power of
+   two; page alignment is always given) */
+void *kexos_dma_alloc_ex(kx_u32 size, kx_u32 max_phys, kx_u32 align, kx_u32 *phys);
 void kexos_dma_free(void *va, kx_u32 size);
 
 /* ---- short waits (busy; for register handshakes) ---- */

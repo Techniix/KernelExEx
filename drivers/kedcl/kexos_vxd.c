@@ -28,6 +28,10 @@ static struct
 {
 	void (*fn)(void *);
 	void *ref;
+	/* 12 bytes, not 8: an index scaled by 8 off ECX encodes as SIB byte CD, and
+	   an address byte 20 after it reads as INT 20h to check_vxd and to anyone
+	   disassembling the image */
+	kx_u32 pad;
 } timers[NTIMER];
 
 __attribute__((used)) static void timer_fire(int slot)
@@ -195,15 +199,15 @@ static struct
 	kx_u32 handle;
 } dma_blocks[8];
 
-void *kexos_dma_alloc(kx_u32 size, kx_u32 *phys)
+void *kexos_dma_alloc_ex(kx_u32 size, kx_u32 max_phys, kx_u32 align, kx_u32 *phys)
 {
-	kx_u32 p = 0, i;
+	kx_u32 p = 0, i, mask = align > 4096 ? (align >> 12) - 1 : 0;
 	unsigned long long r;
 	for (i = 0; i < 8 && dma_blocks[i].va; i++)
 		;
 	if (i == 8)
 		return 0;
-	r = vmm_PageAllocate((size + 4095) >> 12, PG_SYS, 0, 0, 0, 0xFFFFF, &p,
+	r = vmm_PageAllocate((size + 4095) >> 12, PG_SYS, 0, mask, 0, max_phys ? max_phys >> 12 : 0xFFFFF, &p,
 	                     PAGEZEROINIT | PAGEUSEALIGN | PAGECONTIG | PAGEFIXED);
 	if (!(kx_u32) r)
 		return 0;
@@ -212,6 +216,11 @@ void *kexos_dma_alloc(kx_u32 size, kx_u32 *phys)
 	if (phys)
 		*phys = p;
 	return dma_blocks[i].va;
+}
+
+void *kexos_dma_alloc(kx_u32 size, kx_u32 *phys)
+{
+	return kexos_dma_alloc_ex(size, 0, 0, phys);
 }
 
 void kexos_dma_free(void *va, kx_u32 size)

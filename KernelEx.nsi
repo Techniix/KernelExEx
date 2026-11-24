@@ -716,7 +716,7 @@ Function KexWifiProgram
 FunctionEnd
 
 ;--------------------------------
-;Driver INFs for INF\OTHER, made by toolchain/infother.py at build time
+;Driver INFs for Windows' INF folder, made by toolchain/infother.py at build time
 
 !include "infother.nsh"
 
@@ -1442,6 +1442,20 @@ Section /o "Browse old websites through Protoweb" SECPROTOWEB
 SectionEnd
 
 SectionGroupEnd
+
+;Last: devices that Windows recorded as "drivers not installed" before our INFs
+;were in the INF folder are set up again at the restart. Windows offers drivers only
+;for new devices, so without this they would never get ours (a Latitude E6510's
+;Ethernet and sound, for one). kexinfo /reinstall makes Windows forget only devices our INFs
+;support, and leaves disk controllers alone.
+Section "-KexReinstall"
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File "/oname=$PLUGINSDIR\kexinfo.exe" "kexinfo\kexinfo.exe"
+  DetailPrint "Looking for devices that are waiting for a driver"
+  ExecWait '"$PLUGINSDIR\kexinfo.exe" /reinstall'
+  SetOutPath "$INSTDIR"
+SectionEnd
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SECPROTOWEB} $(DESC_PROTOWEB)

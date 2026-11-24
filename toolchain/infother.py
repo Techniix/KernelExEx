@@ -1,7 +1,8 @@
-"""Driver INFs for Windows' own INF\\OTHER folder.
+"""Driver INFs for Windows' own INF folder (named KernelExEx<name>.inf).
 
 Windows 98's New Hardware wizard does not search the folders in DevicePath;
-it finds a driver by itself only through the INF folder (INF and INF\\OTHER).
+it finds a driver by itself only through the INF folder (and, in our tests, not
+through INF\\OTHER).
 An INF there no longer sits beside its driver files, so Windows would ask
 for the "KernelExEx drivers" disk. So for each driver INF setup ships, this
 makes:
@@ -10,7 +11,7 @@ makes:
                         usbd.sys or ntmap.sys, stay: those come from the
                         Windows CD as always);
   infother.nsh          macro KexInfOther_<name>: puts those files where the
-                        INF would have, and the INF into INF\\OTHER;
+                        INF would have, and the INF into INF;
                         macro un.KexInfOther_<name>: removes the INF again.
 """
 import re
@@ -93,9 +94,14 @@ def process(inf: Path, stage: Path, out_dir: Path):
             lines += [f'  CreateDirectory "{d}"', f'  GetTempFileName $0 "{d}"',
                       f'  File /oname=$0 "{str(src).replace("/", chr(92))}"',
                       f'  Delete "{d}\\{f}"', f'  Rename /REBOOTOK $0 "{d}\\{f}"']
-    target = f"$WINDIR\\INF\\OTHER\\KernelExEx{base}.inf"
-    lines += ['  CreateDirectory "$WINDIR\\INF\\OTHER"', f'  File "/oname={target}" "infother\\{base}.inf"']
-    return base, lines, [f'  Delete "{target}"']
+    # INF itself, not INF\\OTHER: tested in QEMU (2026-11-24), Windows 98's driver search
+    # did not find a matching INF in INF\\OTHER even after rebuilding its driver index;
+    # the same file in INF was found. Earlier builds put it in INF\\OTHER: removed here.
+    old = f"$WINDIR\\INF\\OTHER\\KernelExEx{base}.inf"
+    target = f"$WINDIR\\INF\\KernelExEx{base}.inf"
+    lines += [f'  Delete "{old}"', f'  File "/oname={target}" "infother\\{base}.inf"']
+    # Windows compiles an INF it has read into a .PNF beside it
+    return base, lines, [f'  Delete "{target}"', f'  Delete "{target[:-4]}.PNF"', f'  Delete "{old}"']
 
 
 def generate(stage: Path, infs):

@@ -162,26 +162,76 @@ void kexos_mmio_unmap(void *va, kx_u32 len)
 		MmUnmapIoSpace(va, len);
 }
 
-/* ---- DMA memory ---- */
-void *kexos_dma_alloc(kx_u32 size, kx_u32 *phys)
+/* ---- DMA memory: alignment above a page is had by allocating more; the block's
+ *      start (for MmFreeContiguousMemory) is kept in a small table ---- */
+#define NDMA 64
+static struct
+{
+	void *va, *base;
+} dma_blocks[NDMA];
+static KSPIN_LOCK dma_lock;
+static int dma_lock_init;
+
+void *kexos_dma_alloc_ex(kx_u32 size, kx_u32 max_phys, kx_u32 align, kx_u32 *phys)
 {
 	PHYSICAL_ADDRESS hi;
-	void *va;
-	hi.QuadPart = 0xffffffff;
-	va = MmAllocateContiguousMemory(size, hi);
-	if (!va)
+	unsigned char *base, *va;
+	kx_u32 extra = align > PAGE_SIZE ? align : 0, i;
+	KIRQL irql;
+	hi.QuadPart = max_phys ? max_phys : 0xffffffff;
+	base = (unsigned char *) MmAllocateContiguousMemory(size + extra, hi);
+	if (!base)
 		return NULL;
+	va = extra ? (unsigned char *) (((ULONG_PTR) base + align - 1) & ~(ULONG_PTR) (align - 1)) : base;
+	if (!dma_lock_init)
+	{
+		KeInitializeSpinLock(&dma_lock);
+		dma_lock_init = 1;
+	}
+	KeAcquireSpinLock(&dma_lock, &irql);
+	for (i = 0; i < NDMA && dma_blocks[i].va; i++)
+		;
+	if (i < NDMA)
+	{
+		dma_blocks[i].va = va;
+		dma_blocks[i].base = base;
+	}
+	KeReleaseSpinLock(&dma_lock, irql);
+	if (i == NDMA)
+	{
+		MmFreeContiguousMemory(base);
+		return NULL;
+	}
 	memset(va, 0, size);
 	if (phys)
 		*phys = MmGetPhysicalAddress(va).LowPart;
 	return va;
 }
 
+void *kexos_dma_alloc(kx_u32 size, kx_u32 *phys)
+{
+	return kexos_dma_alloc_ex(size, 0, 0, phys);
+}
+
 void kexos_dma_free(void *va, kx_u32 size)
 {
+	kx_u32 i;
+	void *base = NULL;
+	KIRQL irql;
 	(void) size;
-	if (va)
-		MmFreeContiguousMemory(va);
+	if (!va || !dma_lock_init)
+		return;
+	KeAcquireSpinLock(&dma_lock, &irql);
+	for (i = 0; i < NDMA; i++)
+		if (dma_blocks[i].va == va)
+		{
+			base = dma_blocks[i].base;
+			dma_blocks[i].va = NULL;
+			break;
+		}
+	KeReleaseSpinLock(&dma_lock, irql);
+	if (base)
+		MmFreeContiguousMemory(base);
 }
 
 void kexos_stall_us(kx_u32 us)

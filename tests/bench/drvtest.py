@@ -51,6 +51,40 @@ CASES = {
         # same before the KEDCL move). See docs/KEDCL.md.
         "play": False,
     },
+    "em": {
+        "what": "kexem.sys + kexbsd.sys (OpenBSD em) on QEMU's Intel 82540EM (e1000)",
+        "nic": "user,model=e1000",
+        "qemu": [],
+        "files": ["{sys:kexem.sys}", "{sys:kexbsd.sys}", str(ROOT / "drivers/kexnet/kexem.inf")],
+        "expect": [r"kexbsd: framework ready", r"em0: .*address [0-9a-f]{2}(:[0-9a-f]{2}){5}"],
+        "forbid": [r"failed", r"panic"],
+        "wait": 150,
+        "play": False,
+        # Windows finds the card at start-up and installs from its INF folder (as with
+        # setup's DevicePath), then asks to restart: no wizard
+        "install": "inf",
+    },
+    "em-wiz": {
+        "what": "as em, installed through the wizard's Have Disk (no restart before the driver runs)",
+        "nic": "user,model=e1000",
+        "qemu": [],
+        "files": ["{sys:kexem.sys}", "{sys:kexbsd.sys}", str(ROOT / "drivers/kexnet/kexem.inf")],
+        "expect": [r"kexbsd: framework ready", r"em0: .*address [0-9a-f]{2}(:[0-9a-f]{2}){5}"],
+        "forbid": [r"failed", r"panic"],
+        "wait": 150,
+        "play": False,
+    },
+    "ne2k-control": {
+        "what": "control: an NE2000 PCI card with Windows' own driver (detect, install, restart)",
+        "nic": "user,model=ne2k_pci",
+        "qemu": [],
+        "files": [],
+        "expect": [],
+        "forbid": [],
+        "wait": 150,
+        "play": False,
+        "install": "inf",
+    },
     "ac97": {
         "what": "kexac97.sys on QEMU's ICH AC'97",
         "qemu": ["-audiodev", "wav,id=snd0,path={work}/out.wav", "-device", "AC97,audiodev=snd0"],
@@ -88,6 +122,20 @@ class Vm:
              '/': 'slash', ',': 'comma'}
         for c in text:
             self.key(m.get(c, ('shift-' + c.lower()) if c.isupper() else c), 0.08)
+
+    def eip(self):
+        """the CPU's EIP (or None)"""
+        try:
+            s = socket.socket(socket.AF_UNIX)
+            s.connect(str(self.sock))
+            s.sendall(b"info registers\n")
+            time.sleep(0.5)
+            out = s.recv(65536).decode("latin-1", "replace")
+            s.close()
+            m = re.search(r"EIP=([0-9a-f]{8})", out)
+            return int(m.group(1), 16) if m else None
+        except OSError:
+            return None
 
     def shot(self, path):
         ppm = str(path) + ".ppm"
@@ -159,25 +207,61 @@ def main():
     mtools("mmd", "-i", f"{raw}@@{OFF}", "::/KEXDRV")
     for f in files:
         mtools("mcopy", "-o", "-i", f"{raw}@@{OFF}", str(f), "::/KEXDRV/")
+        if case.get("install") == "inf":   # where Windows looks by itself (files beside the INF)
+            mtools("mcopy", "-o", "-i", f"{raw}@@{OFF}", str(f), "::/WINDOWS/INF/")
     qemu = ["qemu-system-i386", "-M", "pc", "-cpu", "pentium2", "-m", "256", "-rtc", "base=localtime",
             "-drive", f"file={raw},format=raw,if=ide,index=0", "-boot", "c", "-vga", "cirrus",
-            "-nic", "user,model=pcnet", "-display", "none", "-monitor", f"unix:{sock},server,nowait",
-            "-debugcon", f"file:{log}"] + (["-cdrom", CD] if CD and Path(CD).exists() else []) + \
+            "-nic", case.get("nic", "user,model=pcnet"), "-display", "none", "-monitor", f"unix:{sock},server,nowait",
+            # append: a power cycle starts QEMU again with the same log
+            "-chardev", f"file,id=dbg,path={log},append=on", "-device", "isa-debugcon,chardev=dbg"] + (["-cdrom", CD] if CD and Path(CD).exists() else []) + \
         [x.format(work=work) for x in case["qemu"]]
     q = subprocess.Popen(qemu, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     vm = Vm(sock)
+
+    def first_start_hang():
+        """Windows' ISA PnP delay loop with a frozen timer (VTD, C0053Bxx): the first start
+        after a new device was installed sometimes stops there in QEMU (docs/NEXT.md).
+        Do what a user would: switch off, start again (disk marked clean first)."""
+        nonlocal q
+        hits = sum(1 for _ in range(6) if 0xC0053B00 <= (vm.eip() or 0) < 0xC0053C00)
+        if hits < 5:
+            return False
+        print("first-start hang (ISA PnP timer loop): power cycle")
+        q.terminate()
+        q.wait()
+        subprocess.run([sys.executable, str(VM / "fatclean.py"), str(raw), str(OFF)], capture_output=True)
+        sock.unlink(missing_ok=True)
+        q = subprocess.Popen(qemu, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        # the start-up menu after a failed start defaults to Safe mode: choose 1, Normal
+        for _ in range(40):
+            time.sleep(2)
+            vm.cmd('screendump "/tmp/bt.ppm"')
+            if subprocess.run([sys.executable, str(VM / "ismenu.py")]).returncode == 0:
+                vm.key("1", 0.5)
+                vm.key("ret", 1)
+                break
+        time.sleep(170)
+        vm.key("ret", 30)   # log-on box, if any
+        return True
     try:
         # Windows starts; the wizard comes up for the new device: Next, "list of drivers"?
         # As vm/hdatest.sh: Enter, Enter, then "Specify a location" with Have Disk.
         time.sleep(125)
-        vm.key("ret", 3)
-        vm.key("ret", 3)
-        vm.key("alt-f", 1)
-        vm.key("alt-l", 1)
-        vm.key("tab", 1)
-        vm.type("C:\\KEXDRV")
-        vm.key("ret", 8)
-        vm.key("ret", 1)
+        if case.get("install") == "inf":
+            # Windows installs from our INF and asks to restart: yes; then the driver runs
+            vm.shot(work / "found.png")
+            vm.key("y", 200)
+            first_start_hang()
+            vm.key("ret", 1)
+        else:
+            vm.key("ret", 3)
+            vm.key("ret", 3)
+            vm.key("alt-f", 1)
+            vm.key("alt-l", 1)
+            vm.key("tab", 1)
+            vm.type("C:\\KEXDRV")
+            vm.key("ret", 8)
+            vm.key("ret", 1)
         time.sleep(case["wait"])
         vm.shot(work / "end.png")
         if case.get("play"):

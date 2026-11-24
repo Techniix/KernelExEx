@@ -55,3 +55,28 @@ From Dell's setup guide and reviews (to confirm with kexinfo on the machine):
 - ALPS touchpad + trackstick (kextouch ALPS support; trackstick middle-button scroll).
 - SD/MMC reader, ExpressCard/PC Card, FireWire, eSATA, legacy BIOS (no UEFI needed);
   SATA AHCI/IDE switch in the BIOS.
+
+### First hardware report (2026-11-23): it is a Latitude E6510 (subsystem 1028:040B)
+
+- Core i5 M460 (Arrandale), 5 series PCH (3B07 LPC), Intel HD graphics 8086:0046,
+  2 GB seen (2 GB option), SMBIOS 2.6, ACPI (Dell).
+- Not set up (problem 28) although our INFs list them: 82577LM 8086:10EA (kexem),
+  HD Audio 8086:3B56 (kexhda), AHCI 8086:3B2F (kexahci, class match). Windows met them
+  before KernelExEx and offers drivers only for new devices. Fixed for build 29:
+  - setup's INFs go to INF, not INF\OTHER: in QEMU Windows' driver search did not
+    find our INF in INF\OTHER at all (also after rebuilding its index); in INF it did;
+  - kexinfo /reinstall (setup runs it last) makes Windows forget such devices and
+    removes the driver index, so the next start sets them up from our INFs. Disk
+    controllers are left alone (the boot disk: AHCI needs /reinstall /all, by hand).
+    Tested in QEMU end to end with kexhda (problem 28 -> wizard finds our INF -> starts).
+  - display still on vga.drv: most likely the same INF\OTHER cause (KexVesaRedetect
+    forgot the card, Windows found no INF). kexinfo now prints each device's driver
+    files (drv=, DevLoader, NTMPDriver) to confirm.
+- Wi-Fi is an Atheros AR9285 168C:002B (an HP card): OpenBSD athn(4), ISC, PCI part
+  needs no firmware. This replaces the Intel 6200 plan.
+- Ricoh R5U822 SD host 1180:E822 (SDHCI, class 0805): a storage driver; QEMU has sdhci-pci.
+- SMBus 3B30 and thermal 3B32: no driver needed (could get a null INF to clear the marks).
+- Touchpad: ALPS v3 Pinnacle + stick detected, but 0 bytes received after set-up.
+  kextouch now turns on the 8042 aux interrupt (command byte bit 1) after set-up and
+  reports IRQ 12 count and the command byte; QEMU does not reproduce (the old driver
+  receives there with the bit cleared too), so the next report decides.

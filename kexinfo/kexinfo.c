@@ -7,6 +7,12 @@
  *  its hardware IDs, class, driver, status / problem code and IRQ, DMA, I/O and
  *  memory assignments, KernelExEx driver diagnostics (KernelEx\Diag) and the
  *  touchpad driver's log. "kexinfo /q" writes the file without opening it.
+ *  "kexinfo /reinstall" first makes Windows forget (Enum key deleted), so that it
+ *  sets them up as new at the next start, every device
+ *  Windows recorded as "drivers not installed" (problem 28) or "not configured"
+ *  (problem 1) that one of our INFs (INF\KernelExEx*.inf, INF\OTHER\KernelExEx*.inf) supports:
+ *  Windows offers drivers only for new devices, so a device it met before
+ *  KernelExEx was installed would never get ours. Setup runs it.
  *  For Windows 98 / ME (cfgmgr32.dll loaded at run time).
  */
 #include <windows.h>
@@ -227,6 +233,45 @@ static void prop(DEVINST d, ULONG which, const char *label, int multi)
 		pf("    %s: %s\r\n", label, b);
 }
 
+/* the files behind a device: its class key's DevLoader / NTMPDriver / PortDriver,
+   and a display's DEFAULT\drv (vga.drv is Windows' standard VGA) */
+static void driver_files(DEVINST d)
+{
+	char drv[128], key[200], v[128], line[600];
+	static const char *names[] = { "DevLoader", "NTMPDriver", "PortDriver", "DriverDesc" };
+	ULONG type, len = sizeof(drv) - 1;
+	HKEY k;
+	int i, n = 0;
+	if (cmProp(d, CM_DRP_DRIVER, &type, drv, &len, 0) != 0 || !len)
+		return;
+	drv[len] = 0;
+	line[0] = 0;
+	for (i = 0; i < 5; i++)
+	{
+		DWORD t, l = sizeof(v) - 1;
+		if (i < 4)
+			wsprintfA(key, "System\\CurrentControlSet\\Services\\Class\\%s", drv);
+		else
+			wsprintfA(key, "System\\CurrentControlSet\\Services\\Class\\%s\\DEFAULT", drv);
+		if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, key, 0, KEY_READ, &k) != ERROR_SUCCESS)
+			continue;
+		if (RegQueryValueExA(k, i < 4 ? names[i] : "drv", NULL, &t, (BYTE *) v, &l) == ERROR_SUCCESS && t == REG_SZ && l > 1)
+		{
+			v[l] = 0;
+			if (lstrlenA(line) + lstrlenA(v) + 20 < (int) sizeof(line))
+			{
+				wsprintfA(line + lstrlenA(line), "%s%s=%s", n++ ? ", " : "", i < 4 ? names[i] : "drv", v);
+			}
+		}
+		RegCloseKey(k);
+	}
+	if (n)
+	{
+		ind();
+		pf("    driver files: %s\r\n", line);
+	}
+}
+
 static void resources(DEVINST d)
 {
 	/* the allocated configuration; Windows 98 sometimes keeps it as forced or boot */
@@ -311,6 +356,7 @@ static void walk(DEVINST d, int depth)
 	prop(d, CM_DRP_COMPATIBLEIDS, "compatible IDs", 1);
 	prop(d, CM_DRP_CLASS, "class", 0);
 	prop(d, CM_DRP_DRIVER, "driver key", 0);
+	driver_files(d);
 	resources(d);
 	if (cmChild(&c, d, 0) == 0)
 	{
@@ -320,11 +366,9 @@ static void walk(DEVINST d, int depth)
 	}
 }
 
-static void devices(void)
+static void cm_load(void)
 {
 	HMODULE h = LoadLibraryA("cfgmgr32.dll");
-	DEVINST root;
-	put("== Devices (Configuration Manager tree)\r\n");
 	if (h)
 	{
 		cmLocate = (pLocate) GetProcAddress(h, "CM_Locate_DevNodeA");
@@ -338,6 +382,14 @@ static void devices(void)
 		cmRdSize = (pRdSize) GetProcAddress(h, "CM_Get_Res_Des_Data_Size");
 		cmRdData = (pRdData) GetProcAddress(h, "CM_Get_Res_Des_Data");
 	}
+	if (!cmLocate || !cmChild || !cmSibling || !cmProp || !cmStatus || !cmId)
+		cmLocate = NULL;
+}
+
+static void devices(void)
+{
+	DEVINST root;
+	put("== Devices (Configuration Manager tree)\r\n");
 	if (!cmLocate || !cmChild || !cmSibling || !cmProp || !cmStatus || !cmId || !cmNextRd || !cmRdSize || !cmRdData)
 	{
 		put("cfgmgr32.dll is missing or incomplete\r\n\r\n");
@@ -350,6 +402,281 @@ static void devices(void)
 	}
 	walk(root, 0);
 	pf("\r\n%d devices, %d with a problem\r\n\r\n", ndev, nproblem);
+}
+
+/* ---------------- /reinstall ---------------- */
+/* hardware and compatible IDs from the models sections of our INFs, upper case,
+   each 0-terminated, the list ending with an empty string */
+static char *ids;
+static DWORD ids_len, ids_cap;
+static int nreinstall, reinstall_disks;
+
+/* a disk controller (PCI class 01): may hold the disk Windows starts from */
+static int is_disk_ctl(DEVINST d)
+{
+	char b[1024];
+	ULONG type, len = sizeof(b) - 2;
+	char *p;
+	if (cmProp(d, CM_DRP_COMPATIBLEIDS, &type, b, &len, 0) != 0 || !len)
+		return 0;
+	b[len] = b[len + 1] = 0;
+	for (p = b; *p; p++)
+		if (*p == ',')
+			*p = 0;
+	for (p = b; *p; p += lstrlenA(p) + 1)
+	{
+		/* PCI\CC_01, PCI\CC_0106, PCI\CC_010601 ... */
+		static const char pre[] = "PCI\\CC_01";
+		int i;
+		for (i = 0; pre[i] && p[i] && ((p[i] | 0x20) == (pre[i] | 0x20)); i++)
+			;
+		if (!pre[i])
+			return 1;
+	}
+	return 0;
+}
+
+static void id_add(const char *s, int n)
+{
+	char *p;
+	int i;
+	while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\r'))
+		n--;
+	while (n && (*s == ' ' || *s == '\t'))
+		s++, n--;
+	if (n <= 0 || n > 200)
+		return;
+	if (ids_len + n + 2 > ids_cap)
+	{
+		DWORD cap = ids_cap ? ids_cap * 2 : 65536;
+		char *q = (char *) HeapAlloc(GetProcessHeap(), 0, cap);
+		if (!q)
+			return;
+		if (ids)
+		{
+			CopyMemory(q, ids, ids_len);
+			HeapFree(GetProcessHeap(), 0, ids);
+		}
+		ids = q, ids_cap = cap;
+	}
+	p = ids + ids_len;
+	for (i = 0; i < n; i++)
+		p[i] = (s[i] >= 'a' && s[i] <= 'z') ? s[i] - 32 : s[i];
+	p[n] = 0;
+	ids_len += n + 1;
+	ids[ids_len] = 0;
+}
+
+static int id_known(const char *s)
+{
+	const char *p;
+	char u[256];
+	int i;
+	for (i = 0; s[i] && i < 255; i++)
+		u[i] = (s[i] >= 'a' && s[i] <= 'z') ? s[i] - 32 : s[i];
+	u[i] = 0;
+	for (p = ids; p && *p; p += lstrlenA(p) + 1)
+		if (!lstrcmpA(p, u))
+			return 1;
+	return 0;
+}
+
+static int sect_is(const char *line, const char *names)
+{
+	/* line is "[name]"; names: 0-separated list of model section names */
+	char n[128];
+	int i = 0;
+	const char *p;
+	line++;
+	while (*line && *line != ']' && i < 127)
+		n[i++] = *line++;
+	n[i] = 0;
+	for (p = names; *p; p += lstrlenA(p) + 1)
+		if (!lstrcmpiA(p, n))
+			return 1;
+	return 0;
+}
+
+static void inf_ids(const char *path)
+{
+	HANDLE f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	DWORD size, got;
+	char *t, *line, *end, models[1024];
+	int mlen = 0, pass, insect;
+	if (f == INVALID_HANDLE_VALUE)
+		return;
+	size = GetFileSize(f, NULL);
+	t = (size && size < 4000000) ? (char *) HeapAlloc(GetProcessHeap(), 0, size + 1) : NULL;
+	if (!t || !ReadFile(f, t, size, &got, NULL))
+	{
+		CloseHandle(f);
+		return;
+	}
+	CloseHandle(f);
+	t[got] = 0;
+	models[0] = 0;
+	/* pass 0: the section names [Manufacturer] lists; pass 1: their lines */
+	for (pass = 0; pass < 2; pass++)
+	{
+		insect = 0;
+		for (line = t; *line; line = *end ? end + 1 : end)
+		{
+			char *eq, *c;
+			for (end = line; *end && *end != '\n'; end++)
+				;
+			while (*line == ' ' || *line == '\t')
+				line++;
+			if (*line == '[')
+			{
+				if (pass == 0)
+				{
+					char n[16];
+					int i;
+					for (i = 0; i < 15 && line[i + 1] && line[i + 1] != ']'; i++)
+						n[i] = line[i + 1];
+					n[i] = 0;
+					insect = !lstrcmpiA(n, "Manufacturer");
+				}
+				else
+					insect = sect_is(line, models);
+				continue;
+			}
+			if (!insect || *line == ';')
+				continue;
+			for (c = line; c < end && *c != ';'; c++)
+				;
+			for (eq = line; eq < c && *eq != '='; eq++)
+				;
+			if (eq >= c)
+				continue;
+			eq++;
+			if (pass == 0)
+			{
+				/* %mfg%=Models[,decoration...]: the first name only (Windows 98) */
+				char *e = eq;
+				while (e < c && *e != ',')
+					e++;
+				while (eq < e && (*eq == ' ' || *eq == '\t'))
+					eq++;
+				while (e > eq && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r'))
+					e--;
+				if (e > eq && mlen + (e - eq) + 2 < (int) sizeof(models))
+				{
+					CopyMemory(models + mlen, eq, e - eq);
+					mlen += (int) (e - eq);
+					models[mlen++] = 0;
+					models[mlen] = 0;
+				}
+			}
+			else
+			{
+				/* desc = install-section, id[, compatible id...] */
+				char *a = eq;
+				while (a < c && *a != ',')
+					a++;
+				while (a < c)
+				{
+					char *b = ++a;
+					while (a < c && *a != ',')
+						a++;
+					id_add(b, (int) (a - b));
+				}
+			}
+		}
+	}
+	HeapFree(GetProcessHeap(), 0, t);
+}
+
+static int ids_match(DEVINST d, ULONG which)
+{
+	char b[1024];
+	ULONG type, len = sizeof(b) - 2;
+	char *p;
+	if (cmProp(d, which, &type, b, &len, 0) != 0 || !len)
+		return 0;
+	b[len] = b[len + 1] = 0;
+	/* REG_MULTI_SZ, or one comma-separated string */
+	for (p = b; *p; p++)
+		if (*p == ',')
+			*p = 0;
+	for (p = b; *p; p += lstrlenA(p) + 1)
+		if (id_known(p))
+			return 1;
+	return 0;
+}
+
+static void mark(DEVINST d)
+{
+	char id[512], key[600];
+	ULONG status = 0, problem = 0;
+	DEVINST c;
+	if (cmStatus(&status, &problem, d, 0) == 0 && (status & DN_HAS_PROBLEM) && (problem == 28 || problem == 1) &&
+		(ids_match(d, CM_DRP_HARDWAREID) || ids_match(d, CM_DRP_COMPATIBLEIDS)))
+	{
+		id[0] = 0;
+		cmId(d, id, sizeof(id), 0);
+		wsprintfA(key, "Enum\\%s", id);
+		if (!reinstall_disks && is_disk_ctl(d))
+			pf("  %s: a disk controller, left alone (kexinfo /reinstall /all includes it)\r\n", id);
+		else if (id[0] && RegDeleteKeyA(HKEY_LOCAL_MACHINE, key) == ERROR_SUCCESS)
+		{
+			/* forgotten: at the next start Windows meets it as a new device and finds
+			   our INF (setting CONFIGFLAG_REINSTALL is not enough: Windows 98 puts
+			   FAILEDINSTALL back at start-up and asks nothing) */
+			pf("  %s\r\n", id);
+			nreinstall++;
+		}
+	}
+	if (cmChild(&c, d, 0) == 0)
+	{
+		mark(c);
+		while (cmSibling(&c, c, 0) == 0)
+			mark(c);
+	}
+}
+
+static void reinstall(void)
+{
+	char dir[MAX_PATH], path[MAX_PATH];
+	WIN32_FIND_DATAA fd;
+	HANDLE h;
+	DEVINST root;
+	put("== Devices set up again at the next start (kexinfo /reinstall)\r\n");
+	{
+		static const char *sub[] = { "\\INF\\OTHER\\", "\\INF\\" };
+		int j;
+		for (j = 0; j < 2; j++)
+		{
+			GetWindowsDirectoryA(dir, sizeof(dir));
+			lstrcatA(dir, sub[j]);
+			wsprintfA(path, "%sKernelExEx*.inf", dir);
+			h = FindFirstFileA(path, &fd);
+			if (h == INVALID_HANDLE_VALUE)
+				continue;
+			do
+			{
+				wsprintfA(path, "%s%s", dir, fd.cFileName);
+				inf_ids(path);
+			} while (FindNextFileA(h, &fd));
+			FindClose(h);
+		}
+	}
+	if (!ids || !cmLocate || cmLocate(&root, NULL, 0) != 0)
+	{
+		put("  (no KernelExEx INFs or no device tree)\r\n\r\n");
+		return;
+	}
+	mark(root);
+	pf("%d device(s)\r\n", nreinstall);
+	/* Windows' driver index: it is rebuilt when missing. Without this, an INF added to
+	   INF\OTHER is not seen (the INF folder's own date does not change) and the
+	   wizard finds no driver for a device Windows meets again */
+	GetWindowsDirectoryA(dir, sizeof(dir));
+	wsprintfA(path, "%s\\INF\\DRVIDX.BIN", dir);
+	DeleteFileA(path);
+	wsprintfA(path, "%s\\INF\\DRVDATA.BIN", dir);
+	DeleteFileA(path);
+	put("driver index (INF\\DRVIDX.BIN, DRVDATA.BIN) removed: Windows rebuilds it\r\n\r\n");
 }
 
 /* ---------------- KernelExEx diagnostics ---------------- */
@@ -411,8 +738,11 @@ static void diag(void)
 			DWORD got = 0;
 			ZeroMemory(&s, sizeof(s));
 			if (DeviceIoControl(v, KEXTOUCH_IOCTL_STATUS, NULL, 0, &s, sizeof(s), &got, NULL) && got >= sizeof(s))
+			{
 				pf("%s, %ux%u, stick %u; bytes %u packets %u posts %u errors %u resyncs %u\r\n", s.name, s.x_max,
 				   s.y_max, s.has_stick, s.bytes, s.packets, s.posts, s.errors, s.resyncs);
+				pf("IRQ 12 interrupts %u; 8042 command byte %x (was %x)\r\n", s.irqs, s.kbc_cmd, s.kbc_cmd_was);
+			}
 			got = 0;
 			if (DeviceIoControl(v, KEXTOUCH_IOCTL_LOG, NULL, 0, log, sizeof(log) - 1, &got, NULL))
 			{
@@ -437,11 +767,18 @@ void entrypoint(void)
 {
 	char path[MAX_PATH], cmd[MAX_PATH + 32];
 	const char *c = GetCommandLineA();
-	int quiet = 0;
+	int quiet = 0, re = 0;
 	SYSTEMTIME t;
 	for (; *c; c++)
-		if ((*c == '/' || *c == '-') && (c[1] | 0x20) == 'q')
-			quiet = 1;
+		if (*c == '/' || *c == '-')
+		{
+			if ((c[1] | 0x20) == 'q')
+				quiet = 1;
+			if ((c[1] | 0x20) == 'r')
+				re = quiet = 1;
+			if ((c[1] | 0x20) == 'a' && (c[2] | 0x20) == 'l')
+				reinstall_disks = 1;
+		}
 	GetWindowsDirectoryA(path, sizeof(path));
 	lstrcpyA(path + 3, "KEXINFO.TXT");
 	out = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -452,6 +789,9 @@ void entrypoint(void)
 	}
 	GetLocalTime(&t);
 	pf("KernelExEx hardware report, %04u-%02u-%02u %02u:%02u\r\n\r\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute);
+	cm_load();
+	if (re)
+		reinstall();
 	system_info();
 	firmware_info();
 	devices();

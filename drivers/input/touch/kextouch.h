@@ -18,6 +18,8 @@ struct kextouch_status
 	unsigned x_max, y_max, has_stick;
 	unsigned bytes, packets, posts, errors, resyncs;
 	struct tp_settings set;
+	unsigned irqs;              /* IRQ 12 interrupts taken */
+	int kbc_cmd, kbc_cmd_was;   /* 8042 command byte now / before kextouch set it, -1 unread */
 };
 
 struct kextouch_wheel

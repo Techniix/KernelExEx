@@ -23,7 +23,8 @@ static kx_u32 hirq;
 static int polling = 1, running;
 static kx_u32 *mouse_instance;
 static int pend_wheel, pend_hwheel;
-static kx_u32 n_bytes, n_packets, n_posts, n_errors;
+static kx_u32 n_bytes, n_packets, n_posts, n_errors, n_irqs;
+static int kbc_cb = -1, kbc_cb_was = -1;
 
 void tp_log(struct tp *t, const char *fmt, ...)
 {
@@ -118,6 +119,74 @@ fail:
 	return -1;
 }
 
+/* ---- 8042 command byte ----
+ * Bit 1 lets the controller raise IRQ 12 for aux bytes, bit 5 set disables the aux
+ * clock. Commands and detection here are polled, so they work either way; but a
+ * BIOS (Dell, with USB legacy support) may leave bit 1 clear until a mouse driver
+ * sets it, as MSMOUSE does, and then not one byte ever reaches the ISR. Read and
+ * written with interrupts off, counting port reads rather than ms: the clock
+ * may stand still meanwhile. */
+static int kbc_spin_write(void)
+{
+	int i;
+	for (i = 0; i < 200000; i++)
+		if (!(kexos_inb(KBC_STAT) & ST_IBF))
+			return 0;
+	return -1;
+}
+
+static int kbc_get_cmd_byte(void)
+{
+	int i;
+	/* drop anything already waiting */
+	for (i = 0; i < 16 && (kexos_inb(KBC_STAT) & ST_OBF); i++)
+		kexos_inb(KBC_DATA);
+	if (kbc_spin_write())
+		return -1;
+	kexos_outb(KBC_STAT, 0x20);
+	for (i = 0; i < 200000; i++)
+	{
+		kx_u8 st = kexos_inb(KBC_STAT);
+		if ((st & (ST_OBF | ST_AUX)) == ST_OBF)
+			return kexos_inb(KBC_DATA);
+		if (st & ST_OBF)
+			kexos_inb(KBC_DATA);   /* an aux byte: drop it */
+	}
+	return -1;
+}
+
+static int kbc_set_cmd_byte(kx_u8 v)
+{
+	if (kbc_spin_write())
+		return -1;
+	kexos_outb(KBC_STAT, 0x60);
+	if (kbc_spin_write())
+		return -1;
+	kexos_outb(KBC_DATA, v);
+	return kbc_spin_write();
+}
+
+static void kbc_enable_aux_irq(void)
+{
+	kx_u32 f = kexos_irq_save();
+	int cb = kbc_get_cmd_byte();
+	kbc_cb_was = cb;
+	if (cb >= 0 && ((cb & 0x02) == 0 || (cb & 0x20)))
+	{
+		kx_u8 v = (kx_u8) ((cb | 0x02) & ~0x20);
+		if (kbc_set_cmd_byte(v) == 0)
+			cb = kbc_get_cmd_byte();
+	}
+	kbc_cb = cb;
+	kexos_irq_restore(f);
+	if (kbc_cb_was < 0)
+		kexos_log(&klog, "kextouch: 8042 command byte unreadable\n");
+	else if (kbc_cb != kbc_cb_was)
+		kexos_log(&klog, "kextouch: 8042 command byte %x -> %x (aux interrupt on)\n", kbc_cb_was, kbc_cb);
+	else
+		kexos_log(&klog, "kextouch: 8042 command byte %x\n", kbc_cb);
+}
+
 /* ---- events ---- */
 static void post(struct tp_out *o)
 {
@@ -149,6 +218,7 @@ static int isr(void *ref)
 	int ours = 0;
 	struct tp_out o;
 	(void) ref;
+	n_irqs++;
 	for (;;)
 	{
 		kx_u8 st = kexos_inb(KBC_STAT);
@@ -175,7 +245,23 @@ static void tick(void *ref)
 		return;
 	if (!polling)
 	{
+		static kx_u32 last_irqs, stuck;
 		kx_u32 f = kexos_irq_save();
+		if ((kexos_inb(KBC_STAT) & (ST_OBF | ST_AUX)) == (ST_OBF | ST_AUX) && n_irqs == last_irqs)
+		{
+			/* an aux byte sits unread with no interrupt since the last tick */
+			if (++stuck == 10)
+			{
+				kexos_irq_restore(f);
+				kexos_log(&klog, "kextouch: aux data waiting but no IRQ 12 (irqs %u, command byte %x)\n", n_irqs,
+				          kbc_get_cmd_byte());
+				f = kexos_irq_save();
+				kexos_irq_mask(hirq, 0);
+			}
+		}
+		else
+			stuck = 0;
+		last_irqs = n_irqs;
 		if (tp_tick(&T, kexos_ms(), &o))
 			post(&o);
 		kexos_irq_restore(f);
@@ -190,6 +276,8 @@ static int start_device(void)
 	if (hirq)
 		kexos_irq_mask(hirq, 1);
 	r = tp_init(&T);
+	if (r == 0)
+		kbc_enable_aux_irq();
 	polling = 0;
 	if (hirq)
 		kexos_irq_mask(hirq, 0);
@@ -276,6 +364,9 @@ static kx_u32 ioctl(DIOCPARAMS *p)
 		s->errors = n_errors;
 		s->resyncs = (kx_u32) T.out_of_sync;
 		memcpy(&s->set, &T.set, sizeof(s->set));
+		s->irqs = n_irqs;
+		s->kbc_cmd = kbc_cb;
+		s->kbc_cmd_was = kbc_cb_was;
 		n = sizeof(*s);
 		break;
 	}
