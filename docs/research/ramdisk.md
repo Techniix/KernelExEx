@@ -64,3 +64,31 @@ claimed device that we overwrite), e.g. by comparing with a real disk's VRP/DCB 
 DCBs with ISP_GET_FIRST_NEXT_DCB as cfu1 does), or set VRP_max_sgd in AEP_CREATE_VRP.
 Notes from cfu1-vxd (MIT) that this follows: be your own TSD, appy-time association,
 WRITEABLE on both DCBs, logical SG list order {sectors, pointer}.
+
+## Working (2026-11-23, later the same day)
+
+The zero-length reads came from wrong DCB offsets: Microsoft's IOS structures are
+byte-packed (IOS reads DCB_max_sg_elements at 0x77 and DCB_apparent_blk_size at 0xDB);
+with the packed offsets the volume mounts and reads/writes normally. Also learned:
+
+- The volume can be created during Device_Init (claim the unit in AEP_DEVICE_INQUIRY,
+  configure IOS's physical DCB in AEP_CONFIG_DCB, create the logical DCB and
+  ISP_ASSOCIATE_DCB right after IOS_Register), early enough for the swap file. Appy
+  time stays as a fallback.
+- Windows 98 uses one page directory (CR3 was the same for every request), so the
+  window's entry is valid in every context. It is now set only for the copy itself.
+- Windows sizes the swap file by its own RAM and waits for ever at start-up if the swap
+  drive cannot hold it: setup sets MaxPagingFileSize=1048576 (1 GB) and KEXRAM only
+  makes Z: when it has at least 1.125 GB.
+- Static VxD from the registry (Services\VxD\KEXRAM, StaticVxD=) works: no SYSTEM.INI
+  device= line to edit.
+
+Tests (QEMU, Westmere, 6 GB):
+- KEXMEM /MAX=2048: 4 GB RAM disk; 535 files (76.5 MB, twice) copied to Z: and
+  compared: all identical. Swap file on Z:.
+- RAM disk only above 4 GB (3 GB): 540 files copied and compared: all identical.
+- Installer `/S /MEMA /RAMD` on a clean Windows: Windows 3072 MB, Z: = 3 GB from RAM
+  above 4 GB, WIN386.SWP on Z:.
+- Not done: paging under heavy memory pressure. In this VM a 300 MB test program fails
+  with a 256 MB Windows even without KEXRAM and with Windows' original VMM, so that test
+  says nothing about KEXRAM yet.

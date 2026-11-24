@@ -3,7 +3,7 @@
 install media boots into (through MEMDISK), from the user's own Windows 98
 CD. Usage: proto_image.py BOOTFLOPPY.IMG WIN98DIR EXTRA_DIR OUT.IMG
 EXTRA_DIR's files go to the image's root (our DOS stage)."""
-import os, struct, subprocess, sys, tempfile
+import os, shutil, struct, subprocess, sys, tempfile
 
 SPT, HEADS, START = 63, 255, 63
 
@@ -127,4 +127,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main() works in a temporary folder of ~150 MB: always remove it, also on errors
+    _mkdtemp = tempfile.mkdtemp
+    _made = []
+    tempfile.mkdtemp = lambda *a, **k: _made.append(_mkdtemp(*a, **k)) or _made[-1]
+    try:
+        main()
+    finally:
+        for d in _made:
+            shutil.rmtree(d, ignore_errors=True)

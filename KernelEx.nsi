@@ -659,6 +659,7 @@ LangString DESC_KEXINFO ${LANG_ENGLISH} "A hardware report (Start menu: Hardware
 LangString DESC_KEXKEYS ${LANG_ENGLISH} "Makes laptop Fn volume/mute keys and USB keyboard media keys work: volume up/down and mute change the master volume; play/stop/next/previous control Winamp."
 LangString DESC_KEXMEMX ${LANG_ENGLISH} "Lets Windows 98 SE use up to 2 GB of RAM by patching its memory manager (VMM32.VXD; the original is kept and comes back when this is removed). Builds on Rudolph R. Loew's PATCHMEM. Experimental, tested in an emulator: if Windows does not start afterwards, start from the KernelExEx install stick, which offers to undo it."
 LangString DESC_KEXMEMA ${LANG_ENGLISH} "Like 'Use up to 2 GB', but for all the RAM Windows can address: up to about 3.5 GB (a 32-bit PC maps the rest above 4 GB). Tested in an emulator with 2, 3 and 3.5 GB. Same patch, same undo."
+LangString DESC_KEXRAM ${LANG_ENGLISH} "Makes a RAM disk (drive Z:) from the RAM Windows 98 cannot use: above the memory limit (see the options above) and above 4 GB, and puts the swap file on it. Useful with more RAM than Windows can address (e.g. 4-8 GB): needs at least 1.125 GB unused (the swap file is limited to 1 GB). Its contents are lost at every restart. Experimental, tested in an emulator; needs a CPU with PSE-36 for RAM above 4 GB (Pentium III and later)."
 LangString DESC_KEXMEM ${LANG_ENGLISH} "For computers with more than 1 GB of RAM: Windows 98 and ME crash or say 'Insufficient memory' at start-up with that much. This makes Windows use the first 1 GB (adds KEXMEM.SYS to CONFIG.SYS). Takes effect after a restart."
 LangString DESC_KEXFAT ${LANG_ENGLISH} "Reads SD cards, USB sticks and disks formatted exFAT (cards over 32 GB come that way): they get a drive letter and open in Explorer and in programs. Read-only for now: copying files onto them is not possible yet. Experimental."
 LangString DESC_KEXVMM ${LANG_ENGLISH} "The mouse pointer moves in and out of the virtual machine's window freely, with no need to click into it or press keys to release it. For QEMU (the default PC machine) and VMware. Does nothing on a real PC."
@@ -1216,6 +1217,27 @@ Function KexMemXOn
   SetRebootFlag true
 FunctionEnd
 
+;KEXRAM.VXD: a RAM disk (Z:) made of the RAM Windows does not use (above KEXMEM's
+;limit, and above 4 GB), with the swap file on it. KEXMEM keeps the BIOS memory map
+;for it. Loaded as a static VxD from the registry (no SYSTEM.INI device= line).
+Section /o "Swap file in unused RAM (RAM disk Z:, experimental)" SECKEXRAM
+  !insertmacro KexUpd "media\KEXMEM.SYS" "$WINDIR" "KEXMEM.SYS"
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexMem"
+  StrCmp $0 "1" kexram_mem
+    StrCpy $R7 ""
+    Call KexMemLine
+    WriteRegStr HKLM "Software\KernelEx\Components" "KexMem" "1"
+  kexram_mem:
+  !insertmacro KexUpd "ramdisk\KEXRAM.VXD" "$SYSDIR" "KEXRAM.VXD"
+  WriteRegStr HKLM "System\CurrentControlSet\Services\VxD\KEXRAM" "StaticVxD" "$SYSDIR\KEXRAM.VXD"
+  WriteINIStr "$WINDIR\system.ini" "386Enh" "PagingDrive" "Z:"
+  ;Windows sizes the swap file by its RAM and hangs at start-up if the drive is too
+  ;small; KEXRAM only makes Z: when it holds 1 GB and more
+  WriteINIStr "$WINDIR\system.ini" "386Enh" "MaxPagingFileSize" "1048576"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexRam" "1"
+  SetRebootFlag true
+SectionEnd
+
 
 SectionGroupEnd
 
@@ -1450,6 +1472,7 @@ SectionGroupEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEM} $(DESC_KEXMEM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEMX} $(DESC_KEXMEMX)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXMEMA} $(DESC_KEXMEMA)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRAM} $(DESC_KEXRAM)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATA} $(DESC_KEXATA)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAHCI} $(DESC_KEXAHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXNVME} $(DESC_KEXNVME)
@@ -1517,6 +1540,18 @@ FunctionEnd
 Section "Uninstall"
 
   SetDetailsView show
+
+  ;RAM disk: no longer loaded; the swap file goes back to Windows' own place
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexRam"
+  StrCmp $0 "1" 0 un_kexram_done
+    DeleteRegKey HKLM "System\CurrentControlSet\Services\VxD\KEXRAM"
+    ReadINIStr $1 "$WINDIR\system.ini" "386Enh" "PagingDrive"
+    StrCmp $1 "Z:" 0 +3
+      DeleteINIStr "$WINDIR\system.ini" "386Enh" "PagingDrive"
+      DeleteINIStr "$WINDIR\system.ini" "386Enh" "MaxPagingFileSize"
+    Delete /REBOOTOK "$SYSDIR\KEXRAM.VXD"
+    DeleteRegValue HKLM "Software\KernelEx\Components" "KexRam"
+  un_kexram_done:
 
   ;Memory limit (KEXMEM.SYS): remove its CONFIG.SYS line
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexMemX"
@@ -2132,6 +2167,11 @@ Function .onInit
   ${GetOptions} $0 "/MEMX" $1
   ${IfNot} ${Errors}
     !insertmacro SelectSection ${SECKEXMEMX}
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $0 "/RAMD" $1
+  ${IfNot} ${Errors}
+    !insertmacro SelectSection ${SECKEXRAM}
   ${EndIf}
   ClearErrors
   ${GetOptions} $0 "/MEMA" $1

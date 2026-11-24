@@ -121,6 +121,7 @@ LAYOUT = {
     "kexpower/kexpower.exe": "core:kexpower.exe",
     "kexpower/kexpower.cpl": "core:kexpower.cpl",
     "media/KEXMEM.SYS": "core:KEXMEM.SYS",
+    "ramdisk/KEXRAM.VXD": "core:KEXRAM.VXD",
     "drivers/touch/KEXTOUCH.VXD": "core:KEXTOUCH.VXD",
     "drivers/touch/kextouch.exe": "core:kextouch.exe",
     "kexkeys/kexkeys.exe": "core:kexkeys.exe",

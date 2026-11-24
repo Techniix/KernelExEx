@@ -46,10 +46,14 @@ __declspec(naked) ULONG __cdecl _SHELL_CallAtAppyTime(void(__cdecl *cb)(ULONG), 
 	VMMJmp(__SHELL_CallAtAppyTime)
 }
 #define CAAFL_RING0 1
+#define RC_MIN_CHUNKS 288   /* 1.125 GB: the 1 GB swap file, the FATs and room to spare */
 #define PR_SYSTEM 0x80080000
 #define PR_FIXED  0x00000008
 
-/* ---- IOS structures: only the fields we use, at their offsets ---------------------- */
+/* ---- IOS structures: only the fields we use, at their offsets ----------------------
+   Microsoft's IOS structures are byte-packed (from MASM includes): the DCB's ULONG
+   fields after DCB_device_type (0x40) are unaligned. IOS itself reads
+   DCB_max_sg_elements at 0x77 and DCB_apparent_blk_size at 0xDB. */
 #define OFS(p, o, t) (*(t *) ((unsigned char *) (p) + (o)))
 /* DCB */
 #define DCB_physical_dcb        0x00
@@ -60,25 +64,24 @@ __declspec(naked) ULONG __cdecl _SHELL_CallAtAppyTime(void(__cdecl *cb)(ULONG), 
 #define DCB_apparent_blk_shift  0x3C
 #define DCB_sig                 0x3E
 #define DCB_device_type         0x40
-#define DCB_max_xfer_len        0x54
-#define DCB_actual_sector_cnt   0x58
-#define DCB_actual_blk_size     0x60
-#define DCB_actual_head_cnt     0x64
-#define DCB_actual_cyl_cnt      0x68
-#define DCB_actual_spt          0x6C
-#define DCB_max_sg_elements     0x7B   /* set by the port driver: 0 makes IOS split I/O into nothing */
-#define DCB_unit_on_ctl         0xBF
-#define DCB_apparent_sector_cnt 0xD8
-#define DCB_apparent_blk_size   0xE0
-#define DCB_apparent_head_cnt   0xE4
-#define DCB_apparent_cyl_cnt    0xE8
-#define DCB_apparent_spt        0xEC
-#define DCB_SIZE                0x130
+#define DCB_max_xfer_len        0x50
+#define DCB_actual_sector_cnt   0x54
+#define DCB_actual_blk_size     0x5C
+#define DCB_actual_head_cnt     0x60
+#define DCB_actual_cyl_cnt      0x64
+#define DCB_actual_spt          0x68
+#define DCB_max_sg_elements     0x77   /* set by the port driver: 0 makes IOS split I/O into nothing */
+#define DCB_unit_on_ctl         0xBA
+#define DCB_apparent_sector_cnt 0xD3
+#define DCB_apparent_blk_size   0xDB
+#define DCB_apparent_head_cnt   0xDF
+#define DCB_apparent_cyl_cnt    0xE3
+#define DCB_apparent_spt        0xE7
+#define DCB_SIZE                0x12B
 #define DCB_DEV_PHYSICAL  0x8000
 #define DCB_DEV_LOGICAL   0x4000
 #define DCB_DEV_WRITEABLE 0x0002
 #define DMD_NONE          0x00   /* we copy with the CPU: any linear buffer will do */
-#define DCB_DEV_REMOVABLE 0x0004
 /* IOP / IOR */
 #define IOP_callback_ptr 0x14
 #define IOP_ior          0x64
@@ -116,21 +119,25 @@ struct drp
 	void *aer;
 	void *ilb;
 	char name[16];
-	unsigned char revision, pad[3];
+	unsigned char revision;
 	ULONG feature_code;
 	unsigned short if_requirements;
-	unsigned char bus_type, pad2;
-	unsigned short reg_result, pad3;
+	unsigned char bus_type;
+	unsigned short reg_result;
 	ULONG reference_data, reserved1, reserved2;
-};
+} __attribute__((packed));
 struct ilb
 {
 	void(__cdecl *service)(void *isp);
 	ULONG rest[12];
 };
 
-/* ---- log: QEMU's debug console (port 0xE9 is unused on real PCs) -------------------- */
+/* ---- log: QEMU's debug console, in --debugcon builds only ----------------------------- */
+#ifdef KEX_DEBUGCON
 static void dc(char c) { __asm__ __volatile__("outb %0, $0xe9" : : "a"(c)); }
+#else
+static void dc(char c) { (void) c; }
+#endif
 static void ds(const char *s) { while (*s) dc(*s++); }
 static void dx(ULONG v) { int i; for (i = 28; i >= 0; i -= 4) dc("0123456789abcdef"[(v >> i) & 15]); }
 static void kv(const char *k, ULONG v) { ds(k); dc('='); dx(v); dc(' '); }
@@ -139,8 +146,8 @@ static void kv(const char *k, ULONG v) { ds(k); dc('='); dx(v); dc(' '); }
 static rc_u32 *chunks, nchunks;
 static ULONG total_secs;
 static volatile ULONG *pde;     /* the window's page-directory entry */
+static ULONG pde_idle;          /* its value outside our copies (as VMM left it) */
 static unsigned char *win;      /* its linear address (4 MB aligned) */
-static ULONG mapped = 0xFFFFFFFF;
 
 static ULONG cr3(void) { ULONG v; __asm__ __volatile__("movl %%cr3, %0" : "=r"(v)); return v; }
 static ULONG cr4(void) { ULONG v; __asm__ __volatile__("movl %%cr4, %0" : "=r"(v)); return v; }
@@ -154,15 +161,19 @@ static void copy(void *d, const void *s, ULONG n)
 	__asm__ __volatile__("cld; rep movsl" : "+D"(d), "+S"(s), "+c"(n) : : "memory");
 }
 
-/* point the window at chunk c (caller has interrupts off) */
+/* point the window at chunk c, or (c = ~0) put back VMM's own entry. The 4 MB
+   entry exists only while we copy, with interrupts off: VMM never sees it (it would
+   take the chunk's first page for a page table when it walks its tables) */
 static void map_chunk(ULONG c)
 {
-	ULONG id = chunks[c];   /* physical address / 4 MB */
-	if (mapped == id && (*pde & 1))
-		return;
-	*pde = (id << RC_CHUNK_SHIFT) | (id >> 10 & 0xF) << 13 | 0x83;   /* P | RW | PS */
+	if (c == 0xFFFFFFFF)
+		*pde = pde_idle;
+	else
+	{
+		ULONG id = chunks[c];   /* physical address / 4 MB */
+		*pde = (id << RC_CHUNK_SHIFT) | (id >> 10 & 0xF) << 13 | 0x83;   /* P | RW | PS */
+	}
 	__asm__ __volatile__("invlpg (%0)" : : "r"(win) : "memory");
-	mapped = id;
 }
 
 /* copy n sectors from (write: to) the disk at sector s; buf is linear */
@@ -181,6 +192,7 @@ static void xfer(ULONG s, ULONG n, unsigned char *buf, int write)
 			copy(win + off * 512, buf, k * 128);
 		else
 			copy(buf, win + off * 512, k * 128);
+		map_chunk(0xFFFFFFFF);
 		restore(f);
 		s += k;
 		n -= k;
@@ -197,7 +209,7 @@ static struct drp drp = { { 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X' }, 1u << 0x13
                           { 'K', 'E', 'X', 'R', 'A', 'M', ' ', 'R', 'A', 'M', ' ', 'D', 'I', 'S', 'K', ' ' } };
 static void *ddb;
 static unsigned char *pdcb, *ldcb, lgn;
-static int volume_up;
+static int volume_up, ldcb_assoc;
 
 static unsigned short isp(void *p)
 {
@@ -236,6 +248,12 @@ static void geometry(unsigned char *d, ULONG secs)
 	OFS(d, DCB_actual_head_cnt, ULONG) = 255;
 	OFS(d, DCB_actual_spt, ULONG) = 63;
 	OFS(d, DCB_actual_cyl_cnt, ULONG) = cyl;
+	OFS(d, DCB_apparent_sector_cnt, ULONG) = secs;
+	OFS(d, DCB_apparent_sector_cnt + 4, ULONG) = 0;
+	OFS(d, DCB_apparent_blk_size, ULONG) = 512;
+	OFS(d, DCB_apparent_head_cnt, ULONG) = 255;
+	OFS(d, DCB_apparent_spt, ULONG) = 63;
+	OFS(d, DCB_apparent_cyl_cnt, ULONG) = cyl;
 }
 
 /* create both DCBs and give the volume a drive letter: Z:, else the next one down */
@@ -247,14 +265,17 @@ static void volume(void)
 	volume_up = 1;
 	if (!pdcb)
 		return ds("KEXRAM: IOS gave no physical DCB\n");
-	if (!(ldcb = new_dcb()))
-		return ds("KEXRAM: no logical DCB\n");
-	OFS(ldcb, DCB_physical_dcb, void *) = pdcb;
-	OFS(pdcb, DCB_next_logical_dcb, void *) = ldcb;
-	if (!calldown(ldcb))
-		return ds("KEXRAM: no calldown (logical)\n");
+	if (!ldcb)
+	{
+		if (!(ldcb = new_dcb()))
+			return ds("KEXRAM: no logical DCB\n");
+		OFS(ldcb, DCB_physical_dcb, void *) = pdcb;
+		OFS(pdcb, DCB_next_logical_dcb, void *) = ldcb;
+		if (!calldown(ldcb))
+			return ds("KEXRAM: no calldown (logical)\n");
+	}
 	geometry(ldcb, total_secs);
-	OFS(ldcb, DCB_device_flags, ULONG) = DCB_DEV_LOGICAL | DCB_DEV_WRITEABLE | DCB_DEV_REMOVABLE;
+	OFS(ldcb, DCB_device_flags, ULONG) = DCB_DEV_LOGICAL | DCB_DEV_WRITEABLE;
 	OFS(ldcb, DCB_Partition_Start, ULONG) = 0;   /* the volume starts at sector 0 */
 	for (drive = 25; drive >= 12; drive--)
 	{
@@ -262,6 +283,7 @@ static void volume(void)
 			{ ISP_ASSOCIATE_DCB, 0, ldcb, (unsigned char) drive, 0, { 0, 0 } };
 		if (isp(&p) == 0)
 		{
+			ldcb_assoc = 1;
 			ds("KEXRAM: drive ");
 			dc((char) ('A' + drive));
 			ds(":\n");
@@ -282,9 +304,6 @@ static void __cdecl appy(ULONG ref)
 static void __cdecl aer(unsigned char *aep)
 {
 	unsigned short f = OFS(aep, AEP_func, unsigned short), r = AEP_FAILURE;
-	ds("A");
-	dx(f);
-	dc('\n');
 	if (f == AEP_INITIALIZE)
 	{
 		struct { unsigned short func, result, size; void *ddb; unsigned char flags, pad; } __attribute__((packed)) p =
@@ -315,7 +334,7 @@ static void __cdecl aer(unsigned char *aep)
 			pdcb = d;
 			lgn = OFS(aep, AEP_lgn, unsigned char);
 			geometry(pdcb, total_secs);
-			OFS(pdcb, DCB_device_flags, ULONG) |= DCB_DEV_WRITEABLE | DCB_DEV_REMOVABLE;
+			OFS(pdcb, DCB_device_flags, ULONG) |= DCB_DEV_WRITEABLE;
 			OFS(pdcb, DCB_device_flags, ULONG) &= ~0x400u;   /* DCB_DEV_MUST_CONFIGURE: we are its TSD */
 			if (!calldown(pdcb))
 				ds("KEXRAM: no calldown (physical)\n");
@@ -336,56 +355,22 @@ static void __cdecl req(unsigned char *iop)
 	unsigned short f = OFS(iop, IOR_func, unsigned short), st = IORS_SUCCESS;
 	ULONG flags = OFS(iop, IOR_flags, ULONG), s = OFS(iop, IOR_start_addr, ULONG), n = OFS(iop, IOR_xfer_count, ULONG);
 	ULONG cb;
-	static ULONG logged;
-	if (logged < 400)
+#ifdef KEX_DEBUGCON
 	{
-		logged++;
-		ds("R");
-		dx(f);
-		dc(' ');
-		dx(flags);
-		dc(' ');
-		dx(s);
-		dc(' ');
-		dx(n);
-		dc(' ');
-		dx(OFS(iop, IOR_buffer_ptr, ULONG));
-		dc(' ');
-		dx(OFS(iop, IOP_ior + 0x48, ULONG));
-		dc(' ');
-		dx(OFS(iop, IOP_ior + 0x4C, unsigned char));
-		dc('\n');
-		if (logged <= 3 || (logged < 400 && n == 0 && logged % 100 == 0))
+		/* each new (function, flags) pair once, with its first buffer address */
+		static ULONG seen[32];
+		ULONG key = (ULONG) f << 24 ^ flags, k;
+		for (k = 0; k < 32 && seen[k] && seen[k] != key; k++)
+			;
+		if (k < 32 && !seen[k])
 		{
-			ULONG k;
-			ds(" IOP:");
-			for (k = 0; k < 0xBC; k += 4)
-			{
-				if (!(k & 31))
-					dc('\n');
-				dx(OFS(iop, k, ULONG));
-				dc(' ');
-			}
-			dc('\n');
-			ds(" buf:");
-			for (k = 0; k < 32; k += 4)
-				dx(*(ULONG *) (OFS(iop, IOR_buffer_ptr, ULONG) + k)), dc(' ');
-			ds("\n dcbs:");
-			dx(OFS(pdcb, 0x78, ULONG)); dc(' ');
-			dx(ldcb ? OFS(ldcb, 0x78, ULONG) : 0); dc(' ');
-			dx(OFS(iop, 4, ULONG)); dc(' '); dx(OFS(iop, 8, ULONG)); dc(' ');
-			dx(OFS(OFS(iop, 8, unsigned char *), 0x78, ULONG));
-			ds("\n vrp:");
-			if (OFS(iop, IOP_ior + 0x44, ULONG))
-				for (k = 0; k < 48; k += 4)
-					dx(*(ULONG *) (OFS(iop, IOP_ior + 0x44, ULONG) + k)), dc(' ');
-			ds("\n sgd:");
-			if (OFS(iop, IOP_ior + 0x48, ULONG))
-				for (k = 0; k < 16; k += 4)
-					dx(*(ULONG *) (OFS(iop, IOP_ior + 0x48, ULONG) + k)), dc(' ');
-			dc('\n');
+			seen[k] = key;
+			ds("REQ ");
+			dx(f); dc(' '); dx(flags); dc(' '); dx(s); dc(' '); dx(n); dc(' ');
+			dx(OFS(iop, IOR_buffer_ptr, ULONG)); dc('\n');
 		}
 	}
+#endif
 	if (f == 0 || f == 1)                 /* IOR_READ, IOR_WRITE */
 	{
 		if (flags & IORF_CHAR_COMMAND)
@@ -455,7 +440,11 @@ static int init(void)
 	nchunks = rc_chunks(map, (int) i, *(const ULONG *) (t + 4), (d & 0x20000) != 0, chunks, RC_MAX_CHUNKS);
 	kv("limit", *(const ULONG *) (t + 4));
 	kv("chunks", nchunks);
-	if (nchunks < 4)
+	/* Windows sizes its swap file by its own RAM and, if the drive cannot hold that,
+	   waits for ever at start-up; setup caps the swap file at 1 GB
+	   (MaxPagingFileSize), so the RAM disk must hold that much and some: below it
+	   there is no drive Z: and Windows keeps its swap file where it was */
+	if (nchunks < RC_MIN_CHUNKS)
 		return ds("not enough unused RAM\n"), 0;
 	if (nchunks > 0x1FFFFFFF / RC_SECTORS_PER_CHUNK)
 		nchunks = 0x1FFFFFFF / RC_SECTORS_PER_CHUNK;
@@ -467,6 +456,7 @@ static int init(void)
 		return ds("no window\n"), (total_secs = 0);
 	win = (unsigned char *) ((lin + RC_CHUNK - 1) & ~(RC_CHUNK - 1));
 	pde = (volatile ULONG *) pdl + ((ULONG) win >> 22);
+	pde_idle = *pde;
 	set_cr4(cr4() | 0x10);   /* PSE */
 	kv("win", (ULONG) win);
 	/* the volume */
@@ -482,14 +472,20 @@ static int init(void)
 	_IOS_Register(&drp);
 	kv("KEXRAM: IOS", drp.reg_result);
 	ds("\n");
-	if (pdcb)   /* the drive letter comes at "appy time" */
+	/* the drive letter: now, so the swap file can be on it (Windows opens the swap
+	   file before "appy time"); appy time is the fallback if that is refused */
+	volume();
+	if (pdcb && !ldcb_assoc)
+	{
+		volume_up = 0;
 		_SHELL_CallAtAppyTime(appy, 0, CAAFL_RING0, 0);
+	}
 	return 1;
 }
 
 __attribute__((used)) BOOL __stdcall kexram_dispatch(DWORD msg)
 {
-	if (msg == 3)        /* Sys_VM_Init: IOS and the shell are up */
+	if (msg == 1)        /* Device_Init: before the swap file is opened */
 		init();
 	return TRUE;
 }
