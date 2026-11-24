@@ -150,3 +150,92 @@ void kexos_irq_mask(kx_u32 h, int masked)
 	else
 		__asm__ __volatile__("int $0x20\n\t.long 0x00030009" : : "a"(h) : "memory", "cc");   /* VPICD_Physically_Unmask */
 }
+
+/* ---- VMM memory services (C calling convention: a dynamic-link jump keeps the caller's
+ *      frame, as toolchain/vxd/vxdwraps.c) ---- */
+__attribute__((naked)) static kx_u32 vmm_MapPhysToLinear(kx_u32 phys, kx_u32 len, kx_u32 flags)
+{
+	__asm__("int $0x20\n\t.long 0x0001806C");   /* _MapPhysToLinear */
+}
+__attribute__((naked)) static unsigned long long vmm_PageAllocate(kx_u32 n, kx_u32 type, kx_u32 vm, kx_u32 align,
+                                                                  kx_u32 minp, kx_u32 maxp, kx_u32 *phys, kx_u32 flags)
+{
+	__asm__("int $0x20\n\t.long 0x00018053");   /* _PageAllocate */
+}
+__attribute__((naked)) static kx_u32 vmm_PageFree(kx_u32 handle, kx_u32 flags)
+{
+	__asm__("int $0x20\n\t.long 0x00018055");   /* _PageFree */
+}
+
+/* ---- memory-mapped registers: VMM keeps the mapping for good (there is no unmap) ---- */
+void *kexos_mmio_map(kx_u32 phys_lo, kx_u32 phys_hi, kx_u32 len)
+{
+	kx_u32 lin;
+	if (phys_hi)
+		return 0;
+	lin = vmm_MapPhysToLinear(phys_lo, len, 0);
+	return lin == 0xFFFFFFFF ? 0 : (void *) lin;
+}
+
+void kexos_mmio_unmap(void *va, kx_u32 len)
+{
+	(void) va;
+	(void) len;
+}
+
+/* ---- DMA memory: locked, contiguous, page aligned, below 4 GB ---- */
+#define PG_SYS 1
+#define PAGEZEROINIT 0x00000001
+#define PAGEUSEALIGN 0x00000002
+#define PAGECONTIG 0x00000004
+#define PAGEFIXED 0x00000008
+static struct
+{
+	void *va;
+	kx_u32 handle;
+} dma_blocks[8];
+
+void *kexos_dma_alloc(kx_u32 size, kx_u32 *phys)
+{
+	kx_u32 p = 0, i;
+	unsigned long long r;
+	for (i = 0; i < 8 && dma_blocks[i].va; i++)
+		;
+	if (i == 8)
+		return 0;
+	r = vmm_PageAllocate((size + 4095) >> 12, PG_SYS, 0, 0, 0, 0xFFFFF, &p,
+	                     PAGEZEROINIT | PAGEUSEALIGN | PAGECONTIG | PAGEFIXED);
+	if (!(kx_u32) r)
+		return 0;
+	dma_blocks[i].handle = (kx_u32) r;
+	dma_blocks[i].va = (void *) (kx_u32) (r >> 32);
+	if (phys)
+		*phys = p;
+	return dma_blocks[i].va;
+}
+
+void kexos_dma_free(void *va, kx_u32 size)
+{
+	kx_u32 i;
+	(void) size;
+	for (i = 0; i < 8; i++)
+		if (va && dma_blocks[i].va == va)
+		{
+			vmm_PageFree(dma_blocks[i].handle, 0);
+			dma_blocks[i].va = 0;
+		}
+}
+
+/* ---- short waits: a write to port 0x80 (POST codes) takes about 1 us on every PC ---- */
+void kexos_stall_us(kx_u32 us)
+{
+	while (us--)
+		kexos_outb(0x80, 0);
+}
+
+/* ---- the log ring: VxDs hand it to their helper program (kextouch /report, ...);
+ *      registry saving here is not needed yet ---- */
+void kexos_log_save(const struct kexos_log *l)
+{
+	(void) l;
+}

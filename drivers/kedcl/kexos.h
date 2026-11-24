@@ -61,6 +61,24 @@ void kexos_irq_mask(kx_u32 h, int masked);
 kx_u32 kexos_irq_attach_wdm(void *desc, int (*isr)(void *ref), void *ref);
 void kexos_irq_detach_wdm(kx_u32 h);
 
+/* ---- memory-mapped registers: plain volatile access (Windows 98's NTKERN has no
+ *      READ_REGISTER_*; a VxD has none either). Map once at start, unmap at stop. ---- */
+void *kexos_mmio_map(kx_u32 phys_lo, kx_u32 phys_hi, kx_u32 len);
+void kexos_mmio_unmap(void *va, kx_u32 len);
+static __inline kx_u8 kexos_rd8(volatile void *b, kx_u32 o) { return *(volatile kx_u8 *) ((volatile char *) b + o); }
+static __inline kx_u16 kexos_rd16(volatile void *b, kx_u32 o) { return *(volatile kx_u16 *) ((volatile char *) b + o); }
+static __inline kx_u32 kexos_rd32(volatile void *b, kx_u32 o) { return *(volatile kx_u32 *) ((volatile char *) b + o); }
+static __inline void kexos_wr8(volatile void *b, kx_u32 o, kx_u8 v) { *(volatile kx_u8 *) ((volatile char *) b + o) = v; }
+static __inline void kexos_wr16(volatile void *b, kx_u32 o, kx_u16 v) { *(volatile kx_u16 *) ((volatile char *) b + o) = v; }
+static __inline void kexos_wr32(volatile void *b, kx_u32 o, kx_u32 v) { *(volatile kx_u32 *) ((volatile char *) b + o) = v; }
+
+/* ---- DMA memory: physically contiguous, below 4 GB, zeroed; *phys = its bus address ---- */
+void *kexos_dma_alloc(kx_u32 size, kx_u32 *phys);
+void kexos_dma_free(void *va, kx_u32 size);
+
+/* ---- short waits (busy; for register handshakes) ---- */
+void kexos_stall_us(kx_u32 us);
+
 /* ---- logging (KEDCL: a ring per driver, read by kexinfo and the driver's helper) ---- */
 struct kexos_log
 {
@@ -72,5 +90,8 @@ void kexos_log(struct kexos_log *l, const char *fmt, ...);
 void kexos_vlog(struct kexos_log *l, const char *fmt, va_list ap);
 /* copy the ring out, oldest first; returns bytes copied */
 kx_u32 kexos_log_read(const struct kexos_log *l, char *out, kx_u32 size);
+/* save the ring to the registry, HKLM\Software\KernelEx\Diag, value l->name (CR LF
+   line ends), where kexinfo's hardware report picks it up; call after start-up */
+void kexos_log_save(const struct kexos_log *l);
 
 #endif

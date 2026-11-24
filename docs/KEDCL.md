@@ -61,3 +61,20 @@ that exports one text file with:
   resets), battery health from KEXACPI.
 
 The report is plain text so it can be attached to a bug report or pasted into a chat.
+
+## Progress (2026-11-23)
+
+- KEDCL gained memory-mapped register access (`kexos_mmio_map`, `kexos_rd*/wr*`), DMA
+  memory (`kexos_dma_alloc`, contiguous, below 4 GB), `kexos_stall_us` and
+  `kexos_log_save` (the log ring into `HKLM\Software\KernelEx\Diag\<driver>` for the
+  hardware report), in both backends (WDM: MmMapIoSpace, MmAllocateContiguousMemory,
+  ZwSetValueKey; VxD: _MapPhysToLinear, _PageAllocate).
+- **kexhda** moved onto it: registers, CORB/RIRB memory, headphone-sense timer, stalls,
+  log and the registry copy now come from KEDCL; PortCls (streams, DMA channel) stays
+  the audio personality. Behaviour unchanged (bench: same start-up log as before); the
+  log now prints field widths (`%08lx`), which the old one ignored.
+- **Driver test bench**: `tests/bench/drvtest.py CASE` (QEMU): fresh copy-on-write disk,
+  the driver files in C:\KEXDRV, the "Add New Hardware" wizard as a user would, then
+  checks the driver's debug log (expected and forbidden lines). Cases: `hda`, `ac97`.
+  Playback check (Sound Recorder into QEMU's WAV capture) is written but off: after the
+  restart Windows finds no sound device, with the old kexhda as well; to investigate.

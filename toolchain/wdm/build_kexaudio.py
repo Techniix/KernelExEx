@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wdm  # noqa: E402
 
 SRC = wdm.ROOT / "drivers" / "audio"
+KEDCL = wdm.ROOT / "drivers" / "kedcl"   # the shared driver layer (docs/KEDCL.md)
 
 
 def main():
@@ -25,7 +26,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     extra = ["-DKEX_DEBUGCON"] if a.debugcon else []
     rt = wdm.ROOT / "net/rt/w9xrt_div.c"   # 64-bit division helpers
-    drivers = {"kexac97": [SRC / "ac97" / "kexac97.c", rt], "kexhda": [SRC / "hda" / "kexhda.c", rt]}
+    drivers = {"kexac97": [SRC / "ac97" / "kexac97.c", rt], "kexhda": [SRC / "hda" / "kexhda.c", rt, KEDCL / "kexos_common.c", KEDCL / "kexos_wdm.c"]}
     for name, srcs in drivers.items():
         dout = out / name
         dout.mkdir(exist_ok=True)

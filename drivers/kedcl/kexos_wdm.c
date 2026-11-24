@@ -9,7 +9,7 @@
  *    number, as VxDs use) is not available here and returns 0.
  *  Build with kexos_common.c.
  */
-#include <wdm.h>
+#include <ntddk.h>   /* wdm.h lacks the contiguous-memory calls */
 #include "kexos.h"
 
 /* ---- time ---- */
@@ -145,4 +145,93 @@ void kexos_irq_mask(kx_u32 h, int masked)
 {
 	(void) h;
 	(void) masked;
+}
+
+/* ---- memory-mapped registers ---- */
+void *kexos_mmio_map(kx_u32 phys_lo, kx_u32 phys_hi, kx_u32 len)
+{
+	PHYSICAL_ADDRESS pa;
+	pa.LowPart = phys_lo;
+	pa.HighPart = (LONG) phys_hi;
+	return MmMapIoSpace(pa, len, MmNonCached);
+}
+
+void kexos_mmio_unmap(void *va, kx_u32 len)
+{
+	if (va)
+		MmUnmapIoSpace(va, len);
+}
+
+/* ---- DMA memory ---- */
+void *kexos_dma_alloc(kx_u32 size, kx_u32 *phys)
+{
+	PHYSICAL_ADDRESS hi;
+	void *va;
+	hi.QuadPart = 0xffffffff;
+	va = MmAllocateContiguousMemory(size, hi);
+	if (!va)
+		return NULL;
+	memset(va, 0, size);
+	if (phys)
+		*phys = MmGetPhysicalAddress(va).LowPart;
+	return va;
+}
+
+void kexos_dma_free(void *va, kx_u32 size)
+{
+	(void) size;
+	if (va)
+		MmFreeContiguousMemory(va);
+}
+
+void kexos_stall_us(kx_u32 us)
+{
+	while (us > 50)
+	{
+		KeStallExecutionProcessor(50);
+		us -= 50;
+	}
+	if (us)
+		KeStallExecutionProcessor(us);
+}
+
+/* ---- the log ring into the registry (what kexhda did for itself) ---- */
+void kexos_log_save(const struct kexos_log *l)
+{
+	static WCHAR w[sizeof(l->buf) * 2 + 1];
+	static char c[sizeof(l->buf)];
+	static const WCHAR *const keys[] = { L"\\Registry\\Machine\\Software\\KernelEx",
+	                                     L"\\Registry\\Machine\\Software\\KernelEx\\Diag" };
+	UNICODE_STRING us, name;
+	OBJECT_ATTRIBUTES oa;
+	HANDLE h;
+	ULONG disp, n, i, k = 0;
+	int j;
+	WCHAR wname[32];
+	if (!l || !l->name)
+		return;
+	n = kexos_log_read(l, c, sizeof(c));
+	for (i = 0; i < n; i++)
+	{
+		if (c[i] == '\n' && (i == 0 || c[i - 1] != '\r'))
+			w[k++] = '\r';
+		w[k++] = (WCHAR) (UCHAR) c[i];
+	}
+	w[k] = 0;
+	for (j = 0; j < 31 && l->name[j]; j++)
+		wname[j] = (WCHAR) (UCHAR) l->name[j];
+	wname[j] = 0;
+	for (j = 0; j < 2; j++)
+	{
+		RtlInitUnicodeString(&us, keys[j]);
+		InitializeObjectAttributes(&oa, &us, OBJ_CASE_INSENSITIVE, NULL, NULL);
+		if (!NT_SUCCESS(ZwCreateKey(&h, KEY_ALL_ACCESS, &oa, 0, NULL, REG_OPTION_NON_VOLATILE, &disp)))
+			return;
+		if (j == 1)
+		{
+			RtlInitUnicodeString(&name, wname);
+			ZwSetValueKey(h, &name, 0, REG_SZ, w, (k + 1) * sizeof(WCHAR));
+		}
+		ZwClose(h);
+	}
 }

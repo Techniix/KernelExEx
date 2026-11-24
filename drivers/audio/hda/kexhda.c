@@ -16,12 +16,12 @@
 typedef char TCHAR;
 #include <portcls.h>
 #include <ksmedia.h>
+#include "../../kedcl/kexos.h"
 
-/* messages: QEMU's debug console in test builds, and always a copy that
- * start_device saves to the registry (HKLM\Software\KernelEx\Diag,
- * "kexhda") for testing on real machines */
-static void dbg(const char *fmt, ...);
-#define DPRINT(...) dbg(__VA_ARGS__)
+/* messages (KEDCL log ring): QEMU's debug console in test builds, and saved to the
+ * registry (HKLM\Software\KernelEx\Diag, "kexhda") for the hardware report */
+static struct kexos_log hlog = { "", 0, "kexhda" };
+#define DPRINT(...) kexos_log(&hlog, __VA_ARGS__)
 
 /* ---- GUIDs, defined here (the headers' DEFINE_GUIDSTRUCT machinery is C++) ------------- */
 #define KGUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
@@ -49,14 +49,6 @@ KGUID(G_KSPROPTYPESETID_General, 0x97e99ba0, 0xbdea, 0x11cf, 0xa5, 0xd6, 0x28, 0
 KGUID(G_KSAUDFNAME_MASTER_VOLUME, 0x185fedf8, 0x9905, 0x11d1, 0x95, 0xa9, 0x00, 0xc0, 0x4f, 0xb9, 0x25, 0xd3);
 KGUID(G_KSAUDFNAME_MASTER_MUTE, 0x185fedf9, 0x9905, 0x11d1, 0x95, 0xa9, 0x00, 0xc0, 0x4f, 0xb9, 0x25, 0xd3);
 
-/* the compiler's own calls (structure clears) */
-void *__cdecl memset(void *d, int c, size_t n)
-{
-	unsigned char *p = (unsigned char *) d;
-	while (n--)
-		*p++ = (unsigned char) c;
-	return d;
-}
 
 static int guid_eq(REFIID a, const GUID *b)
 {
@@ -161,7 +153,7 @@ struct opath
 
 typedef struct adapter
 {
-	PUCHAR mmio;
+	volatile void *mmio;
 	ULONG mmio_len;
 	KSPIN_LOCK codec_lock;
 	volatile ULONG *corb, *rirb;   /* command rings (NULL: immediate command interface) */
@@ -175,8 +167,6 @@ typedef struct adapter
 	LONG vol[2];        /* master volume, 1/65536 dB, per channel */
 	int muted;
 	int ready;
-	KTIMER timer;
-	KDPC dpc;
 	PINTERRUPTSYNC isync;
 	struct wave *wave;
 } ADAPTER;
@@ -184,12 +174,12 @@ typedef struct adapter
 static ADAPTER g_ad;
 
 /* plain volatile access (as kexehci.c): Windows 98's NTKERN has no READ_REGISTER_* */
-#define R8(o) (*(volatile UCHAR *) (ad->mmio + (o)))
-#define R16(o) (*(volatile USHORT *) (ad->mmio + (o)))
-#define R32(o) (*(volatile ULONG *) (ad->mmio + (o)))
-#define W8(o, v) (*(volatile UCHAR *) (ad->mmio + (o)) = (UCHAR) (v))
-#define W16(o, v) (*(volatile USHORT *) (ad->mmio + (o)) = (USHORT) (v))
-#define W32(o, v) (*(volatile ULONG *) (ad->mmio + (o)) = (ULONG) (v))
+#define R8(o) kexos_rd8(ad->mmio, (o))
+#define R16(o) kexos_rd16(ad->mmio, (o))
+#define R32(o) kexos_rd32(ad->mmio, (o))
+#define W8(o, v) kexos_wr8(ad->mmio, (o), (kx_u8) (v))
+#define W16(o, v) kexos_wr16(ad->mmio, (o), (kx_u16) (v))
+#define W32(o, v) kexos_wr32(ad->mmio, (o), (kx_u32) (v))
 
 /* ring sizes from the size register's capability bits: 256, else 16, else 2 entries */
 static int ring_size(UCHAR caps, UCHAR *code)
@@ -204,35 +194,32 @@ static int ring_size(UCHAR caps, UCHAR *code)
 /* CORB/RIRB (the usual way; polled, no RIRB interrupt) */
 static int rings_init(ADAPTER *ad)
 {
-	PHYSICAL_ADDRESS hi, pa;
+	kx_u32 pa;
 	UCHAR code;
 	int i;
-	hi.QuadPart = 0xffffffff;
-	ad->corb = (volatile ULONG *) MmAllocateContiguousMemory(4096, hi);
+	ad->corb = (volatile ULONG *) kexos_dma_alloc(4096, &pa);
 	if (!ad->corb)
 		return 0;
 	ad->rirb = ad->corb + 256;   /* CORB 1K, RIRB 2K, one page */
-	RtlZeroMemory((PVOID) ad->corb, 4096);
-	pa = MmGetPhysicalAddress((PVOID) ad->corb);
 	W8(CORBCTL, 0);
 	W8(RIRBCTL, 0);
 	for (i = 0; i < 1000 && ((R8(CORBCTL) & 2) || (R8(RIRBCTL) & 2)); i++)
-		KeStallExecutionProcessor(10);
+		kexos_stall_us(10);
 	ad->corb_n = ring_size(R8(CORBSIZE) >> 4, &code);
 	W8(CORBSIZE, (R8(CORBSIZE) & ~3) | code);
-	W32(CORBLBASE, pa.LowPart);
+	W32(CORBLBASE, pa);
 	W32(CORBUBASE, 0);
 	/* read pointer reset: set bit 15, see it, clear it (some controllers never show it: go on) */
 	W16(CORBRP, 0x8000);
 	for (i = 0; i < 1000 && !(R16(CORBRP) & 0x8000); i++)
-		KeStallExecutionProcessor(1);
+		kexos_stall_us(1);
 	W16(CORBRP, 0);
 	for (i = 0; i < 1000 && (R16(CORBRP) & 0x8000); i++)
-		KeStallExecutionProcessor(1);
+		kexos_stall_us(1);
 	W16(CORBWP, 0);
 	ad->rirb_n = ring_size(R8(RIRBSIZE) >> 4, &code);
 	W8(RIRBSIZE, (R8(RIRBSIZE) & ~3) | code);
-	W32(RIRBLBASE, pa.LowPart + 1024);
+	W32(RIRBLBASE, pa + 1024);
 	W32(RIRBUBASE, 0);
 	W16(RIRBWP, 0x8000);
 	W16(RINTCNT, 0xff);
@@ -240,7 +227,7 @@ static int rings_init(ADAPTER *ad)
 	ad->rirb_rp = 0;
 	W8(CORBCTL, 2);
 	W8(RIRBCTL, 2);
-	DPRINT("kexhda: CORB %d / RIRB %d entries at %08lx\n", ad->corb_n, ad->rirb_n, pa.LowPart);
+	DPRINT("kexhda: CORB %d / RIRB %d entries at %08lx\n", ad->corb_n, ad->rirb_n, pa);
 	return 1;
 }
 
@@ -267,7 +254,7 @@ static ULONG cmd_raw(ADAPTER *ad, ULONG c, int *ok)
 				break;
 			}
 			if (!done)
-				KeStallExecutionProcessor(1);
+				kexos_stall_us(1);
 		}
 		W8(RIRBSTS, 0x05);
 	}
@@ -275,7 +262,7 @@ static ULONG cmd_raw(ADAPTER *ad, ULONG c, int *ok)
 	{
 		/* the Immediate Command interface */
 		for (i = 0; i < 1000 && (R16(ICS) & 1); i++)
-			KeStallExecutionProcessor(1);
+			kexos_stall_us(1);
 		W16(ICS, 2);              /* clear IRV */
 		W32(IC, c);
 		W16(ICS, 1);              /* ICB: send */
@@ -287,7 +274,7 @@ static ULONG cmd_raw(ADAPTER *ad, ULONG c, int *ok)
 				done = 1;
 				break;
 			}
-			KeStallExecutionProcessor(1);
+			kexos_stall_us(1);
 		}
 	}
 	KeReleaseSpinLock(&ad->codec_lock, irql);
@@ -439,16 +426,12 @@ static void hp_poll(ADAPTER *ad)
 	}
 }
 
-static VOID NTAPI hp_dpc(PKDPC dpc, PVOID ctx, PVOID a1, PVOID a2)
+/* headphone sense, twice a second (KEDCL one-shot timer, re-armed) */
+static void hp_tick(void *ref)
 {
-	ADAPTER *ad = (ADAPTER *) ctx;
-	LARGE_INTEGER due;
-	(void) dpc;
-	(void) a1;
-	(void) a2;
+	ADAPTER *ad = (ADAPTER *) ref;
 	hp_poll(ad);
-	due.QuadPart = -5000000;   /* again in 0.5 s (KeSetTimer: Windows 98 has no periodic timers) */
-	KeSetTimer(&ad->timer, due, &ad->dpc);
+	kexos_timer(500, hp_tick, ad);
 }
 
 /* walk one codec: its audio function group, widgets and output paths */
@@ -471,9 +454,9 @@ static int codec_probe(ADAPTER *ad, int addr)
 	if (!afg)
 		return 0;
 	verb(ad, (int) afg, V_RESET, 0);
-	KeStallExecutionProcessor(1000);
+	kexos_stall_us(1000);
 	verb(ad, (int) afg, V_SET_POWER, 0);
-	KeStallExecutionProcessor(10000);
+	kexos_stall_us(10000);
 	n = PARAM((int) afg, P_NODES);
 	start = (int) ((n >> 16) & 0xff);
 	count = (int) (n & 0xff);
@@ -526,20 +509,20 @@ static NTSTATUS hw_init(ADAPTER *ad)
 	W8(CORBCTL, 0);
 	W8(RIRBCTL, 0);
 	for (i = 0; i < 1000 && ((R8(CORBCTL) & 2) || (R8(RIRBCTL) & 2)); i++)
-		KeStallExecutionProcessor(10);
+		kexos_stall_us(10);
 	W32(GCTL, R32(GCTL) & ~1u);
 	for (i = 0; i < 100 && (R32(GCTL) & 1); i++)
-		KeStallExecutionProcessor(100);
-	KeStallExecutionProcessor(100);
+		kexos_stall_us(100);
+	kexos_stall_us(100);
 	W32(GCTL, R32(GCTL) | 1);
 	for (i = 0; i < 100 && !(R32(GCTL) & 1); i++)
-		KeStallExecutionProcessor(100);
+		kexos_stall_us(100);
 	if (!(R32(GCTL) & 1))
 	{
 		DPRINT("kexhda: controller does not leave reset\n");
 		return STATUS_DEVICE_NOT_READY;
 	}
-	KeStallExecutionProcessor(1000);   /* the spec asks for at least 521 us */
+	kexos_stall_us(1000);   /* the spec asks for at least 521 us */
 	codecs = R16(STATESTS);
 	W16(STATESTS, codecs);
 	ad->out_sd = (R16(GCAP) >> 8) & 0xf;
@@ -576,13 +559,13 @@ static void sd_reset(ADAPTER *ad)
 	int o = SD(ad->out_sd), i;
 	W8(o + SD_CTL, R8(o + SD_CTL) & ~CTL_RUN);
 	for (i = 0; i < 1000 && (R8(o + SD_CTL) & CTL_RUN); i++)
-		KeStallExecutionProcessor(10);
+		kexos_stall_us(10);
 	W8(o + SD_CTL, CTL_SRST);
 	for (i = 0; i < 1000 && !(R8(o + SD_CTL) & CTL_SRST); i++)
-		KeStallExecutionProcessor(10);
+		kexos_stall_us(10);
 	W8(o + SD_CTL, 0);
 	for (i = 0; i < 1000 && (R8(o + SD_CTL) & CTL_SRST); i++)
-		KeStallExecutionProcessor(10);
+		kexos_stall_us(10);
 	W8(o + SD_STS, STS_CLEAR);
 }
 
@@ -1287,13 +1270,12 @@ static NTSTATUS new_port_miniport(PDEVICE_OBJECT dev, PIRP irp, const GUID *clsi
 }
 
 static NTSTATUS start_body(PDEVICE_OBJECT dev, PIRP irp, PRESOURCELIST res);
-static void diag_save(void);
 
 static NTSTATUS NTAPI start_device(PDEVICE_OBJECT dev, PIRP irp, PRESOURCELIST res)
 {
 	NTSTATUS st = start_body(dev, irp, res);
 	DPRINT("kexhda: start result %08lx\n", st);
-	diag_save();
+	kexos_log_save(&hlog);
 	return st;
 }
 
@@ -1306,7 +1288,6 @@ static NTSTATUS start_body(PDEVICE_OBJECT dev, PIRP irp, PRESOURCELIST res)
 	TOPO *t;
 	PPORT pwave = NULL, ptopo = NULL;
 	NTSTATUS st;
-	LARGE_INTEGER due;
 
 	DPRINT("kexhda: start, %lu memory ranges, %lu interrupts\n", res->lpVtbl->NumberOfEntriesOfType(res, CmResourceTypeMemory),
 	       res->lpVtbl->NumberOfEntriesOfType(res, CmResourceTypeInterrupt));
@@ -1317,18 +1298,14 @@ static NTSTATUS start_body(PDEVICE_OBJECT dev, PIRP irp, PRESOURCELIST res)
 	RtlZeroMemory(ad, sizeof(*ad));
 	KeInitializeSpinLock(&ad->codec_lock);
 	ad->mmio_len = mem->u.Memory.Length;
-	ad->mmio = (PUCHAR) MmMapIoSpace(mem->u.Memory.Start, ad->mmio_len, MmNonCached);
+	ad->mmio = kexos_mmio_map(mem->u.Memory.Start.LowPart, (kx_u32) mem->u.Memory.Start.HighPart, ad->mmio_len);
 	if (!ad->mmio)
 		return STATUS_INSUFFICIENT_RESOURCES;
 	DPRINT("kexhda: registers at %08lx\n", mem->u.Memory.Start.LowPart);
 	st = hw_init(ad);
 	if (!NT_SUCCESS(st))
 		return st;
-	/* headphone sense, twice a second */
-	KeInitializeDpc(&ad->dpc, hp_dpc, ad);
-	KeInitializeTimer(&ad->timer);
-	due.QuadPart = -5000000;
-	KeSetTimer(&ad->timer, due, &ad->dpc);
+	kexos_timer(500, hp_tick, ad);   /* headphone sense */
 
 	st = PcNewInterruptSync(&ad->isync, NULL, res, 0, InterruptSyncModeNormal);
 	if (NT_SUCCESS(st))
@@ -1386,109 +1363,4 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT drv, PUNICODE_STRING reg)
 {
 	DPRINT("kexhda: loaded\n");
 	return PcInitializeAdapterDriver(drv, reg, (PDRIVER_ADD_DEVICE) add_device);
-}
-
-#include <stdarg.h>
-static char diag[2048];
-static ULONG diag_len;
-
-/* %s %c %x %lx %u %lu %d %ld, nothing more */
-static void out_c(char c)
-{
-#ifdef KEX_DEBUGCON
-	WRITE_PORT_UCHAR((PUCHAR) 0xe9, (UCHAR) c);
-#endif
-	if (c == '\n' && diag_len + 2 < sizeof(diag))
-		diag[diag_len++] = '\r';
-	if (diag_len + 1 < sizeof(diag))
-		diag[diag_len++] = c;
-}
-
-static void diag_save(void)
-{
-	UNICODE_STRING us, name;
-	OBJECT_ATTRIBUTES oa;
-	HANDLE h;
-	ULONG disp;
-	static const WCHAR *const keys[] = { L"\\Registry\\Machine\\Software\\KernelEx",
-	                                     L"\\Registry\\Machine\\Software\\KernelEx\\Diag" };
-	int i;
-	for (i = 0; i < 2; i++)
-	{
-		RtlInitUnicodeString(&us, keys[i]);
-		InitializeObjectAttributes(&oa, &us, OBJ_CASE_INSENSITIVE, NULL, NULL);
-		if (!NT_SUCCESS(ZwCreateKey(&h, KEY_ALL_ACCESS, &oa, 0, NULL, REG_OPTION_NON_VOLATILE, &disp)))
-			return;
-		if (i == 1)
-		{
-			static WCHAR w[sizeof(diag)];
-			ULONG k;
-			for (k = 0; k < diag_len; k++)
-				w[k] = (WCHAR) (UCHAR) diag[k];
-			w[k] = 0;
-			RtlInitUnicodeString(&name, L"kexhda");
-			ZwSetValueKey(h, &name, 0, REG_SZ, w, (k + 1) * sizeof(WCHAR));
-		}
-		ZwClose(h);
-	}
-}
-
-static void out_n(unsigned long v, unsigned base, int neg)
-{
-	char b[12];
-	int i = 0;
-	if (neg)
-		out_c('-');
-	do
-	{
-		b[i++] = "0123456789abcdef"[v % base];
-		v /= base;
-	} while (v);
-	while (i--)
-		out_c(b[i]);
-}
-
-static void dbg(const char *fmt, ...)
-{
-	va_list ap;
-	va_start(ap, fmt);
-	for (; *fmt; fmt++)
-	{
-		if (*fmt != '%')
-		{
-			out_c(*fmt);
-			continue;
-		}
-		fmt++;
-		while (*fmt == '0' || (*fmt >= '1' && *fmt <= '9'))
-			fmt++;
-		if (*fmt == 'l')
-			fmt++;
-		switch (*fmt)
-		{
-		case 's':
-		{
-			const char *p = va_arg(ap, const char *);
-			while (*p)
-				out_c(*p++);
-			break;
-		}
-		case 'c':
-			out_c((char) va_arg(ap, int));
-			break;
-		case 'x':
-			out_n(va_arg(ap, unsigned long), 16, 0);
-			break;
-		case 'd':
-		{
-			long v = va_arg(ap, long);
-			out_n(v < 0 ? (unsigned long) -v : (unsigned long) v, 10, v < 0);
-			break;
-		}
-		default:
-			out_n(va_arg(ap, unsigned long), 10, 0);
-			break;
-		}
-	}
-	va_end(ap);
 }
