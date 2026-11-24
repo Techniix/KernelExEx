@@ -692,6 +692,7 @@ LangString DESC_KEXRTWN ${LANG_ENGLISH} "Wi-Fi with WPA2 for Realtek USB adapter
 LangString DESC_KEXURTWN ${LANG_ENGLISH} "Wi-Fi with WPA2 for the Realtek USB adapters FreeBSD's rtwn does not list, with OpenBSD's urtwn driver and wireless stack."
 LangString DESC_KEXRL ${LANG_ENGLISH} "Realtek RTL8139, RTL8139C/C+/D, RTL8100/8100C and RTL8101L 10/100 adapters, onboard or on a card (D-Link DFE-530TX+/538TX, SMC 1211TX and many others). Our own driver: Windows 98 has none for these."
 LangString DESC_KEXEM ${LANG_ENGLISH} "Intel PRO/1000 gigabit adapters (82540 to I350, ICH/PCH onboard), with OpenBSD's em driver. Windows uses it when it finds one."
+LangString DESC_KEXATHN ${LANG_ENGLISH} "Atheros 802.11n Wi-Fi cards inside laptops and PCs (AR9285 in the Dell Latitude E6510, AR9280, AR9287, AR5416/5418, AR9160, AR9227, AR2427), with OpenBSD's athn driver. No firmware needed."
 
 LangString DESC_GAMEPAD ${LANG_ENGLISH} "Support for modern game controllers."
 LangString DESC_XINPUT ${LANG_ENGLISH} "XInput (xinput1_3.dll) for games that need it. Works with any controller Windows sees; layouts follow the SDL controller database."
@@ -1315,6 +1316,22 @@ SectionEnd
 SectionGroupEnd
 
 SectionGroup "Wi-Fi" SECGRPWIFI
+Section /o "Atheros Wi-Fi cards (AR9285, AR9280, AR5416 and others; PCI/PCIe)" SECKEXATHN
+  SectionIn 2
+  ;no firmware: these chips run from the driver alone
+  SetOutPath "$INSTDIR\drivers\kexathn"
+  File "drivers\kexnet\kexathn.sys"
+  File "drivers\kexnet\kexbsd.sys"
+  File "drivers\kexnet\kexathn.inf"
+  SetOutPath "$INSTDIR"
+  !insertmacro KexDevicePath "$INSTDIR\drivers\kexathn"
+  WriteRegStr HKLM "Software\KernelEx\Components" "KexAthn" "1"
+  ;the Wi-Fi program (taskbar icon, window, Control Panel), shared by the Wi-Fi drivers
+  Call KexWifiProgram
+  ;Windows 98 finds drivers by itself only in its INF folder
+  !insertmacro KexInfOther_kexathn
+SectionEnd
+
 Section /o "Realtek USB Wi-Fi (TP-Link Archer T2U family and others)" SECKEXRTWN
   SectionIn 1 2
   SetOutPath "$INSTDIR\drivers\kexrtwn"
@@ -1505,6 +1522,7 @@ SectionEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXAHCI} $(DESC_KEXAHCI)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXNVME} $(DESC_KEXNVME)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXEM} $(DESC_KEXEM)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXATHN} $(DESC_KEXATHN)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRL} $(DESC_KEXRL)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXRNDIS} $(DESC_KEXRNDIS)
   !insertmacro MUI_DESCRIPTION_TEXT ${SECKEXCDCE} $(DESC_KEXCDCE)
@@ -1731,6 +1749,17 @@ Section "Uninstall"
     RMDir "$INSTDIR\drivers\kexem"
     RMDir "$INSTDIR\drivers"
   un_kexem_done:
+  ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexAthn"
+  StrCmp $0 "1" 0 un_kexathn_done
+    ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
+    ${un.WordReplace} "$0" ";$INSTDIR\drivers\kexathn" "" "+" $1
+    WriteRegStr HKLM "${DEVPATH_KEY}" "DevicePath" $1
+    Delete /REBOOTOK "$INSTDIR\drivers\kexathn\kexathn.sys"
+    Delete /REBOOTOK "$INSTDIR\drivers\kexathn\kexbsd.sys"
+    Delete "$INSTDIR\drivers\kexathn\kexathn.inf"
+    RMDir "$INSTDIR\drivers\kexathn"
+    RMDir "$INSTDIR\drivers"
+  un_kexathn_done:
   ReadRegStr $0 HKLM "Software\KernelEx\Components" "KexRl"
   StrCmp $0 "1" 0 un_kexrl_done
     ReadRegStr $0 HKLM "${DEVPATH_KEY}" "DevicePath"
@@ -1879,6 +1908,7 @@ Section "Uninstall"
   !insertmacro un.KexInfOther_kexvesa
   !insertmacro un.KexInfOther_kexrl
   !insertmacro un.KexInfOther_kexem
+  !insertmacro un.KexInfOther_kexathn
   !insertmacro un.KexInfOther_kexcdce
   !insertmacro un.KexInfOther_kexrndis
   !insertmacro un.KexInfOther_kexrtwn
@@ -2132,6 +2162,11 @@ Function KexFindHardware
     !insertmacro KexMarkFound ${SECKEXVIO}
   kfh_novio:
   ;Intel PRO/1000: Intel's 10xx device IDs are its gigabit adapters
+  Push "VEN_168C&DEV_00"
+  Call KexPciNameHas
+  StrCmp $R9 1 0 kfh_noathn
+    !insertmacro KexMarkFound ${SECKEXATHN}
+  kfh_noathn:
   Push "VEN_8086&DEV_10"
   Call KexPciNameHas
   StrCmp $R9 1 0 kfh_noem

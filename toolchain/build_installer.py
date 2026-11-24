@@ -78,6 +78,8 @@ LAYOUT = {
     "drivers/kexnet/kexrl.inf": "drivers/kexnet/rl/kexrl.inf",
     "drivers/kexnet/kexbsd.sys": "kexnet:kexbsd/kexbsd.sys",
     "drivers/kexnet/kexem.inf": "drivers/kexnet/kexem.inf",
+    "drivers/kexnet/kexathn.sys": "kexnet:kexathn.sys",
+    "drivers/kexnet/kexathn.inf": "drivers/kexnet/athn/kexathn.inf",
     "drivers/kexnet/kexrndis.sys": "kexnet:kexrndis.sys",
     "drivers/kexnet/kexrndis.inf": "drivers/kexnet/kexrndis.inf",
     "drivers/kexnet/kexcdce.sys": "kexnet:kexcdce.sys",

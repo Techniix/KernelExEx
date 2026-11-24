@@ -32,6 +32,8 @@ project) without delay. Contact us through the project's GitHub issues.
 - **Jaroslav Hensl (JHRobotics)**: patcher9x (MIT) - our VxD container code's W4
   decompression follows it; vmdisp9x (MIT) - the VESA display driver.
 - **mintsuki**: CREGFIX (0BSD), the idea behind KEXMEM's control-register reset.
+- **Damien Bergamini and Atheros Communications**: OpenBSD's athn driver (ISC), the
+  Atheros Wi-Fi card driver (kexathn).
 - The OpenBSD and FreeBSD projects (network and Wi-Fi drivers), Linux (touchpad
   protocols), ACPICA, Mbed TLS, Wine and ReactOS (references), Mozilla/certifi
   (root certificates), syslinux, SeaBIOS/ReBIOS and CSMWrap (install media).

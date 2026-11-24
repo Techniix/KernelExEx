@@ -951,6 +951,47 @@ struct mbuf *obsd_m_pullup(struct mbuf *m, int len)
 	return m;
 }
 
+/* insert hlen bytes at offset skip of the packet; returns the mbuf holding
+ * them and their offset in it (*off). On failure NULL, and m0 is left as it
+ * was: the caller frees it, as with OpenBSD's. Here the packet ends up in m0
+ * alone: it is moved into one buffer when m0 cannot take it in place */
+struct mbuf *obsd_m_makespace(struct mbuf *m0, int skip, int hlen, int *off)
+{
+	int total = (m0->m_flags & M_PKTHDR) ? (int) m0->m_pkthdr.len : (int) m0->m_len;
+	unsigned int align;
+	caddr_t data;
+	void *p;
+	if (skip < 0 || hlen < 0 || skip > total)
+		return NULL;
+	if (!m0->m_next && (int) m0->m_len == total && (int) M_TRAILINGSPACE(m0) >= hlen)
+	{
+		memmove(m0->m_data + skip + hlen, m0->m_data + skip, total - skip);
+	}
+	else
+	{
+		align = total + hlen <= MCLBYTES ? MCLBYTES : PAGE_SIZE;
+		p = kexbsd_malloc(total + hlen + align, M_DEVBUF, M_NOWAIT);
+		if (!p)
+			return NULL;
+		data = (caddr_t) (((ULONG_PTR) p + align - 1) & ~(ULONG_PTR) (align - 1));
+		obsd_m_copydata(m0, 0, skip, data);
+		obsd_m_copydata(m0, skip, total - skip, data + skip + hlen);
+		obsd_m_freem(m0->m_next);
+		m0->m_next = NULL;
+		if (m0->m_alloc)
+			kexbsd_free(m0->m_alloc, M_DEVBUF);
+		m0->m_alloc = p;
+		m0->m_buf = m0->m_data = data;
+		m0->m_bufsize = total + hlen;
+		m0->m_flags |= M_EXT;
+	}
+	m0->m_len = total + hlen;
+	if (m0->m_flags & M_PKTHDR)
+		m0->m_pkthdr.len = total + hlen;
+	*off = skip;
+	return m0;
+}
+
 struct mbuf *obsd_m_prepend(struct mbuf *m, int len, int how)
 {
 	struct mbuf *n;

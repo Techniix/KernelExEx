@@ -2,7 +2,8 @@
 """Build the OpenBSD network drivers in drivers/kexnet as NDIS 5 miniports:
 kexem.sys (em, Intel PRO/1000), kexrndis.sys (urndis, USB RNDIS) and
 kexcdce.sys (our own CDC ECM driver), kexurtwn.sys (urtwn + net80211),
-kexrtwn.sys (FreeBSD rtwn on OpenBSD net80211: two personalities in one driver).
+kexrtwn.sys (FreeBSD rtwn on OpenBSD net80211: two personalities in one driver),
+kexathn.sys (athn, Atheros PCI/PCIe 802.11n).
 Builds kexbsd.sys first (they import from it).
 
 usage: build_kexnet.py [--out DIR] [--sdk DIR] [--debugcon]
@@ -58,6 +59,10 @@ def main():
         "kexcdce": ([SRC / "cdce" / "kexcdce.c"] + USBLIB, ["-I", str(SRC)]),
         "kexurtwn": ([SRC / "urtwn" / "kexurtwn.c", SRC / "urtwn" / "dev" / "ic" / "rtwn.c"] + WIFI,
                      ["-I", str(SRC / "urtwn"), "-I", str(SRC / "wifi"), "-I", str(SRC)]),
+        # Atheros PCI/PCIe 802.11n (athn): no firmware
+        "kexathn": ([SRC / "athn" / "kexathn.c"] + [SRC / "athn" / "dev" / "ic" / f for f in
+                    ("athn.c", "ar5008.c", "ar5416.c", "ar9280.c", "ar9285.c", "ar9287.c", "ar9003.c", "ar9380.c")] + WIFI,
+                    ["-I", str(SRC / "athn"), "-I", str(SRC / "wifi"), "-I", str(SRC)]),
         # the wireless stack alone, to prove it links (never installed)
         "kexwlan_linktest": ([SRC / "wifi" / "kexwlan_linktest.c"] + WIFI, ["-I", str(SRC / "wifi"), "-I", str(SRC)]),
     }

@@ -118,6 +118,8 @@ struct mbuf *obsd_m_devget(const char *buf, int len, int off);
 int obsd_m_dup_pkthdr(struct mbuf *to, struct mbuf *from, int how);
 struct mbuf *obsd_m_pullup(struct mbuf *m, int len);
 struct mbuf *obsd_m_prepend(struct mbuf *m, int len, int how);
+struct mbuf *obsd_m_makespace(struct mbuf *m0, int skip, int hlen, int *off);
+#define m_makespace(m, s, h, o) obsd_m_makespace((m), (s), (h), (o))
 void obsd_m_align(struct mbuf *m, int len);
 struct mbuf *obsd_m_dup_pkt(struct mbuf *m, unsigned int adj, int how);
 struct mbuf *obsd_m_split(struct mbuf *m, int len, int how);

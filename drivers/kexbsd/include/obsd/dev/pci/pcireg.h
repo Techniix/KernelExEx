@@ -10,6 +10,8 @@
 #define PCI_ID_REG 0x00
 #define PCI_VENDOR(id) ((id) & 0xffff)
 #define PCI_PRODUCT(id) (((id) >> 16) & 0xffff)
+typedef u_int16_t pci_vendor_id_t;
+typedef u_int16_t pci_product_id_t;
 #define PCI_COMMAND_STATUS_REG 0x04
 #define PCI_COMMAND_IO_ENABLE 0x00000001
 #define PCI_COMMAND_MEM_ENABLE 0x00000002
@@ -21,6 +23,12 @@
 #define PCI_CLASS(cr) (((cr) >> 24) & 0xff)
 #define PCI_SUBCLASS(cr) (((cr) >> 16) & 0xff)
 #define PCI_BHLC_REG 0x0c
+#define PCI_LATTIMER_SHIFT 8
+#define PCI_LATTIMER_MASK 0xff
+#define PCI_LATTIMER(bhlcr) (((bhlcr) >> PCI_LATTIMER_SHIFT) & PCI_LATTIMER_MASK)
+#define PCI_CACHELINE_SHIFT 0
+#define PCI_CACHELINE_MASK 0xff
+#define PCI_CACHELINE(bhlcr) (((bhlcr) >> PCI_CACHELINE_SHIFT) & PCI_CACHELINE_MASK)
 #define PCI_SUBSYS_ID_REG 0x2c
 #define PCI_CAPLISTPTR_REG 0x34
 #define PCI_INTERRUPT_REG 0x3c
