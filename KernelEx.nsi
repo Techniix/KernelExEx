@@ -2105,6 +2105,11 @@ Function KexFindHardware
   StrCmp $R9 1 0 kfh_3
     !insertmacro KexMarkFound ${SECKEXAC97}
   kfh_3:
+  Push "CC_0403"
+  Call KexPciClass
+  StrCmp $R9 1 0 kfh_nohda
+    !insertmacro KexMarkFound ${SECKEXHDA}
+  kfh_nohda:
   !insertmacro KexPciHas "VEN_1AF4&DEV_1000"
   StrCmp $R9 1 kfh_vio
   !insertmacro KexPciHas "VEN_1AF4&DEV_1041"
